@@ -1,5 +1,6 @@
 import {
   Background,
+  BackgroundVariant,
   type ColorMode,
   Controls,
   type Edge,
@@ -75,6 +76,12 @@ const EDGE_STYLE: Record<
     dash: "6 4",
     animated: false,
   },
+  authorizes: {
+    label: "Authorizes requests",
+    stroke: "hsl(var(--status-blocked))",
+    dash: "2 4",
+    animated: false,
+  },
   uses: {
     label: "Uses",
     stroke: "hsl(var(--muted-foreground))",
@@ -82,7 +89,8 @@ const EDGE_STYLE: Record<
   },
 };
 
-/** A short label for an edge (the gateway rows already detail routes). */
+/** A short label for an edge. The cards already detail the rest: the gateway
+ *  rows list routes, and a provider lists what it offers. */
 function edgeLabel(e: TopologyEdgeDto): string | undefined {
   switch (e.kind) {
     case "access":
@@ -91,8 +99,10 @@ function edgeLabel(e: TopologyEdgeDto): string | undefined {
       return undefined;
     case "authenticates":
       return "sign-in";
+    case "authorizes":
+      return "policy";
     case "uses":
-      return `${e.protocol} · ${e.resources.join(", ")}`;
+      return e.resources.join(", ");
   }
 }
 
@@ -105,6 +115,8 @@ function edgeTitle(e: TopologyEdgeDto): string {
       return `The gateway exposes ${e.to} on :${e.host_port}${e.gated ? " (requires sign-in)" : ""}`;
     case "authenticates":
       return `The gateway delegates sign-in to ${e.to}; login portal at ${e.portal_prefix}`;
+    case "authorizes":
+      return `The gateway asks ${e.to} to authorize each signed-in request on :${e.host_port}`;
     case "uses":
       return `${e.from} uses ${e.to} (${e.protocol}) for ${e.resources.join(", ")}`;
   }
@@ -168,9 +180,18 @@ function MarkitectureFlow({
           animated: look.animated,
           label: edgeLabel(edge),
           ariaLabel: edgeTitle(edge),
-          labelStyle: { fontSize: 10, fill: "hsl(var(--muted-foreground))" },
-          labelBgStyle: { fill: "hsl(var(--background))", fillOpacity: 0.85 },
-          labelBgPadding: [4, 2] as [number, number],
+          labelStyle: {
+            fontSize: 10,
+            fontWeight: 500,
+            fill: "hsl(var(--muted-foreground))",
+          },
+          labelBgStyle: {
+            fill: "hsl(var(--card))",
+            stroke: "hsl(var(--border))",
+            strokeWidth: 1,
+          },
+          labelBgPadding: [6, 3] as [number, number],
+          labelBgBorderRadius: 4,
           markerEnd: {
             type: MarkerType.ArrowClosed,
             width: 14,
@@ -221,7 +242,12 @@ function MarkitectureFlow({
       proOptions={{ hideAttribution: true }}
       minZoom={0.1}
     >
-      <Background />
+      <Background
+        variant={BackgroundVariant.Dots}
+        gap={20}
+        size={1}
+        color="hsl(var(--muted-foreground) / 0.35)"
+      />
       <Controls showInteractive={false} />
       <Panel position="top-right">
         <Legend kinds={kinds} />
@@ -236,10 +262,14 @@ function Legend({ kinds }: { kinds: Set<TopologyEdgeKind> }) {
     "access",
     "route",
     "authenticates",
+    "authorizes",
     "uses",
   ];
   return (
-    <div className="rounded-md border border-border bg-card/90 px-3 py-2 text-[11px] text-muted-foreground shadow-sm">
+    <div className="rounded-lg border border-border bg-card/95 px-3 py-2 text-[11px] text-muted-foreground shadow-sm">
+      <div className="pb-1 text-[10px] font-semibold uppercase tracking-wide">
+        Connections
+      </div>
       {order
         .filter((k) => kinds.has(k))
         .map((k) => {
