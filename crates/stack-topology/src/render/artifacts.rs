@@ -44,6 +44,14 @@ struct EnvoyCtx<'a> {
     auth: Option<AuthCtx<'a>>,
     /// The TLS listener for emulated public hostnames, when any module declares them.
     tls: Option<TlsCtx<'a>>,
+    /// The authorization policy engine's cluster, when a policy module is selected. Checked
+    /// after forward-auth on the listener(s) flagged `ext_authz`.
+    policy: Option<PolicyCtx<'a>>,
+}
+
+#[derive(Serialize)]
+struct PolicyCtx<'a> {
+    cluster: &'a str,
 }
 
 /// The TLS listener's template context: its port, the certificate it presents, and one
@@ -90,8 +98,27 @@ struct ListenerCtx<'a> {
 #[derive(Serialize)]
 struct RouteCtx<'a> {
     prefix: &'a str,
+    /// [`prefix`](Self::prefix) as a literal RE2 pattern, for the `regex_rewrite` match.
+    prefix_regex: String,
     cluster: &'a str,
     rewrite: Option<&'a str>,
+}
+
+/// Escape `literal` so RE2 matches it verbatim, in a form that is also valid inside a YAML
+/// double-quoted scalar: path-safe characters pass through, anything else becomes a
+/// `\\x{HH}` escape (YAML turns the doubled backslash into the single one RE2 reads). A prefix
+/// like `/api/2.1/unity-catalog` would otherwise let its `.` match any character.
+fn re2_literal(literal: &str) -> String {
+    literal
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '~') {
+                c.to_string()
+            } else {
+                format!("\\\\x{{{:X}}}", c as u32)
+            }
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -99,6 +126,7 @@ struct ClusterCtx<'a> {
     name: &'a str,
     host: &'a str,
     port: u16,
+    http2: bool,
 }
 
 /// Render the Envoy bootstrap config for the plan's gateway.
@@ -131,6 +159,7 @@ pub fn render_envoy(gateway: &GatewayConfig) -> String {
                 .iter()
                 .map(|r| RouteCtx {
                     prefix: &r.prefix,
+                    prefix_regex: re2_literal(&r.prefix),
                     cluster: &r.cluster,
                     rewrite: r.rewrite.as_deref(),
                 })
@@ -158,6 +187,7 @@ pub fn render_envoy(gateway: &GatewayConfig) -> String {
             name: &c.name,
             host: &c.host,
             port: c.port,
+            http2: c.http2,
         })
         .collect();
 
@@ -171,6 +201,9 @@ pub fn render_envoy(gateway: &GatewayConfig) -> String {
             path_prefix: &a.path_prefix,
             portal_prefix: &a.portal_prefix,
             identity_headers: &a.identity_headers,
+        }),
+        policy: gateway.policy.as_ref().map(|p| PolicyCtx {
+            cluster: &p.cluster,
         }),
         tls: gateway.tls.as_ref().map(|t| TlsCtx {
             port: t.port,
@@ -188,6 +221,7 @@ pub fn render_envoy(gateway: &GatewayConfig) -> String {
     };
 
     let mut env = minijinja::Environment::new();
+    env.set_keep_trailing_newline(true);
     env.add_template("envoy", ENVOY_TEMPLATE)
         .expect("the embedded Envoy template is valid");
     env.get_template("envoy")
@@ -250,15 +284,37 @@ fn render_env(env: &InjectedEnv, referenced: &BTreeSet<String>) -> String {
     push_lines(
         &mut out,
         &[
-            "# Local environment overlay. Copy to `.env.local` and adjust as needed.",
-            "# The variables below mirror the env vars Databricks Apps inject, so app code",
-            "# reads the same names locally and on Databricks.",
+            "# Compose substitution overlay: only variables some rendered file references as",
+            "# `${VAR}`. Clients (apps, notebooks, engines) load `client/host.env` or",
+            "# `client/container.env` instead.",
         ],
     );
     for (k, v) in env.iter() {
         if referenced.contains(k) {
             let _ = writeln!(out, "{k}={v}");
         }
+    }
+    out
+}
+
+/// Render a client environment file (see [`Plan::client_env`](crate::Plan::client_env)):
+/// `KEY=value` lines in key order under a header naming the vantage the addresses are for.
+pub(crate) fn render_client_env(env: &InjectedEnv, vantage: &str) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "# Client environment for callers {vantage}. Generated; re-render to update."
+    );
+    push_lines(
+        &mut out,
+        &[
+            "# Load it into an app, notebook, or engine to reach this stack. It holds no",
+            "# credentials: authenticate through the gateway, and read/write object storage",
+            "# with the temporary credentials Unity Catalog vends.",
+        ],
+    );
+    for (k, v) in env.iter() {
+        let _ = writeln!(out, "{k}={v}");
     }
     out
 }

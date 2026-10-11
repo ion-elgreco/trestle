@@ -961,28 +961,26 @@ fn headwaters_ui_knob_override_turns_off_the_ui() {
         config.contents
     );
     assert!(
-        !config.contents.contains("base_path"),
-        "no base_path line when the UI is off: {}",
+        config.contents.contains("base_path = \"/lineage\""),
+        "the surface stays under its base path with the UI off: {}",
         config.contents
     );
 
-    // With the UI off, there is no UI to relocate: Headwaters serves only its static
-    // Databricks-style API path at root, so the gateway matches `/api/v1/lineage` and forwards
-    // it unchanged. The prefixable-UI handshake drops away — no `BASE_PATH` is injected, the
-    // `AssignedRoute` carries no `base_path`, and there is no `/lineage` route at all.
+    // With the UI off, the whole surface is still served under `/lineage` — fronted as an API
+    // passthrough, so a custom UI reaches the read API and ConnectRPC service — and ingest is
+    // still matched at its static path and rewritten under the base path.
+    let surface = p
+        .routes
+        .get("headwaters", "surface")
+        .expect("the headwaters surface is routed with the UI off");
+    assert_eq!(surface.prefix, "/lineage");
+    assert_eq!(surface.rewrite, None, "the prefix is forwarded unchanged");
     let route = p
         .routes
         .get("headwaters", "api")
         .expect("headwaters api endpoint is routed");
     assert_eq!(route.prefix, "/api/v1/lineage");
-    assert_eq!(
-        route.rewrite, None,
-        "API served at its static path, forwarded unchanged"
-    );
-    assert_eq!(
-        route.base_path, None,
-        "no prefixable-UI base path when the UI is off"
-    );
+    assert_eq!(route.rewrite.as_deref(), Some("/lineage/api/v1/lineage"));
     assert!(
         matches!(route.listener, olai_stack_topology::Listener::Shared),
         "the API stays on the shared listener"
@@ -995,21 +993,20 @@ fn headwaters_ui_knob_override_turns_off_the_ui() {
         p.injected
             .get(&ModuleId::from("headwaters"))
             .and_then(|e| e.get("BASE_PATH")),
-        None,
-        "BASE_PATH is not injected when the UI is off"
+        Some("/lineage"),
+        "the base path reaches the render with the UI off too"
     );
 
-    // The gateway route table fronts the static API path (and no `/lineage` route).
     let arts = render_all(&p);
     let (routes, _, _) = parse_envoy(&arts.envoy);
     let (cluster, rewrite) = routes
         .get("/api/v1/lineage")
-        .expect("the API path is fronted with the UI off");
+        .expect("the ingest path is fronted with the UI off");
     assert_eq!(cluster, "headwaters");
-    assert_eq!(*rewrite, None);
+    assert_eq!(rewrite.as_deref(), Some("/lineage/api/v1/lineage\\1"));
     assert!(
-        !routes.contains_key("/lineage"),
-        "no UI route when the UI is off"
+        routes.contains_key("/lineage"),
+        "the surface prefix is fronted with the UI off"
     );
 }
 
@@ -1483,12 +1480,13 @@ mod auth {
         let arts = render_all(&p);
         let doc: Value = serde_yaml::from_str(&arts.envoy).expect("valid Envoy YAML");
 
-        // The shared listener runs ext_authz before the router.
+        // The shared listener strips spoofed identity, runs ext_authz, then routes.
         let shared = shared_listener(&doc);
         let filters = http_filter_names(shared);
         assert_eq!(
             filters,
             vec![
+                "envoy.filters.http.header_mutation".to_string(),
                 "envoy.filters.http.ext_authz".to_string(),
                 "envoy.filters.http.router".to_string(),
             ],
@@ -1507,9 +1505,10 @@ mod auth {
             }
         }
 
-        // The ext_authz filter targets the authelia cluster at its documented path.
+        // The ext_authz filter (after the anti-spoof strip) targets the authelia cluster at its
+        // documented path.
         let ext_authz = &shared["filter_chains"][0]["filters"][0]["typed_config"]["http_filters"]
-            [0]["typed_config"];
+            [1]["typed_config"];
         let http_service = &ext_authz["http_service"];
         assert_eq!(
             http_service["server_uri"]["cluster"].as_str(),
@@ -1562,15 +1561,16 @@ mod auth {
         let doc: Value = serde_yaml::from_str(&arts.envoy).expect("valid Envoy YAML");
         let shared = shared_listener(&doc);
 
-        // Ingress: the shared virtual host strips client-supplied identity headers (anti-spoof).
-        let vh = &shared["filter_chains"][0]["filters"][0]["typed_config"]["route_config"]["virtual_hosts"]
-            [0];
-        let stripped: BTreeSet<String> = vh["request_headers_to_remove"]
-            .as_sequence()
-            .expect("identity headers are stripped on ingress")
-            .iter()
-            .map(|h| h.as_str().unwrap().to_string())
-            .collect();
+        // Ingress: the first filter strips client-supplied identity headers (anti-spoof) —
+        // before ext_authz, so the provider's asserted identity is never stripped with them.
+        let filters = &shared["filter_chains"][0]["filters"][0]["typed_config"]["http_filters"];
+        let stripped: BTreeSet<String> =
+            filters[0]["typed_config"]["mutations"]["request_mutations"]
+                .as_sequence()
+                .expect("identity headers are stripped on ingress")
+                .iter()
+                .map(|m| m["remove"].as_str().unwrap().to_string())
+                .collect();
         for h in [
             "Remote-User",
             "Remote-Email",
@@ -1582,17 +1582,27 @@ mod auth {
                 "{h} is stripped on ingress: {stripped:?}"
             );
         }
+        assert!(
+            shared["filter_chains"][0]["filters"][0]["typed_config"]["route_config"]
+                ["virtual_hosts"][0]["request_headers_to_remove"]
+                .is_null(),
+            "a route-level strip would run after ext_authz and drop the asserted identity"
+        );
 
         // Response: the same headers are allowed upstream (now sourced from Authelia). The
         // request/response policy lives under `http_service` on the ext_authz typed config.
-        let http_service = &shared["filter_chains"][0]["filters"][0]["typed_config"]["http_filters"]
-            [0]["typed_config"]["http_service"];
+        let http_service = &filters[1]["typed_config"]["http_service"];
         let allowed: BTreeSet<String> =
             http_service["authorization_response"]["allowed_upstream_headers"]["patterns"]
                 .as_sequence()
                 .unwrap()
                 .iter()
-                .map(|p| p["exact"].as_str().unwrap().to_string())
+                .map(|p| {
+                    // Envoy lowercases header names: an exact, case-sensitive match on
+                    // `Remote-User` would never forward anything.
+                    assert_eq!(p["ignore_case"].as_bool(), Some(true), "{p:?}");
+                    p["exact"].as_str().unwrap().to_string()
+                })
                 .collect();
         for h in [
             "Remote-User",

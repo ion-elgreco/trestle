@@ -47,6 +47,9 @@ pub enum AddressError {
     /// The named endpoint is not on the callee service.
     #[error("service `{service}` has no endpoint `{endpoint}`")]
     UnknownEndpoint { service: String, endpoint: String },
+    /// The named service is not one of the module's resolved services.
+    #[error("module `{module}` has no service `{service}`")]
+    UnknownService { module: String, service: String },
     /// A host-vantage caller needs the callee's host-published port, but the
     /// endpoint declares none.
     #[error(
@@ -147,6 +150,17 @@ fn finish(scheme: Scheme, target: Target) -> Result<Url, AddressError> {
     let (host, port, path) = target;
     build_url(scheme, &host, port, &path)
         .ok_or_else(|| AddressError::InvalidUrl(format!("{host}:{port}{path}")))
+}
+
+/// The gateway's shared-listener origin (`http://host:port`) as reached from `from`: the
+/// gateway's compose service on its internal port from a container, `localhost` on the
+/// host-published port otherwise.
+pub(crate) fn gateway_origin(from: Vantage, facts: &GatewayFacts) -> Result<Url, AddressError> {
+    let (host, port) = match from {
+        Vantage::Container => (facts.service.clone(), facts.internal_port),
+        Vantage::Host | Vantage::InProcess => ("localhost".to_string(), facts.host_port),
+    };
+    finish(Scheme::Http, (host, port, String::new()))
 }
 
 /// The (host, port, path) for a direct reach — straight to the callee.
@@ -301,7 +315,7 @@ mod tests {
     fn host_catalog(port: u16) -> ServiceSpec {
         ServiceSpec {
             name: "unity-catalog".into(),
-            role: Role::new("data_catalog"),
+            role: Role::data_catalog(),
             placement: Placement::Host,
             endpoints: vec![Endpoint {
                 id: "rest".into(),
@@ -322,7 +336,7 @@ mod tests {
     fn container_postgres() -> ServiceSpec {
         ServiceSpec {
             name: "postgres".into(),
-            role: Role::new("relational_db"),
+            role: Role::relational_db(),
             placement: Placement::Container {
                 service: "db".into(),
             },
@@ -336,14 +350,14 @@ mod tests {
     fn container_marquez() -> ServiceSpec {
         ServiceSpec {
             name: "marquez".into(),
-            role: Role::new("lineage"),
+            role: Role::lineage(),
             placement: Placement::Container {
                 service: "marquez-api".into(),
             },
             endpoints: vec![Endpoint::api(
                 "lineage",
                 5000,
-                "/api/2.1/lineage",
+                "/api/v1/lineage",
                 crate::model::endpoint::Rewrite::Inherit,
             )],
             depends_on: vec![],
@@ -356,7 +370,7 @@ mod tests {
     fn container_mlflow_ui() -> ServiceSpec {
         ServiceSpec {
             name: "mlflow".into(),
-            role: Role::new("experiment_tracking"),
+            role: Role::experiment_tracking(),
             placement: Placement::Container {
                 service: "mlflow".into(),
             },

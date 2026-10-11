@@ -49,8 +49,8 @@ use std::sync::Arc;
 use super::Catalog;
 use crate::catalog::images;
 use crate::catalog::module::{
-    ConnectionBinding, DataModule, ImpersonatedHost, Knob, KnobKind, Module, ModuleId, Provides,
-    RenderSpec, ResolvedKnobs, ResourceDemand,
+    ClientValue, ConnectionBinding, DataModule, ImpersonatedHost, Knob, KnobKind, Module, ModuleId,
+    Provides, RenderSpec, ResolvedKnobs, ResourceDemand, UrlPart,
 };
 use crate::model::connection::{
     Connection, ConnectionField, ConnectionTemplate, ObjectStoreCredential,
@@ -83,6 +83,12 @@ pub const DEP_GATE_EXTRA: &str = "dep_gate";
 /// [`BASE_PATH`]: crate::InjectedEnv
 pub const DATA_ROOT_VAR: &str = "DATA_ROOT";
 
+/// The render-only variable carrying the gateway's public origin as a host-side browser
+/// reaches it (`http://localhost:<gateway_host_port>`), so a module that must know its own
+/// public URL (e.g. an auth portal's redirect target) follows the configured gateway port
+/// instead of hard-coding one. Baked at plan time, like [`DATA_ROOT_VAR`].
+pub const GATEWAY_URL_VAR: &str = "GATEWAY_URL";
+
 /// The default value injected for [`DATA_ROOT_VAR`]: `./.data`, relative to the compose
 /// file's directory — matching where the fragments persisted data before the root was
 /// centralized.
@@ -105,8 +111,9 @@ pub fn baseline_catalog() -> Catalog {
         unity_catalog(),
         jaeger(),
         headwaters(),
+        opa(),
         databricks_emulator_env(),
-    ] as [Arc<dyn Module>; 10])
+    ] as [Arc<dyn Module>; 11])
     .with_default_provider(Role::OBJECT_STORE, "rustfs")
     // No coordinate contracts: a provider vends a typed `Connection`, whose variant fields
     // are all mandatory, so completeness is a compile-time guarantee rather than a runtime
@@ -191,6 +198,16 @@ fn config_file(path: &str, alias: &str, contents: &str) -> RenderFile {
 ///
 /// `key` is the public snake_case identifier (typically `"image"` or `"init_image"`);
 /// `legacy` is the old SCREAMING_SNAKE env-var-style name accepted as an override alias.
+/// An operator-owned config file: written beside `compose.yaml` on first render and never
+/// overwritten (`preserve`), so local edits survive re-renders.
+fn operator_file(path: &str, alias: &str, contents: &str) -> RenderFile {
+    RenderFile {
+        at_root: true,
+        preserve: true,
+        ..config_file(path, alias, contents)
+    }
+}
+
 fn image_knob(key: &str, title: &str, default: &str, legacy: &str) -> Knob {
     Knob {
         key: key.into(),
@@ -232,14 +249,13 @@ pub const ENVOY_AUTH: &str = crate::plan::ENVOY_AUTH_KNOB;
 /// this module's own static services — the gateway's listeners are computed from *other*
 /// modules' endpoints, so there is nothing knob-dependent in its `ServiceSpec`.
 fn envoy() -> Arc<dyn Module> {
-    let mut provides = Provides::default();
-    provides.env_vars.insert("ENVOY_PORT".into(), "9080".into());
+    let provides = Provides::default();
     Arc::new(DataModule {
         id: ModuleId::from("envoy"),
         display_name: Some("Envoy gateway".into()),
         summary: Some("Single-port gateway, Databricks-shaped URL rewrites.".into()),
         category: Some("gateway".into()),
-        provider_of: Some("gateway".into()),
+        provider_of: Some(Role::GATEWAY.into()),
         requires: vec![],
         conflicts_with: vec![],
         needs: vec![],
@@ -314,7 +330,7 @@ fn authelia() -> Arc<dyn Module> {
         display_name: Some("Authelia".into()),
         summary: Some("Forward-auth single-sign-on for the gateway (file-based).".into()),
         category: Some("gateway".into()),
-        provider_of: Some("auth".into()),
+        provider_of: Some(Role::AUTH.into()),
         // No `requires`: the gateway is located by role, not id, so an id edge would break a
         // catalog with a differently-named gateway. Runtime ordering is the gateway fragment's
         // `depends_on: authelia` (Envoy waits on auth), which is the real dependency direction.
@@ -429,7 +445,7 @@ fn postgres() -> Arc<dyn Module> {
         display_name: Some("Postgres".into()),
         summary: Some("Postgres 16; auto-creates DBs other modules declare.".into()),
         category: Some("metadata_db".into()),
-        provider_of: Some("relational_db".into()),
+        provider_of: Some(Role::RELATIONAL_DB.into()),
         requires: vec![],
         conflicts_with: vec![],
         needs: vec![],
@@ -526,6 +542,15 @@ fn rustfs() -> Arc<dyn Module> {
         DEP_GATE_EXTRA.into(),
         "rustfs-init:service_completed_successfully".into(),
     );
+    // Clients get the store's coordinates only — never its root keys. They read and write
+    // with temporary credentials Unity Catalog vends for a table or volume.
+    provides.client_env.insert(
+        "AWS_ENDPOINT_URL_S3".into(),
+        ClientValue::endpoint("rustfs", "s3", UrlPart::Full),
+    );
+    provides
+        .client_env
+        .insert("AWS_REGION".into(), ClientValue::literal("us-east-1"));
     // The AWS hostnames clients without an endpoint override call. Virtual-hosted bucket names
     // are listed per provisioned bucket (`{name}`).
     let sts = |host: &str| ImpersonatedHost {
@@ -555,7 +580,7 @@ fn rustfs() -> Arc<dyn Module> {
                 .into(),
         ),
         category: Some("storage".into()),
-        provider_of: Some("object_store".into()),
+        provider_of: Some(Role::OBJECT_STORE.into()),
         requires: vec![],
         conflicts_with: vec![],
         needs: vec![],
@@ -654,7 +679,7 @@ fn azurite() -> Arc<dyn Module> {
         display_name: Some("Azurite (local Azure Blob)".into()),
         summary: Some("Azure Blob emulator; object store with Azure-shaped wiring.".into()),
         category: Some("storage".into()),
-        provider_of: Some("object_store".into()),
+        provider_of: Some(Role::OBJECT_STORE.into()),
         requires: vec![],
         // Same-role exclusivity is enforced by the planner (two unpinned object_store
         // providers in one environment is a `ConflictingRoleProviders` error), so no
@@ -699,22 +724,20 @@ fn mlflow() -> Arc<dyn Module> {
     // `MLFLOW_S3_ENDPOINT_URL` and the AWS_* credentials are no longer declared here — they
     // are injected from the object_store provider's coordinates (see `needs` below), so they
     // follow whichever provider the planner chose and carry the in-network endpoint.
-    for (k, v) in [
-        (
-            "MLFLOW_TRACKING_URI",
-            "http://localhost:${ENVOY_PORT:-9080}",
-        ),
-        ("MLFLOW_EXPERIMENT_NAME", "local-dev"),
-    ] {
-        provides.env_vars.insert(k.into(), v.into());
-    }
+    //
+    // The tracking API is Databricks-shaped (`/api/2.0/mlflow` at the gateway root), so a
+    // client's tracking URI is the gateway origin; the MLflow client appends the API path.
+    provides.client_env.insert(
+        "MLFLOW_TRACKING_URI".into(),
+        ClientValue::endpoint("mlflow", "tracking", UrlPart::Origin),
+    );
 
     Arc::new(DataModule {
         id: ModuleId::from("mlflow"),
         display_name: Some("MLflow tracking".into()),
         summary: Some("Experiment + model tracking; Databricks-shaped URLs.".into()),
         category: Some("ml".into()),
-        provider_of: Some("experiment_tracking".into()),
+        provider_of: Some(Role::EXPERIMENT_TRACKING.into()),
         // Only the gateway is a hard module dependency; the relational store and
         // object store arrive via resource demands (auto-provisioned).
         requires: vec![ModuleId::from("envoy")],
@@ -786,7 +809,11 @@ fn mlflow() -> Arc<dyn Module> {
 /// Databricks-shaped path at root, so `/api/2.1/unity-catalog` fronts with no rewrite;
 /// a second `/unity-catalog` alias points at the same service.
 fn unity_catalog() -> Arc<dyn Module> {
-    let provides = Provides::default();
+    let mut provides = Provides::default();
+    provides.client_env.insert(
+        "UNITY_CATALOG_URL".into(),
+        ClientValue::endpoint("unitycatalog", "rest", UrlPart::Full),
+    );
     // UC reads its storage config from a rendered `server.properties` and its metadata-store
     // config from a rendered `hibernate.properties` (both mounted as secrets: they carry keys
     // and a password). They read the typed connections directly, so this module injects no env
@@ -800,7 +827,7 @@ fn unity_catalog() -> Arc<dyn Module> {
         display_name: Some("Unity Catalog".into()),
         summary: Some("Databricks UC server; Databricks-shaped REST API.".into()),
         category: Some("catalog".into()),
-        provider_of: Some("data_catalog".into()),
+        provider_of: Some(Role::DATA_CATALOG.into()),
         // Only the gateway is a hard module dependency; Postgres + S3 arrive as demands.
         requires: vec![ModuleId::from("envoy")],
         conflicts_with: vec![],
@@ -871,16 +898,24 @@ fn unity_catalog() -> Arc<dyn Module> {
 /// `jaeger` — all-in-one OTLP tracing backend, UI fronted at `/jaeger`.
 fn jaeger() -> Arc<dyn Module> {
     let mut provides = Provides::default();
-    provides.env_vars.insert(
+    // Clients export traces over OTLP/HTTP through the gateway (`/v1/traces` on the shared
+    // listener), so host-side apps reach Jaeger without it publishing a port. The
+    // signal-specific variable is used as-is by OTel SDKs; the generic
+    // `OTEL_EXPORTER_OTLP_ENDPOINT` would also send metrics and logs, which Jaeger rejects.
+    provides.client_env.insert(
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT".into(),
-        "http://localhost:4317".into(),
+        ClientValue::endpoint("jaeger", "otlp_http", UrlPart::Full),
+    );
+    provides.client_env.insert(
+        "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL".into(),
+        ClientValue::literal("http/protobuf"),
     );
     Arc::new(DataModule {
         id: ModuleId::from("jaeger"),
         display_name: Some("Jaeger tracing".into()),
         summary: Some("All-in-one OTLP tracing backend with the Jaeger UI.".into()),
         category: Some("observability".into()),
-        provider_of: Some("tracing".into()),
+        provider_of: Some(Role::TRACING.into()),
         requires: vec![ModuleId::from("envoy")],
         conflicts_with: vec![],
         needs: vec![],
@@ -892,8 +927,11 @@ fn jaeger() -> Arc<dyn Module> {
             base_path: "/jaeger".into(),
             endpoints: vec![
                 Endpoint::ui_prefixable("ui", 16686, Some(16686)),
-                // OTLP/gRPC ingest, reached directly (not gatewayed).
+                // OTLP/gRPC ingest, reached directly in-network (not gatewayed).
                 Endpoint::internal("otlp_grpc", Scheme::Grpc, 4317, Some(4317)),
+                // OTLP/HTTP trace ingest, fronted at the OTLP-standard path: the client-facing
+                // export endpoint (see `client_env` above).
+                Endpoint::api("otlp_http", 4318, "/v1/traces", Rewrite::Passthrough),
             ],
             depends_on: vec![],
         }],
@@ -920,24 +958,21 @@ const HEADWATERS_SERVE_UI_LEGACY: &str = "HEADWATERS_SERVE_UI";
 /// surface under a base path, the gateway rewrites this prefix to carry the base path.
 const HEADWATERS_API_PREFIX: &str = "/api/v1/lineage";
 
+/// The base path Headwaters' whole surface (UI, REST read API, ConnectRPC, ingest) is served
+/// under, told to the server via the generated `config.toml`'s `[ui].base_path`.
+const HEADWATERS_BASE_PATH: &str = "/lineage";
+
 /// `headwaters` — an OpenLineage lineage service, and the baseline's one *logic* module: the
 /// set of services and routes it emits varies with a knob, so it implements [`Module`] by hand
 /// rather than being a [`DataModule`].
 ///
-/// Its REST API is served at a fixed, Databricks-style path baked into the server
-/// ([`HEADWATERS_API_PREFIX`], `/api/v1/lineage`) — like Unity Catalog's `/api/2.1/unity-catalog`.
-/// The web UI is optional, gated on the `HEADWATERS_SERVE_UI` knob:
-///
-/// - **UI off** (API-only): one [`Api`](RouteIntent::Api) endpoint at the static API path,
-///   served at root (no base path), so the gateway matches the prefix and forwards it unchanged.
-/// - **UI on** (default): the server relocates its whole surface under the planner-assigned base
-///   path `/lineage` (told via the generated `config.toml`'s `[ui].base_path`, fed by the
-///   `BASE_PATH` render handshake). So it emits two endpoints on the one service — the UI as
-///   [`UiPrefixable`](RouteIntent::UiPrefixable) at `/lineage`, and the API still matched at its
-///   static path but rewritten to carry the base path (`/api/v1/lineage` →
-///   `/lineage/api/v1/lineage`). A UI cannot be reached through a Databricks-style API route, so
-///   it *needs* its own base path — which is the whole reason this is a knob-driven logic module
-///   a `DataModule` cannot express.
+/// Its whole surface is served under [`HEADWATERS_BASE_PATH`] (`/lineage`), and its OpenLineage
+/// ingest path is additionally fronted at a fixed, Databricks-style path
+/// ([`HEADWATERS_API_PREFIX`], `/api/v1/lineage`) rewritten under the base path. The bundled web
+/// UI is gated on the `serve_ui` knob, which decides whether `/lineage` is fronted as a
+/// [`UiPrefixable`](crate::RouteIntent::UiPrefixable) UI or as an [`Api`](crate::RouteIntent::Api) passthrough
+/// (API-only, e.g. behind a custom UI) — the knob-driven service shape a `DataModule` cannot
+/// express.
 ///
 /// It demands only a `relational_db` (named `lineage`); Postgres provisions the database and
 /// the planner injects the `db:service_healthy` gate.
@@ -991,7 +1026,24 @@ impl Headwaters {
                     "HEADWATERS_IMAGE",
                 ),
             ],
-            provides: Provides::default(),
+            // The OpenLineage client contract (`OPENLINEAGE_URL` + `OPENLINEAGE_ENDPOINT`), as
+            // read by e.g. `datafusion-openlineage`. The ingest path is the static API prefix
+            // at the gateway regardless of the UI knob; the gateway applies any base-path
+            // rewrite, so clients never see it.
+            provides: Provides {
+                client_env: [
+                    (
+                        "OPENLINEAGE_URL".to_string(),
+                        ClientValue::endpoint("headwaters", "api", UrlPart::Origin),
+                    ),
+                    (
+                        "OPENLINEAGE_ENDPOINT".to_string(),
+                        ClientValue::endpoint("headwaters", "api", UrlPart::Path),
+                    ),
+                ]
+                .into(),
+                ..Provides::default()
+            },
             // The service config is rendered to a mounted `config.toml` (so an environment's
             // effective Headwaters config is inspectable on disk) rather than threaded as
             // individual env vars; the DSN stays in `DATABASE_URL`, which Headwaters overlays
@@ -1039,7 +1091,7 @@ impl Module for Headwaters {
         Some("observability")
     }
     fn provider_of(&self) -> Option<&str> {
-        Some("lineage")
+        Some(Role::LINEAGE)
     }
     fn requires(&self) -> &[ModuleId] {
         &self.requires
@@ -1057,42 +1109,34 @@ impl Module for Headwaters {
         &self.render
     }
     fn services(&self, knobs: &ResolvedKnobs) -> Vec<ServiceSpec> {
-        // Headwaters serves its OpenLineage REST API at a fixed, Databricks-style path baked
-        // into the server (`/api/v1/lineage`) — like Unity Catalog's `/api/2.1/unity-catalog`.
+        // The server always relocates its whole surface (UI, REST read API, ConnectRPC,
+        // ingest) under `/lineage` (told via `config.toml`'s `[ui].base_path`), so the gateway
+        // fronts that prefix either way:
         //
-        // - UI off (API-only): one `Api` endpoint at that static path, served at root (no
-        //   base path), so the gateway matches the prefix and forwards it unchanged.
-        // - UI on: the server relocates its whole surface under the planner-assigned base
-        //   path `/lineage` (told via `config.toml`'s `[ui].base_path`). So we emit two
-        //   endpoints on the one service: the UI as `UiPrefixable` at `/lineage`, and the API
-        //   still matched at its static `/api/v1/lineage` but rewritten to carry the base path
-        //   (`Rewrite::Inherit` joins `base_path` + the mount prefix →
-        //   `/lineage/api/v1/lineage`), since that is where the relocated server now serves it.
+        // - UI on: as a `UiPrefixable` UI.
+        // - UI off: as an `Api` passthrough — a custom UI built on the shipped components
+        //   still needs the read API and ConnectRPC service behind it.
+        //
+        // The OpenLineage ingest path is also matched at its static, Databricks-style
+        // `/api/v1/lineage` (like Unity Catalog's `/api/2.1/unity-catalog`) and rewritten to
+        // carry the base path (`Rewrite::Inherit` → `/lineage/api/v1/lineage`), so clients
+        // post to a stable path regardless of the knob.
         let serve_ui = knobs.bool(HEADWATERS_SERVE_UI, true);
-        let (base_path, endpoints) = if serve_ui {
-            (
-                "/lineage".to_string(),
-                vec![
-                    Endpoint::ui_prefixable("ui", 8091, None),
-                    Endpoint::api("api", 8091, HEADWATERS_API_PREFIX, Rewrite::Inherit),
-                ],
-            )
+        let surface = if serve_ui {
+            Endpoint::ui_prefixable("ui", 8091, None)
         } else {
-            (
-                String::new(),
-                vec![Endpoint::api(
-                    "api",
-                    8091,
-                    HEADWATERS_API_PREFIX,
-                    Rewrite::Inherit,
-                )],
-            )
+            // The same prefix, fronted as an API: REST reads, ConnectRPC and ingest, but no UI.
+            Endpoint::api("surface", 8091, HEADWATERS_BASE_PATH, Rewrite::Passthrough)
         };
+        let endpoints = vec![
+            surface,
+            Endpoint::api("api", 8091, HEADWATERS_API_PREFIX, Rewrite::Inherit),
+        ];
         vec![ServiceSpec {
             name: "headwaters".into(),
             role: Role::lineage(),
             placement: container("headwaters"),
-            base_path,
+            base_path: HEADWATERS_BASE_PATH.into(),
             endpoints,
             // Demand-driven, like MLflow: the planner injects the chosen relational-db
             // provider's gate into the fragment's `depends_on`.
@@ -1105,27 +1149,116 @@ fn headwaters() -> Arc<dyn Module> {
     Arc::new(Headwaters::new())
 }
 
+/// `opa` — Open Policy Agent as the gateway's authorization engine.
+///
+/// Selecting it adds a gRPC `ext_authz` check to the gateway's shared listener, *after*
+/// forward-auth, so the policy decides on the identity the auth provider asserted (the
+/// `Remote-User` / `Remote-Groups` headers). Selecting it turns gateway auth on; with auth
+/// explicitly off the plan is a [`PlanError::PolicyRequiresAuth`](crate::PlanError).
+///
+/// The policy is operator-owned: `policies/authz.rego` (plus its tests) is written beside
+/// `compose.yaml` once and never overwritten.
+fn opa() -> Arc<dyn Module> {
+    Arc::new(DataModule {
+        id: ModuleId::from("opa"),
+        display_name: Some("Open Policy Agent".into()),
+        summary: Some("Rego authorization for every gateway request, after sign-on.".into()),
+        category: Some("gateway".into()),
+        provider_of: Some(Role::POLICY.into()),
+        // Like Authelia, located by role: Envoy depends on it at runtime, not the reverse.
+        requires: vec![],
+        conflicts_with: vec![],
+        needs: vec![],
+        service_specs: vec![ServiceSpec {
+            name: "opa".into(),
+            role: Role::policy(),
+            placement: container("opa"),
+            // The ext_authz gRPC port; the planner builds the gateway's HTTP/2 cluster from it.
+            endpoints: vec![Endpoint::internal("grpc", Scheme::Grpc, 9191, None)],
+            depends_on: vec![],
+            base_path: String::new(),
+        }],
+        provides: Provides::default(),
+        knobs: vec![
+            image_knob("image", "OPA image", images::OPA, "OPA_IMAGE"),
+            Knob {
+                key: "dry_run".into(),
+                title: Some("Dry run".into()),
+                kind: KnobKind::Bool,
+                default: Some("false".into()),
+                required: false,
+                help: Some(
+                    "Allow every request and only log the policy's decision — for rolling out \
+                     a policy change safely."
+                        .into(),
+                ),
+                aliases: vec![],
+            },
+            Knob {
+                key: "log_level".into(),
+                title: Some("Log level".into()),
+                kind: KnobKind::Enum {
+                    options: ["debug", "info", "warn", "error"]
+                        .map(String::from)
+                        .to_vec(),
+                },
+                default: Some("info".into()),
+                required: false,
+                help: None,
+                aliases: vec![],
+            },
+        ],
+        render: template_with_files(
+            include_str!("../../templates/modules/opa/compose.yaml.jinja"),
+            vec![
+                config_file(
+                    "config.yaml",
+                    "opa_config",
+                    include_str!("../../templates/modules/opa/config.yaml.jinja"),
+                ),
+                operator_file(
+                    "policies/authz.rego",
+                    "opa_policy",
+                    include_str!("../../templates/modules/opa/authz.rego"),
+                ),
+                operator_file(
+                    "policies/authz_test.rego",
+                    "opa_policy_test",
+                    include_str!("../../templates/modules/opa/authz_test.rego"),
+                ),
+            ],
+        ),
+    })
+}
+
 /// `databricks-emulator-env` — env-only module: the `DATABRICKS_*` contract Databricks
 /// Apps inject, so app code reads the same names locally. No services, no fragment.
 fn databricks_emulator_env() -> Arc<dyn Module> {
     let mut provides = Provides::default();
+    // The workspace and app URLs are the gateway origin, resolved per client vantage. No
+    // `DATABRICKS_TOKEN`: the client env is credential-free, and with gateway auth on a token
+    // is the user's own to supply.
+    for k in ["DATABRICKS_HOST", "DATABRICKS_APP_URL"] {
+        provides
+            .client_env
+            .insert(k.into(), ClientValue::GatewayOrigin);
+    }
     for (k, v) in [
         ("LOCAL_DEV", "1"),
-        ("DATABRICKS_HOST", "http://localhost:${ENVOY_PORT:-9080}"),
-        ("DATABRICKS_TOKEN", "local-dev-token-do-not-use-in-prod"),
         ("DATABRICKS_CLIENT_ID", "local-dev"),
         ("DATABRICKS_WORKSPACE_ID", "local"),
-        ("DATABRICKS_APP_URL", "http://localhost:${ENVOY_PORT:-9080}"),
         ("DATABRICKS_APP_PORT", "8080"),
         ("DATABRICKS_FORWARDED_USER", "local-developer@example.com"),
         ("DATABRICKS_FORWARDED_EMAIL", "local-developer@example.com"),
     ] {
-        provides.env_vars.insert(k.into(), v.into());
+        provides
+            .client_env
+            .insert(k.into(), ClientValue::literal(v));
     }
     Arc::new(DataModule {
         id: ModuleId::from("databricks-emulator-env"),
         display_name: Some("Databricks app runtime contract".into()),
-        summary: Some("DATABRICKS_HOST / TOKEN / forwarded-user env vars apps expect.".into()),
+        summary: Some("DATABRICKS_HOST / app URL / forwarded-user env vars apps expect.".into()),
         category: Some("app_runtime".into()),
         provider_of: Some("databricks_apps_contract".into()),
         requires: vec![],
@@ -1168,16 +1301,21 @@ mod tests {
         // `Inherit` against base_path `/lineage` joins to the relocated upstream path.
         assert_eq!(api.rewrite, Rewrite::Inherit);
 
-        // UI off: a single API endpoint at the static path, served at root (no base path), so
-        // the gateway forwards `/api/v1/lineage` unchanged.
+        // UI off: the surface stays under the base path, fronted as an API passthrough (the
+        // read API and ConnectRPC remain reachable), and ingest keeps its static path.
         let mut off = ResolvedKnobs::new();
         off.set(HEADWATERS_SERVE_UI, "false");
         let svcs = m.services(&off);
-        assert_eq!(svcs[0].base_path, "");
-        assert_eq!(svcs[0].endpoints.len(), 1);
+        assert_eq!(svcs[0].base_path, HEADWATERS_BASE_PATH);
+        assert!(svcs[0].endpoints.iter().all(|e| e.id != "ui"));
+        let surface = ep(&svcs[0], "surface");
+        assert_eq!(surface.intent, RouteIntent::Api);
+        assert_eq!(surface.mount_prefix.as_deref(), Some(HEADWATERS_BASE_PATH));
+        assert_eq!(surface.rewrite, Rewrite::Passthrough);
         let api = ep(&svcs[0], "api");
         assert_eq!(api.intent, RouteIntent::Api);
         assert_eq!(api.mount_prefix.as_deref(), Some(HEADWATERS_API_PREFIX));
+        assert_eq!(api.rewrite, Rewrite::Inherit);
 
         // The default (no knob value resolved) keeps the UI on.
         let svcs = m.services(&ResolvedKnobs::new());
