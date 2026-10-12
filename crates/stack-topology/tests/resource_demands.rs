@@ -447,7 +447,7 @@ fn ambiguous_object_store_without_default_or_preference_errors() {
         "needs-store",
         vec![ResourceDemand {
             resource: "object_store".into(),
-            name: "x".into(),
+            name: "data".into(),
             provider: None,
             bind: ConnectionBinding::default(),
         }],
@@ -469,7 +469,7 @@ fn ambiguous_object_store_without_default_or_preference_errors() {
             "needs-store",
             vec![ResourceDemand {
                 resource: "object_store".into(),
-                name: "x".into(),
+                name: "data".into(),
                 provider: None,
                 bind: ConnectionBinding::default(),
             }],
@@ -697,6 +697,68 @@ fn pinned_extra_resource_sanctions_a_second_provider() {
         "the extra bucket is provisioned on the pinned azurite: {:?}",
         p.azure_containers
     );
+}
+
+/// Selecting a non-default provider is enough to make it satisfy its role: mlflow's object-store
+/// demand lands on the selected Azurite instead of pulling in the catalog default (RustFS) and
+/// clashing — with no `provider_preference` in the context, as the CLI plans it.
+#[test]
+fn a_selected_provider_satisfies_its_role_without_a_preference() {
+    let sel = Selection::modules(["envoy", "postgres", "azurite", "mlflow"]);
+    let p = baseline_catalog()
+        .plan(&sel, &PlanCtx::default())
+        .expect("the selected azurite satisfies mlflow's object store");
+    assert!(p.services.contains_key(&ModuleId::from("azurite")));
+    assert!(
+        !p.services.contains_key(&ModuleId::from("rustfs")),
+        "the catalog default isn't pulled in"
+    );
+    assert!(p.azure_containers.contains(&"mlflow".to_string()));
+}
+
+/// An explicit environment preference still wins over a selected provider.
+#[test]
+fn an_explicit_preference_wins_over_a_selected_provider() {
+    let sel = Selection::modules(["envoy", "postgres", "azurite", "mlflow"]);
+    let ctx = PlanCtx {
+        provider_preference: BTreeMap::from([(
+            Role::OBJECT_STORE.to_string(),
+            vec![ModuleId::from("rustfs")],
+        )]),
+        ..PlanCtx::default()
+    };
+    let err = baseline_catalog().plan(&sel, &ctx).unwrap_err();
+    assert!(
+        matches!(err, PlanError::ConflictingRoleProviders { .. }),
+        "rustfs is preferred, so the selected azurite clashes: {err:?}"
+    );
+}
+
+/// Extra resource names reach the providers' init jobs (SQL, shell) verbatim, so the planner
+/// rejects any that aren't valid for their role — regardless of which front end built them.
+#[test]
+fn unsafe_extra_resource_names_are_rejected() {
+    for (role, name) in [
+        (Role::RELATIONAL_DB, "x\"; DROP DATABASE mlflow; --"),
+        (Role::RELATIONAL_DB, "Analytics"),
+        (Role::OBJECT_STORE, "x; rm -rf /"),
+        (Role::OBJECT_STORE, "$(id)"),
+        (Role::OBJECT_STORE, "ab"),
+    ] {
+        let mut sel = Selection::modules(["envoy", "postgres", "rustfs"]);
+        sel.extra_resources = vec![ExtraResource {
+            resource: role.into(),
+            name: name.into(),
+            provider: None,
+        }];
+        let err = baseline_catalog()
+            .plan(&sel, &PlanCtx::default())
+            .unwrap_err();
+        assert!(
+            matches!(err, PlanError::InvalidResourceName { name: ref n, .. } if n == name),
+            "{role} `{name}`: expected InvalidResourceName, got {err:?}"
+        );
+    }
 }
 
 /// A module answering `host` in-network, forwarding to its own service on port 80.

@@ -51,6 +51,7 @@ mod demands;
 mod gateway;
 mod impersonation;
 mod knobs;
+mod names;
 pub mod resolve;
 pub mod routing;
 
@@ -72,7 +73,7 @@ use crate::render::{InjectedEnv, RenderOutput};
 use client_env::resolve_client_env;
 use demands::{
     bind_connection, check_role_exclusivity, provider_dep_gate, provisioned_by_provider,
-    resolve_demand_providers, resolve_with_demands,
+    resolve_demand_providers, resolve_with_demands, with_selected_providers,
 };
 pub use gateway::{
     AuthConfig, ClusterConfig, ENVOY_AUTH_KNOB, ENVOY_AUTH_KNOB_LEGACY, EXT_AUTHZ_PATH_EXTRA,
@@ -86,6 +87,7 @@ use gateway::{
 };
 use impersonation::{plan_impersonation, rewrite_gatewayed_object_store_endpoints};
 use knobs::resolve_module_knobs;
+pub use names::{is_valid_resource_name, resource_name_rule};
 
 /// What modules an environment should contain.
 ///
@@ -297,6 +299,18 @@ pub enum PlanError {
         module: String,
         /// The unmet resource kind.
         resource: String,
+    },
+    /// A demanded or extra resource name isn't valid for its role. Names reach the providers'
+    /// init jobs (SQL, shell) verbatim, so the planner rejects anything outside the role's
+    /// [`resource_name_rule`].
+    #[error("invalid {resource} name `{name}`: use {rule}")]
+    InvalidResourceName {
+        /// The resource role.
+        resource: String,
+        /// The rejected name.
+        name: String,
+        /// What a valid name looks like.
+        rule: &'static str,
     },
     /// More than one catalog module provisions a demanded resource kind and there is
     /// no tie-break, so the planner will not guess which to deploy.
@@ -718,9 +732,29 @@ fn plan_env(selection: &Selection, catalog: &Catalog, ctx: &PlanCtx) -> Result<P
         selection
     };
 
+    // A provider the user picked satisfies its role's demands ahead of the catalog default.
+    let preferred;
+    let ctx = if let Some(c) = with_selected_providers(ctx, selection, catalog) {
+        preferred = c;
+        &preferred
+    } else {
+        ctx
+    };
+
     // Resolve the selection, auto-provisioning a provider for every resource demand
     // (a demanded relational store, object store, …) before anything else runs.
     let graph = resolve_with_demands(selection, catalog, ctx)?;
+
+    // Every name the plan provisions reaches a provider's init job verbatim, so check them all
+    // (module demands and environment-level extras alike) before anything renders.
+    for module in &graph.nodes {
+        for demand in module.needs() {
+            names::check_resource_name(&demand.resource, &demand.name)?;
+        }
+    }
+    for extra in &selection.extra_resources {
+        names::check_resource_name(&extra.resource, &extra.name)?;
+    }
 
     // Resolve each demand's provider and its typed connection exactly once, up front:
     // `choose_provider` is a pure function of `(ctx, catalog, demand)`, so the downstream
