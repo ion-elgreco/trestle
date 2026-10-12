@@ -56,8 +56,11 @@ pub mod routing;
 
 use crate::address::{AddressError, ServiceRef};
 use crate::catalog::Catalog;
-use crate::catalog::baseline::{DATA_ROOT_DEFAULT, DATA_ROOT_VAR, GATEWAY_URL_VAR};
-use crate::catalog::module::{ExtraResource, ModuleId};
+use crate::catalog::baseline::{
+    CLIENT_ENV_KEYS_VAR, DATA_ROOT_DEFAULT, DATA_ROOT_VAR, GATEWAY_AUTH_VAR,
+    GATEWAY_INTERNAL_URL_VAR, GATEWAY_URL_VAR,
+};
+use crate::catalog::module::{ExtraResource, ModuleId, StackFacts};
 use crate::model::connection::Connection;
 use crate::model::endpoint::RouteIntent;
 use crate::model::placement::Vantage;
@@ -731,13 +734,18 @@ fn plan_env(selection: &Selection, catalog: &Catalog, ctx: &PlanCtx) -> Result<P
     // module emits may *vary* with its knobs, but the knobs are settled first. Every later
     // pass reads these caches instead of re-resolving or re-deriving.
     let resolved_knobs = resolve_module_knobs(&graph, selection)?;
+    // Stack-wide facts a module's topology may depend on, settled before any services are
+    // computed. Forward-auth is wired exactly when an auth provider was resolved above.
+    let stack_facts = StackFacts {
+        gateway_auth: auth_provider.is_some(),
+    };
     let services_of: BTreeMap<ModuleId, Vec<ServiceSpec>> = graph
         .nodes
         .iter()
         .map(|module| {
             (
                 module.id().clone(),
-                module.services(&resolved_knobs[module.id()]),
+                module.services_in(&resolved_knobs[module.id()], &stack_facts),
             )
         })
         .collect();
@@ -810,8 +818,22 @@ fn plan_env(selection: &Selection, catalog: &Catalog, ctx: &PlanCtx) -> Result<P
         internal_port: ctx.gateway_internal_port,
         host_port: ctx.gateway_host_port,
     };
-    // What a host-side browser reaches the shared listener at (see `GATEWAY_URL_VAR`).
+    // What a host-side browser reaches the shared listener at (see `GATEWAY_URL_VAR`), and
+    // what an in-network caller reaches it at (see `GATEWAY_INTERNAL_URL_VAR`).
     let gateway_url = format!("http://localhost:{}", ctx.gateway_host_port);
+    let gateway_internal_url = format!(
+        "http://{}:{}",
+        ctx.gateway_service, ctx.gateway_internal_port
+    );
+    // Every client-environment key the stack defines (see `CLIENT_ENV_KEYS_VAR`).
+    let client_env_keys = graph
+        .nodes
+        .iter()
+        .flat_map(|m| m.provides().client_env.keys().cloned())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>()
+        .join(",");
     for module in &graph.nodes {
         let mut module_env = InjectedEnv::new();
         // The stack's root data directory, available to every fragment as a render-only value
@@ -820,6 +842,16 @@ fn plan_env(selection: &Selection, catalog: &Catalog, ctx: &PlanCtx) -> Result<P
         // whole stack's persistence relocates via the one `PlanCtx::data_root` knob.
         module_env.set(DATA_ROOT_VAR, &ctx.data_root);
         module_env.set(GATEWAY_URL_VAR, &gateway_url);
+        module_env.set(GATEWAY_INTERNAL_URL_VAR, &gateway_internal_url);
+        module_env.set(
+            GATEWAY_AUTH_VAR,
+            if stack_facts.gateway_auth {
+                "true"
+            } else {
+                "false"
+            },
+        );
+        module_env.set(CLIENT_ENV_KEYS_VAR, &client_env_keys);
         // Seed each module's render env with its declared env vars.
         for (k, v) in module.provides().env_vars.iter() {
             module_env.set(k, v);
@@ -856,6 +888,7 @@ fn plan_env(selection: &Selection, catalog: &Catalog, ctx: &PlanCtx) -> Result<P
                             prefix: prefix.clone(),
                             cluster: cluster.clone(),
                             rewrite: rewrite.clone(),
+                            options: endpoint.route.clone(),
                         });
                         // One rewrite value feeds both the gateway config and the
                         // route plan, keeping them in lock-step.
@@ -883,6 +916,7 @@ fn plan_env(selection: &Selection, catalog: &Catalog, ctx: &PlanCtx) -> Result<P
                             prefix: base.clone(),
                             cluster: cluster.clone(),
                             rewrite: None,
+                            options: endpoint.route.clone(),
                         });
                         routes.assign(
                             &service.name,
@@ -914,6 +948,7 @@ fn plan_env(selection: &Selection, catalog: &Catalog, ctx: &PlanCtx) -> Result<P
                                 prefix: "/".into(),
                                 cluster: cluster.clone(),
                                 rewrite: None,
+                                options: endpoint.route.clone(),
                             }],
                         });
                         routes.assign(
@@ -1279,6 +1314,7 @@ mod tests {
             path: String::new(),
             mount_prefix,
             rewrite: Rewrite::Inherit,
+            route: Default::default(),
         }
     }
 
@@ -1570,10 +1606,17 @@ mod tests {
         assert_eq!(mlflow.cluster, "mlflow");
         assert_eq!(mlflow.rewrite.as_deref(), Some("/mlflow/api/2.0/mlflow"));
 
-        // MLflow OTel route is the override exception: it passes through unchanged
-        // (the empty override forces no rewrite), unlike the tracking API.
+        // MLflow OTLP ingest is mounted Databricks-style and rewritten onto the path MLflow
+        // serves it at under its base (`/mlflow/v1/traces`).
         let otel = route_for(&p, "/api/2.0/otel");
-        assert_eq!(otel.rewrite, None);
+        assert_eq!(otel.rewrite.as_deref(), Some("/mlflow"));
+
+        // The AI Gateway is mounted at `/ai-gateway`, rewritten onto MLflow's gateway router,
+        // and routed for streaming with caller credentials dropped.
+        let ai = route_for(&p, "/ai-gateway");
+        assert_eq!(ai.cluster, "mlflow");
+        assert_eq!(ai.rewrite.as_deref(), Some("/mlflow/gateway"));
+        assert!(ai.options.streaming && ai.options.strip_client_credentials);
 
         // MLflow UI fronts at its base path, no rewrite.
         let ui = route_for(&p, "/mlflow");

@@ -175,7 +175,8 @@ export const FIXTURE_CATALOG: CatalogDto = {
     {
       id: "mlflow",
       display_name: "MLflow tracking",
-      summary: "Experiment + model tracking; Databricks-shaped URLs.",
+      summary:
+        "Experiment + model tracking and an AI Gateway; Databricks-shaped URLs.",
       category: "ml",
       provider_of: "experiment_tracking",
       requires: ["envoy"],
@@ -187,10 +188,21 @@ export const FIXTURE_CATALOG: CatalogDto = {
           kind: {
             kind: "string",
           },
-          default: "ghcr.io/mlflow/mlflow:v3.10.1-full",
+          default: "ghcr.io/mlflow/mlflow:v3.17.0-full",
           required: false,
           help: "Container image reference (repository:tag or digest). Override to pin or test a different release.",
           aliases: ["MLFLOW_IMAGE"],
+        },
+        {
+          key: "ai_gateway_models",
+          title: "AI Gateway models",
+          kind: {
+            kind: "string",
+          },
+          default:
+            "anthropic:claude-opus-5-5,anthropic:claude-sonnet-5-5,anthropic:claude-haiku-5-5",
+          required: false,
+          help: "Comma-separated provider:model pairs to seed as AI Gateway endpoints, each named the model id. A pair is seeded only when its provider key (e.g. ANTHROPIC_API_KEY) is exported before `docker compose up`.",
         },
       ],
     },
@@ -269,6 +281,70 @@ export const FIXTURE_CATALOG: CatalogDto = {
           required: false,
           help: "Container image reference (repository:tag or digest). Override to pin or test a different release.",
           aliases: ["HEADWATERS_IMAGE"],
+        },
+      ],
+    },
+    {
+      id: "omnigent",
+      display_name: "Omnigent",
+      summary:
+        "AI-agent platform; agents run in the stack, models via MLflow's AI Gateway.",
+      category: "agents",
+      provider_of: "agent_platform",
+      requires: ["envoy", "mlflow"],
+      conflicts_with: [],
+      knobs: [
+        {
+          key: "host",
+          title: "Run an agent host in the stack",
+          kind: {
+            kind: "bool",
+          },
+          default: "true",
+          required: false,
+          help: "Run agents in a host container on the stack's network, with the lakehouse's client env and models from MLflow's AI Gateway. Off: attach your own host with `omnigent host $OMNIGENT_URL`. Always off while the gateway authenticates.",
+        },
+        {
+          key: "model",
+          title: "Agent model",
+          kind: {
+            kind: "string",
+          },
+          default: "claude-opus-5-5",
+          required: false,
+          help: "The model agents use by default: an AI Gateway endpoint name (see mlflow.ai_gateway_models).",
+        },
+        {
+          key: "fast_model",
+          title: "Background model",
+          kind: {
+            kind: "string",
+          },
+          default: "claude-haiku-5-5",
+          required: false,
+          help: "The model harnesses use for quick background calls: an AI Gateway endpoint name.",
+        },
+        {
+          key: "image",
+          title: "Omnigent server image",
+          kind: {
+            kind: "string",
+          },
+          default: "ghcr.io/omnigent-ai/omnigent-server:v0.17.0",
+          required: false,
+          help: "Container image reference (repository:tag or digest). Override to pin or test a different release.",
+          aliases: ["OMNIGENT_IMAGE"],
+        },
+        {
+          key: "host_image",
+          title: "Omnigent host image",
+          kind: {
+            kind: "string",
+          },
+          default: "ghcr.io/omnigent-ai/omnigent-host:v0.17.0",
+          required: false,
+          help: "Container image reference (repository:tag or digest). Override to pin or test a different release.",
+          aliases: ["OMNIGENT_HOST_IMAGE"],
         },
       ],
     },
@@ -426,6 +502,13 @@ export const FIXTURE_PLAN: PlanResult = {
               },
               {
                 module: "mlflow",
+                endpoint: "ai_gateway",
+                kind: "api",
+                prefix: "/ai-gateway",
+                gated: true,
+              },
+              {
+                module: "mlflow",
                 endpoint: "ui",
                 kind: "ui",
                 prefix: "/mlflow",
@@ -534,7 +617,8 @@ export const FIXTURE_PLAN: PlanResult = {
         id: "mlflow",
         kind: "component",
         display_name: "MLflow tracking",
-        summary: "Experiment + model tracking; Databricks-shaped URLs.",
+        summary:
+          "Experiment + model tracking and an AI Gateway; Databricks-shaped URLs.",
         category: "ml",
         role: "experiment_tracking",
         placement: "container:mlflow",
@@ -748,7 +832,25 @@ export const FIXTURE_PLAN: PlanResult = {
               kind: "api",
             },
             mount_prefix: "/api/2.0/otel",
-            rewrite: "passthrough",
+            rewrite: {
+              to: "/mlflow",
+            },
+          },
+          {
+            id: "ai_gateway",
+            scheme: "http",
+            internal_port: 5000,
+            intent: {
+              kind: "api",
+            },
+            mount_prefix: "/ai-gateway",
+            rewrite: {
+              to: "/mlflow/gateway",
+            },
+            route: {
+              streaming: true,
+              strip_client_credentials: true,
+            },
           },
           {
             id: "ui",
@@ -888,7 +990,12 @@ export const FIXTURE_PLAN: PlanResult = {
           {
             prefix: "/api/2.0/otel",
             cluster: "mlflow",
-            rewrite: null,
+            rewrite: "/mlflow",
+          },
+          {
+            prefix: "/ai-gateway",
+            cluster: "mlflow",
+            rewrite: "/mlflow/gateway",
           },
           {
             prefix: "/v1/traces",

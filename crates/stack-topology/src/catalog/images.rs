@@ -24,8 +24,9 @@ pub const CERTS: &str = "eclipse-temurin:17-jdk-noble";
 pub const AZURITE: &str = "mcr.microsoft.com/azure-storage/azurite:3.35.0";
 /// One-shot container initializer for Azurite.
 pub const AZURITE_INIT: &str = "mcr.microsoft.com/azure-cli:2.87.0";
-/// MLflow tracking server.
-pub const MLFLOW: &str = "ghcr.io/mlflow/mlflow:v3.10.1-full";
+/// MLflow tracking server with its built-in AI Gateway (the `-full` image carries the gateway
+/// provider dependencies).
+pub const MLFLOW: &str = "ghcr.io/mlflow/mlflow:v3.17.0-full";
 /// Unity Catalog server.
 pub const UNITY_CATALOG: &str = "unitycatalog/unitycatalog:v0.6.0";
 /// Jaeger all-in-one tracing backend.
@@ -34,3 +35,7 @@ pub const JAEGER: &str = "cr.jaegertracing.io/jaegertracing/jaeger:2.14.1";
 pub const OPA: &str = "openpolicyagent/opa:1.21.1-envoy-static";
 /// Headwaters lineage service (migrate + serve).
 pub const HEADWATERS: &str = "ghcr.io/open-lakehouse/headwaters:0.0.7";
+/// Omnigent agent-platform server (the coordinator: web UI, REST + WebSocket API).
+pub const OMNIGENT_SERVER: &str = "ghcr.io/omnigent-ai/omnigent-server:v0.17.0";
+/// Omnigent agent host (runs agents; ships the claude / codex / pi harness CLIs).
+pub const OMNIGENT_HOST: &str = "ghcr.io/omnigent-ai/omnigent-host:v0.17.0";

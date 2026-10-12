@@ -43,8 +43,16 @@ fn default_lakehouse_rederives_the_working_gateway_routes() {
     assert_eq!(tracking.cluster, "mlflow");
     assert_eq!(tracking.rewrite.as_deref(), Some("/mlflow/api/2.0/mlflow"));
 
-    // MLflow OTel: the override exception — passes through unchanged (no rewrite).
-    assert_eq!(route(routes, "/api/2.0/otel").rewrite, None);
+    // MLflow OTel: Databricks-shaped mount, rewritten onto MLflow's `/mlflow/v1/traces`.
+    assert_eq!(
+        route(routes, "/api/2.0/otel").rewrite.as_deref(),
+        Some("/mlflow")
+    );
+
+    // MLflow AI Gateway: `/ai-gateway/…` reaches MLflow's gateway router under its base path.
+    let ai = route(routes, "/ai-gateway");
+    assert_eq!(ai.cluster, "mlflow");
+    assert_eq!(ai.rewrite.as_deref(), Some("/mlflow/gateway"));
 
     // MLflow UI: served at its base path, no rewrite.
     let ui = route(routes, "/mlflow");
@@ -120,6 +128,7 @@ fn real_prefix_collision_fails_loudly() {
                     path: String::new(),
                     mount_prefix: Some("/api".into()),
                     rewrite: Rewrite::Inherit,
+                    route: Default::default(),
                 }],
                 depends_on: vec![],
             }],
@@ -168,6 +177,7 @@ fn svc_module(id: &str, service_name: &str, mount_prefix: &str) -> Arc<dyn Modul
                 path: String::new(),
                 mount_prefix: Some(mount_prefix.into()),
                 rewrite: Rewrite::Inherit,
+                route: Default::default(),
             }],
             depends_on: vec![],
         }],

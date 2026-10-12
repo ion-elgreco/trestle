@@ -64,15 +64,78 @@ the stack serves:
 | Module | Variables |
 | --- | --- |
 | `unity-catalog` | `UNITY_CATALOG_URL` |
-| `mlflow` | `MLFLOW_TRACKING_URI` |
+| `mlflow` | `MLFLOW_TRACKING_URI`, `MLFLOW_AI_GATEWAY_URL` |
 | `headwaters` | `OPENLINEAGE_URL`, `OPENLINEAGE_ENDPOINT` |
 | `jaeger` | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` |
 | `rustfs` | `AWS_ENDPOINT_URL_S3`, `AWS_REGION` |
 | `databricks-emulator-env` | `DATABRICKS_HOST`, `DATABRICKS_APP_URL`, forwarded-user contract |
+| `omnigent` | `OMNIGENT_URL` |
 
 The files hold **no credentials**. Clients authenticate through the gateway and read or
 write object storage with the temporary credentials Unity Catalog vends. The root `.env`
 is different: it only carries values the compose files substitute.
+
+## AI Gateway (MLflow)
+
+The `mlflow` module also serves MLflow's built-in AI Gateway, fronted at `/ai-gateway`
+(`MLFLOW_AI_GATEWAY_URL`). Clients pick the provider surface they speak below it:
+
+| Surface | Path | Speaks |
+| --- | --- | --- |
+| Anthropic | `/ai-gateway/anthropic/v1/messages` | Anthropic Messages (e.g. Claude Code via `ANTHROPIC_BASE_URL=$MLFLOW_AI_GATEWAY_URL/anthropic`) |
+| OpenAI | `/ai-gateway/openai/v1/{responses,chat/completions}` | OpenAI Responses / Chat Completions |
+| Unified | `/ai-gateway/mlflow/v1/chat/completions` | OpenAI-compatible, any configured provider |
+
+The `model` a client sends is the name of a gateway endpoint. On every `docker compose up`, a
+one-shot `mlflow-gateway-init` creates one endpoint per entry in the `mlflow.ai_gateway_models`
+knob (`provider:model` pairs, default the current Claude models), each named after the model id
+and with usage tracking on. It stores the provider key from the shell that runs `up`:
+
+```bash
+export ANTHROPIC_API_KEY=...   # OPENAI_API_KEY / GEMINI_API_KEY for those providers
+docker compose up -d
+```
+
+Keys are encrypted in MLflow's database and never written into the rendered stack. Clients send
+no key of their own. The gateway route drops caller credentials, so MLflow always uses the key
+it stores. Endpoints already present are left alone, so changes made in the MLflow UI
+(`/mlflow/#/gateway`) survive re-runs.
+
+Upgrading a stack created with an older MLflow image: MLflow refuses an out-of-date schema. Back up
+`.data/`, then run `docker compose run --rm mlflow sh -c 'mlflow db upgrade "$MLFLOW_BACKEND_STORE_URI"'`
+once (or start from an empty `.data/`).
+
+## Agents (Omnigent)
+
+The `omnigent` module runs the [Omnigent](https://github.com/omnigent-ai/omnigent) agent
+platform as part of the stack. Selecting it pulls in `mlflow` for the AI Gateway, plus the
+relational and object stores they need.
+
+- **Server.** The web UI and API are fronted at `/omnigent` (`OMNIGENT_URL`), with no request
+  timeout so session streams stay open. Its state lives in the stack's Postgres.
+- **Agent host** (knob `omnigent.host`, on by default). A container on the stack's network
+  that runs the agents. It loads `client/container.env` and forwards every key to the agents,
+  so they see `UNITY_CATALOG_URL`, `MLFLOW_TRACKING_URI`, `AWS_ENDPOINT_URL_S3`, the OTLP
+  endpoint, and the rest of the selected modules' addresses. Its harnesses (Claude Code, Codex,
+  …) call MLflow's AI Gateway (`ANTHROPIC_BASE_URL=$MLFLOW_AI_GATEWAY_URL/anthropic`), so
+  the host holds no provider key. `omnigent.model` / `omnigent.fast_model` pick the gateway
+  endpoints the harness uses. Export the provider key before `up` so the gateway is seeded:
+
+  ```bash
+  export ANTHROPIC_API_KEY=...
+  docker compose up -d
+  open http://localhost:9080/omnigent/
+  ```
+
+- **Your own host.** Agents can also run on your machine against the stack's server:
+  `omnigent host "$OMNIGENT_URL"` or `omnigent run --server "$OMNIGENT_URL"`, with
+  `client/host.env` loaded.
+
+**Auth.** With the gateway open (the default), Omnigent runs single-user, like the rest of the
+stack. With `envoy.auth=true`, Omnigent trusts the identity the gateway asserts (`Remote-Email`):
+its users are the Authelia users, and with `opa` the policy applies (chatting needs `writers` or
+`admins`). An agent host can't present that identity, so the in-stack host is not rendered
+while the gateway authenticates.
 
 ## Gateway authentication and authorization
 

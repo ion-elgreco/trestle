@@ -1,9 +1,10 @@
 //! The inlined baseline catalog, built purely in Rust (no I/O, no YAML).
 //!
 //! These are the common local-Lakehouse modules — a gateway, a relational store, an
-//! object store, experiment tracking, a data catalog, a query engine, tracing,
-//! and the Databricks app-runtime contract — transcribed from trestle's
-//! `local-stack-*` components. They are the corpus the planner is validated against:
+//! object store, experiment tracking (with an AI Gateway), a data catalog, a query engine,
+//! tracing, an agent platform, and the Databricks app-runtime contract — most of them
+//! transcribed from trestle's `local-stack-*` components. They are the corpus the planner
+//! is validated against:
 //! planning the default selection must re-derive the routes and materialize the
 //! artifacts these components ship today (see the crate's golden tests).
 //!
@@ -20,7 +21,11 @@
 //!   mount prefix (the endpoint's own `path` stays empty so the resolver does not double it).
 //! - [`Endpoint::rewrite`](crate::Endpoint::rewrite) — the [`Rewrite`](crate::Rewrite)
 //!   policy: `Inherit` (derive from `base_path`), `Passthrough` (forward unchanged, e.g.
-//!   MLflow's `/api/2.0/otel`), or `To(path)` (an explicit upstream path).
+//!   Jaeger's `/v1/traces`), or `To(path)` (an explicit upstream path, e.g. MLflow's
+//!   Databricks-shaped `/api/2.0/otel` onto its `/mlflow/v1/traces`).
+//! - [`Endpoint::route`](crate::Endpoint::route) — [`RouteOptions`](crate::RouteOptions) for
+//!   how the gateway treats requests on the route: `streaming` (no request timeout) and
+//!   `strip_client_credentials` (e.g. MLflow's AI Gateway, which holds the provider keys).
 //!
 //! Most modules need no logic and are built as [`DataModule`](crate::DataModule)s (their
 //! static services are returned verbatim). A module that varies its topology with a knob —
@@ -50,7 +55,7 @@ use super::Catalog;
 use crate::catalog::images;
 use crate::catalog::module::{
     ClientValue, ConnectionBinding, DataModule, ImpersonatedHost, Knob, KnobKind, Module, ModuleId,
-    Provides, RenderSpec, ResolvedKnobs, ResourceDemand, UrlPart,
+    Provides, RenderSpec, ResolvedKnobs, ResourceDemand, StackFacts, UrlPart,
 };
 use crate::model::connection::{
     Connection, ConnectionField, ConnectionTemplate, ObjectStoreCredential,
@@ -89,6 +94,25 @@ pub const DATA_ROOT_VAR: &str = "DATA_ROOT";
 /// instead of hard-coding one. Baked at plan time, like [`DATA_ROOT_VAR`].
 pub const GATEWAY_URL_VAR: &str = "GATEWAY_URL";
 
+/// The render-only variable carrying the gateway's origin as an in-network caller reaches it
+/// (`http://<gateway_service>:<gateway_internal_port>`): the container-vantage counterpart of
+/// [`GATEWAY_URL_VAR`], e.g. for a service that must accept the `Host` its in-network callers
+/// send. Baked at plan time, like [`DATA_ROOT_VAR`].
+pub const GATEWAY_INTERNAL_URL_VAR: &str = "GATEWAY_INTERNAL_URL";
+
+/// The render-only variable saying whether the gateway authenticates the requests it fronts:
+/// `"true"` when its forward-auth knob is on and an auth provider is wired, else `"false"`.
+/// A fragment branches on it to trust the identity the gateway asserts (e.g. `Remote-Email`)
+/// or to run single-user. It mirrors [`StackFacts::gateway_auth`](crate::StackFacts), which
+/// the module's [`services_in`](crate::Module::services_in) sees, so both agree.
+pub const GATEWAY_AUTH_VAR: &str = "GATEWAY_AUTH";
+
+/// The render-only variable listing every client-environment key the stack defines (the
+/// selected modules' [`Provides::client_env`](crate::Provides::client_env) keys, sorted and
+/// comma-joined), so a module that launches client processes (an agent runner) can forward
+/// exactly the stack's contract to them without naming other modules' variables.
+pub const CLIENT_ENV_KEYS_VAR: &str = "CLIENT_ENV_KEYS";
+
 /// The default value injected for [`DATA_ROOT_VAR`]: `./.data`, relative to the compose
 /// file's directory — matching where the fragments persisted data before the root was
 /// centralized.
@@ -111,9 +135,10 @@ pub fn baseline_catalog() -> Catalog {
         unity_catalog(),
         jaeger(),
         headwaters(),
+        omnigent(),
         opa(),
         databricks_emulator_env(),
-    ] as [Arc<dyn Module>; 11])
+    ] as [Arc<dyn Module>; 12])
     .with_default_provider(Role::OBJECT_STORE, "rustfs")
     // No coordinate contracts: a provider vends a typed `Connection`, whose variant fields
     // are all mandatory, so completeness is a compile-time guarantee rather than a runtime
@@ -715,10 +740,17 @@ fn azurite() -> Arc<dyn Module> {
     })
 }
 
-/// `mlflow` — experiment tracking.
-/// the Databricks-shaped tracking API, the OTel ingest path, and the UI. It serves
-/// itself under `/mlflow`, so the tracking API rewrites under that base; the OTel path
-/// is the override exception (passes through unchanged).
+/// The default models [`mlflow`]'s AI Gateway is seeded with: `provider:model` pairs, each
+/// becoming an endpoint named the model id (so clients asking for the model by its usual id
+/// reach it unchanged).
+pub const MLFLOW_AI_GATEWAY_MODELS_DEFAULT: &str =
+    "anthropic:claude-opus-5-5,anthropic:claude-sonnet-5-5,anthropic:claude-haiku-5-5";
+
+/// `mlflow` — experiment tracking and its built-in AI Gateway.
+/// the Databricks-shaped tracking API, the OTel ingest path, the AI Gateway, and the UI. It
+/// serves its whole surface under `/mlflow`, so the tracking API rewrites under that base, and
+/// the Databricks-shaped OTel (`/api/2.0/otel`) and AI Gateway (`/ai-gateway`) mounts rewrite
+/// onto the paths MLflow serves them at under it.
 fn mlflow() -> Arc<dyn Module> {
     let mut provides = Provides::default();
     // `MLFLOW_S3_ENDPOINT_URL` and the AWS_* credentials are no longer declared here — they
@@ -731,11 +763,19 @@ fn mlflow() -> Arc<dyn Module> {
         "MLFLOW_TRACKING_URI".into(),
         ClientValue::endpoint("mlflow", "tracking", UrlPart::Origin),
     );
+    // The AI Gateway's base: a client appends the provider surface it speaks, e.g.
+    // `/anthropic` (Claude Code's `ANTHROPIC_BASE_URL`) or `/openai/v1`.
+    provides.client_env.insert(
+        "MLFLOW_AI_GATEWAY_URL".into(),
+        ClientValue::endpoint("mlflow", "ai_gateway", UrlPart::Full),
+    );
 
     Arc::new(DataModule {
         id: ModuleId::from("mlflow"),
         display_name: Some("MLflow tracking".into()),
-        summary: Some("Experiment + model tracking; Databricks-shaped URLs.".into()),
+        summary: Some(
+            "Experiment + model tracking and an AI Gateway; Databricks-shaped URLs.".into(),
+        ),
         category: Some("ml".into()),
         provider_of: Some(Role::EXPERIMENT_TRACKING.into()),
         // Only the gateway is a hard module dependency; the relational store and
@@ -773,13 +813,25 @@ fn mlflow() -> Arc<dyn Module> {
             name: "mlflow".into(),
             role: Role::experiment_tracking(),
             placement: container("mlflow"),
-            // It serves itself under `/mlflow`: the tracking API rewrites under that base
-            // (`Inherit`), while the OTel ingest path passes through unchanged
-            // (`Passthrough`), and the UI is fronted at the base path.
+            // It serves its whole surface under `/mlflow`: the tracking API rewrites under that
+            // base (`Inherit`), and the UI is fronted at the base path. OTLP ingest
+            // (`/mlflow/v1/traces`) is mounted Databricks-style at `/api/2.0/otel`, and the AI
+            // Gateway (`/mlflow/gateway/{anthropic,openai,mlflow}/…`) at `/ai-gateway`. The
+            // gateway route streams model output and drops caller credentials, so MLflow
+            // authenticates upstream with the provider key it stores rather than a client's
+            // placeholder (it forwards a CLI's own key when one is present).
             base_path: "/mlflow".into(),
             endpoints: vec![
                 Endpoint::api("tracking", 5000, "/api/2.0/mlflow", Rewrite::Inherit),
-                Endpoint::api("otel", 5000, "/api/2.0/otel", Rewrite::Passthrough),
+                Endpoint::api("otel", 5000, "/api/2.0/otel", Rewrite::To("/mlflow".into())),
+                Endpoint::api(
+                    "ai_gateway",
+                    5000,
+                    "/ai-gateway",
+                    Rewrite::To("/mlflow/gateway".into()),
+                )
+                .streaming()
+                .strip_client_credentials(),
                 Endpoint::ui_prefixable("ui", 5000, None),
             ],
             // No hand-listed startup edges: MLflow's `depends_on` is demand-driven. The
@@ -789,18 +841,36 @@ fn mlflow() -> Arc<dyn Module> {
             depends_on: vec![],
         }],
         provides,
-        knobs: vec![image_knob(
-            "image",
-            "MLflow image",
-            images::MLFLOW,
-            "MLFLOW_IMAGE",
-        )],
+        knobs: vec![
+            image_knob("image", "MLflow image", images::MLFLOW, "MLFLOW_IMAGE"),
+            Knob {
+                key: "ai_gateway_models".into(),
+                title: Some("AI Gateway models".into()),
+                kind: KnobKind::String,
+                default: Some(MLFLOW_AI_GATEWAY_MODELS_DEFAULT.into()),
+                required: false,
+                help: Some(
+                    "Comma-separated provider:model pairs to seed as AI Gateway endpoints, each \
+                     named the model id. A pair is seeded only when its provider key (e.g. \
+                     ANTHROPIC_API_KEY) is exported before `docker compose up`."
+                        .into(),
+                ),
+                aliases: vec![],
+            },
+        ],
         render: template_with_files(
             include_str!("../../templates/modules/mlflow/compose.yaml.jinja"),
-            vec![sensitive_file(
-                ".env/mlflow.env",
-                include_str!("../../templates/modules/mlflow/mlflow.env.jinja"),
-            )],
+            vec![
+                sensitive_file(
+                    ".env/mlflow.env",
+                    include_str!("../../templates/modules/mlflow/mlflow.env.jinja"),
+                ),
+                config_file(
+                    "seed_gateway.py",
+                    "mlflow_seed_gateway",
+                    include_str!("../../templates/modules/mlflow/seed_gateway.py"),
+                ),
+            ],
         ),
     })
 }
@@ -1147,6 +1217,187 @@ impl Module for Headwaters {
 
 fn headwaters() -> Arc<dyn Module> {
     Arc::new(Headwaters::new())
+}
+
+/// The [`omnigent`] knob for running an agent host inside the stack.
+const OMNIGENT_HOST_KNOB: &str = "host";
+/// Where Omnigent serves its whole surface (web UI, `/v1` API, WebSockets, SSE) at the gateway.
+const OMNIGENT_BASE_PATH: &str = "/omnigent";
+/// The port Omnigent's server image listens on.
+const OMNIGENT_PORT: u16 = 8000;
+
+/// `omnigent` — the Omnigent agent platform: a coordinating server (web UI + API) behind the
+/// gateway, and an agent host in the stack that runs the agents.
+///
+/// The host is what makes agents part of the environment. It loads the stack's
+/// container-vantage client env (every selected module's address, through the gateway) and
+/// forwards it to each agent. It gets its models from [`mlflow`]'s AI Gateway, which holds
+/// the provider keys, so the host carries none.
+///
+/// The host runs only while the gateway is open. Under forward-auth the server trusts the
+/// gateway-asserted `Remote-Email`, and a host can't present that identity, so it is dropped;
+/// browsers and laptop hosts still reach the server through the gateway.
+struct Omnigent {
+    id: ModuleId,
+    requires: Vec<ModuleId>,
+    needs: Vec<ResourceDemand>,
+    knobs: Vec<Knob>,
+    provides: Provides,
+    render: RenderSpec,
+}
+
+impl Omnigent {
+    fn new() -> Self {
+        let string_knob = |key: &str, title: &str, default: &str, help: &str| Knob {
+            key: key.into(),
+            title: Some(title.into()),
+            kind: KnobKind::String,
+            default: Some(default.into()),
+            required: false,
+            help: Some(help.into()),
+            aliases: vec![],
+        };
+        Omnigent {
+            id: ModuleId::from("omnigent"),
+            // The gateway fronts the server; MLflow's AI Gateway serves the agents' models (and
+            // brings its own relational store and object store through its demands).
+            requires: vec![ModuleId::from("envoy"), ModuleId::from("mlflow")],
+            // The server's state (sessions, agents, hosts) lives in the stack's relational store;
+            // the fragment reads the DSN straight from the resolved connection.
+            needs: vec![ResourceDemand {
+                resource: Role::RELATIONAL_DB.into(),
+                name: "omnigent".into(),
+                provider: None,
+                bind: ConnectionBinding::default(),
+            }],
+            knobs: vec![
+                Knob {
+                    key: OMNIGENT_HOST_KNOB.into(),
+                    title: Some("Run an agent host in the stack".into()),
+                    kind: KnobKind::Bool,
+                    default: Some("true".into()),
+                    required: false,
+                    help: Some(
+                        "Run agents in a host container on the stack's network, with the \
+                         lakehouse's client env and models from MLflow's AI Gateway. Off: \
+                         attach your own host with `omnigent host $OMNIGENT_URL`. Always off \
+                         while the gateway authenticates."
+                            .into(),
+                    ),
+                    aliases: vec![],
+                },
+                string_knob(
+                    "model",
+                    "Agent model",
+                    "claude-opus-5-5",
+                    "The model agents use by default: an AI Gateway endpoint name (see \
+                     mlflow.ai_gateway_models).",
+                ),
+                string_knob(
+                    "fast_model",
+                    "Background model",
+                    "claude-haiku-5-5",
+                    "The model harnesses use for quick background calls: an AI Gateway \
+                     endpoint name.",
+                ),
+                image_knob(
+                    "image",
+                    "Omnigent server image",
+                    images::OMNIGENT_SERVER,
+                    "OMNIGENT_IMAGE",
+                ),
+                image_knob(
+                    "host_image",
+                    "Omnigent host image",
+                    images::OMNIGENT_HOST,
+                    "OMNIGENT_HOST_IMAGE",
+                ),
+            ],
+            // Where a client (`omnigent run --server`, `omnigent host`) reaches the server: its
+            // whole surface sits under the base path.
+            provides: Provides {
+                client_env: [(
+                    "OMNIGENT_URL".to_string(),
+                    ClientValue::endpoint("omnigent", "ui", UrlPart::Full),
+                )]
+                .into(),
+                ..Provides::default()
+            },
+            render: template_with_files(
+                include_str!("../../templates/modules/omnigent/compose.yaml.jinja"),
+                vec![sensitive_file(
+                    ".env/omnigent.env",
+                    include_str!("../../templates/modules/omnigent/omnigent.env.jinja"),
+                )],
+            ),
+        }
+    }
+}
+
+impl Module for Omnigent {
+    fn id(&self) -> &ModuleId {
+        &self.id
+    }
+    fn display_name(&self) -> Option<&str> {
+        Some("Omnigent")
+    }
+    fn summary(&self) -> Option<&str> {
+        Some("AI-agent platform; agents run in the stack, models via MLflow's AI Gateway.")
+    }
+    fn category(&self) -> Option<&str> {
+        Some("agents")
+    }
+    fn provider_of(&self) -> Option<&str> {
+        Some(Role::AGENT_PLATFORM)
+    }
+    fn requires(&self) -> &[ModuleId] {
+        &self.requires
+    }
+    fn needs(&self) -> &[ResourceDemand] {
+        &self.needs
+    }
+    fn knobs(&self) -> &[Knob] {
+        &self.knobs
+    }
+    fn provides(&self) -> &Provides {
+        &self.provides
+    }
+    fn render(&self) -> &RenderSpec {
+        &self.render
+    }
+    fn services(&self, knobs: &ResolvedKnobs) -> Vec<ServiceSpec> {
+        self.services_in(knobs, &StackFacts::default())
+    }
+    fn services_in(&self, knobs: &ResolvedKnobs, stack: &StackFacts) -> Vec<ServiceSpec> {
+        // The server relocates its whole surface under the base path (told via
+        // `OMNIGENT_WEB_BASE_PATH`), so one prefixable endpoint fronts the UI, the `/v1` API and
+        // its WebSockets. Session views stream over SSE, so the route carries no timeout.
+        let mut services = vec![ServiceSpec {
+            name: "omnigent".into(),
+            role: Role::agent_platform(),
+            placement: container("omnigent"),
+            base_path: OMNIGENT_BASE_PATH.into(),
+            endpoints: vec![Endpoint::ui_prefixable("ui", OMNIGENT_PORT, None).streaming()],
+            // Demand-driven: the planner injects the chosen relational-db provider's gate.
+            depends_on: vec![],
+        }];
+        if knobs.bool(OMNIGENT_HOST_KNOB, true) && !stack.gateway_auth {
+            // The host dials the server directly on the compose network (it serves nothing).
+            services.push(ServiceSpec {
+                name: "omnigent-host".into(),
+                role: Role::agent_platform(),
+                placement: container("omnigent-host"),
+                base_path: String::new(),
+                endpoints: vec![],
+                depends_on: vec!["omnigent".into()],
+            });
+        }
+        services
+    }
+}
+
+fn omnigent() -> Arc<dyn Module> {
+    Arc::new(Omnigent::new())
 }
 
 /// `opa` — Open Policy Agent as the gateway's authorization engine.
