@@ -115,6 +115,10 @@ pub struct Provides {
     /// [`TlsTrust`](crate::TlsTrust) so consumers can trust that CA.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub impersonated_hosts: Vec<ImpersonatedHost>,
+    /// What a consumer of this provider's resources waits on before it starts, if anything
+    /// (see [`ReadyGate`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ready_gate: Option<ReadyGate>,
     /// The variables a *client* of this module (an app, notebook, or engine) loads to reach
     /// it — keyed by env-var name. Each value is resolved per caller [`Vantage`](crate::Vantage)
     /// against the settled plan, so ports, gateway prefixes and base-path rewrites are always
@@ -384,7 +388,7 @@ impl RenderSpec {
     /// can branch on a demand's typed [`Connection`](crate::Connection)
     /// (e.g. `{% if c.credential.flavour == "s3" %}`) and read plan-resolved values directly.
     ///
-    /// Returns [`RenderError`] when the template fails to compile or render — e.g. a
+    /// Returns [`TemplateError`] when the template fails to compile or render — e.g. a
     /// malformed fragment, or a reference to a field absent from the context (a module
     /// authored as an on-disk `module.yaml` is external input, so this is a recoverable
     /// error the planner surfaces, not a panic).
@@ -392,7 +396,7 @@ impl RenderSpec {
     /// A file whose contents render to nothing but whitespace is dropped, so a template can
     /// make a file conditional (`{% if tls %}…{% endif %}`) without leaving an empty file
     /// and an unused `configs:` declaration behind.
-    pub fn render(&self, ctx: &RenderCtx<'_>) -> Result<RenderOutput, RenderError> {
+    pub fn render(&self, ctx: &RenderCtx<'_>) -> Result<RenderOutput, TemplateError> {
         let RenderSpec { fragment, files } = self;
         let mut env = minijinja::Environment::new();
         // Rendered files are text files: keep the template's final newline (MiniJinja strips
@@ -429,81 +433,65 @@ impl RenderSpec {
                         preserve: f.preserve,
                     })
                 })
-                .collect::<Result<_, RenderError>>()?,
+                .collect::<Result<_, TemplateError>>()?,
         })
     }
 }
 
-/// A [`RenderSpec`] fragment failed to compile or render.
+/// A [`RenderSpec`] template failed to compile or render.
 ///
 /// Carries the templating engine's message. Surfaced (not panicked) because a module can
 /// be authored as an external on-disk `module.yaml`, so a bad template is recoverable
 /// input, not an internal invariant violation.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("rendering module template failed: {0}")]
-pub struct RenderError(pub String);
+pub struct TemplateError(pub String);
 
-/// A compose `depends_on` condition — *what* readiness state of a dependency a service
-/// waits for before it starts.
+/// How far a dependency must get before a service that waits on it may start.
 ///
-/// These are the three Compose-spec long-form conditions. The string each renders to (its
-/// serde value) is exactly the compose token, so a template emits
-/// `condition: {{ dep.condition }}` directly.
+/// Target-neutral: Compose renders a gate as `depends_on: {<service>: {condition:
+/// service_<readiness>}}` (each serde value is the Compose condition's suffix, so a Compose
+/// template writes `condition: service_{{ dep.readiness }}`); another target maps it onto its
+/// own ordering primitive (an init container, a readiness probe, a hook).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DependsCondition {
-    /// `service_started` — the dependency's container has started (the weakest gate).
-    ServiceStarted,
-    /// `service_healthy` — the dependency reports healthy (its healthcheck passes).
-    ServiceHealthy,
-    /// `service_completed_successfully` — the dependency ran to a successful exit (a
-    /// one-shot init job).
-    ServiceCompletedSuccessfully,
+pub enum Readiness {
+    /// The dependency has started (the weakest gate).
+    Started,
+    /// The dependency reports healthy (its health check passes).
+    Healthy,
+    /// The dependency ran to a successful exit (a one-shot init job).
+    CompletedSuccessfully,
 }
 
-impl DependsCondition {
-    /// Parse a compose condition token, returning `None` for an unrecognized value.
-    pub fn parse(s: &str) -> Option<DependsCondition> {
-        match s {
-            "service_started" => Some(DependsCondition::ServiceStarted),
-            "service_healthy" => Some(DependsCondition::ServiceHealthy),
-            "service_completed_successfully" => {
-                Some(DependsCondition::ServiceCompletedSuccessfully)
-            }
-            _ => None,
-        }
-    }
-}
-
-/// One resolved `depends_on` gate a module's render should emit: a compose service to wait
-/// for and the [`DependsCondition`] to wait for it to reach.
+/// A readiness gate: a service to wait for and how far it must get ([`Readiness`]).
 ///
-/// The planner produces these from a consumer's resource demands — for each demand it reads
-/// the *chosen* provider's dependency-gate extra and resolves it into a `DepGate` — and hands
-/// them to the render via
-/// [`RenderCtx::dependencies`]. A template renders its whole `depends_on` block by iterating
-/// them (`{% for dep in dependencies %}{{ dep.service }}: {condition: {{ dep.condition }}}`),
-/// so it never hard-codes which backend's service it waits on.
+/// A resource provider declares one on [`Provides::ready_gate`] — the service its consumers
+/// should wait on (e.g. Postgres' `db` being healthy, or RustFS' one-shot bucket init having
+/// completed). For each of a consumer's demands the planner copies the *chosen* provider's gate
+/// into [`RenderCtx::dependencies`], so a template renders its whole startup-ordering block by
+/// iterating them (`{% for dep in dependencies %}{{ dep.service }}: …`) and never hard-codes
+/// which backend it waits on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DepGate {
-    /// The compose service name to depend on (e.g. `"db"`, `"rustfs-init"`).
+pub struct ReadyGate {
+    /// The service to wait for (e.g. `"db"`, `"rustfs-init"`).
     pub service: String,
-    /// The condition to wait for.
-    pub condition: DependsCondition,
+    /// How far it must get.
+    pub readiness: Readiness,
 }
 
 /// The context a module's render reads: the planner-decided [`InjectedEnv`], the module's
 /// resolved [`knobs`](ResolvedKnobs), the typed [`Connection`](crate::Connection)s for the
-/// module's demands (grouped by role), and the resolved [`DepGate`]s its `depends_on` block
-/// should wait on.
+/// module's demands (grouped by role), and the resolved [`ReadyGate`]s it waits on before
+/// starting.
 ///
 /// A [`RenderSpec`] render gets the whole context as MiniJinja globals:
 /// `env` (planner injections such as `DATA_ROOT` / `BASE_PATH`), `knobs` (user-tunable
 /// config — e.g. `{{ knobs.image }}`, `{{ knobs.auth }}`), `connections` (a
 /// `{role: [connection, …]}` map a template can branch on — e.g.
 /// `{% set obj = connections.object_store.0 %}{% if obj.credential.flavour == "s3" %}`),
-/// `dependencies` (the `[{service, condition}, …]` list a template iterates to write its
-/// `depends_on` block — see [`DepGate`]), and `objects` (the resource *names* this module's
+/// `dependencies` (the `[{service, readiness}, …]` list a template iterates to write its
+/// startup-ordering block — see [`ReadyGate`]), and `objects` (the resource *names* this module's
 /// own role provisions, for a provider's init block to iterate).
 #[derive(Clone, Debug, Serialize)]
 pub struct RenderCtx<'a> {
@@ -519,10 +507,10 @@ pub struct RenderCtx<'a> {
     /// each name it provisions) so its fragment can read e.g.
     /// `connections.object_store.0.credential.connection_string` instead of a `${VAR}`.
     pub connections: BTreeMap<String, Vec<crate::model::connection::Connection>>,
-    /// The resolved `depends_on` gates the module's render should emit, in dependency
+    /// The resolved readiness gates the module waits on before starting, in dependency
     /// (demand) order. Empty for a module with no demands that gate startup.
     #[serde(default)]
-    pub dependencies: Vec<DepGate>,
+    pub dependencies: Vec<ReadyGate>,
     /// The resource *names* this module provisions for its own provided role (e.g. the
     /// buckets/containers an object-store provider must create), deduplicated in dependency
     /// order. A provider's init block iterates these (`{% for o in objects %}`) instead of
@@ -597,16 +585,16 @@ impl<'a> RenderCtx<'a> {
 /// Render one MiniJinja template string against the [`RenderCtx`], reusing `env`.
 ///
 /// Pure and in-memory (no `loader`, no filesystem). A compile or render failure (malformed
-/// source, or a reference to a field absent from `ctx`) is returned as a [`RenderError`]
+/// source, or a reference to a field absent from `ctx`) is returned as a [`TemplateError`]
 /// rather than panicking — a `Template` can come from an external on-disk manifest.
 /// `render_named_str` compiles and renders in one call, so no template name is registered.
 fn render_template(
     env: &mut minijinja::Environment<'_>,
     source: &str,
     ctx: &RenderCtx<'_>,
-) -> Result<String, RenderError> {
+) -> Result<String, TemplateError> {
     env.render_named_str("fragment", source, ctx)
-        .map_err(|e| RenderError(e.to_string()))
+        .map_err(|e| TemplateError(e.to_string()))
 }
 
 /// Stack-wide facts a module's topology may depend on beyond its own knobs, settled by the
@@ -938,12 +926,12 @@ mod tests {
     #[test]
     fn template_iterates_typed_dependencies_into_depends_on() {
         // A template renders its whole `depends_on` block by iterating the typed
-        // `dependencies` the planner resolved — service + condition, no env-var strings.
+        // `dependencies` the planner resolved — service + readiness, no env-var strings.
         let spec = RenderSpec {
             fragment: "depends_on:\n\
                        {%- for dep in dependencies %}\n\
                        \x20 {{ dep.service }}:\n\
-                       \x20   condition: {{ dep.condition }}\n\
+                       \x20   condition: service_{{ dep.readiness }}\n\
                        {%- endfor %}\n"
                 .into(),
             files: vec![],
@@ -955,13 +943,13 @@ mod tests {
             knobs: &empty_knobs,
             connections: BTreeMap::new(),
             dependencies: vec![
-                DepGate {
+                ReadyGate {
                     service: "db".into(),
-                    condition: DependsCondition::ServiceHealthy,
+                    readiness: Readiness::Healthy,
                 },
-                DepGate {
+                ReadyGate {
                     service: "rustfs-init".into(),
-                    condition: DependsCondition::ServiceCompletedSuccessfully,
+                    readiness: Readiness::CompletedSuccessfully,
                 },
             ],
             objects: Vec::new(),
@@ -969,7 +957,7 @@ mod tests {
             tls: None,
         };
         let out = spec.render(&ctx).expect("template renders");
-        // The serde value of each condition is the exact compose token.
+        // Each readiness serializes to the Compose condition's suffix.
         assert!(out.fragment.contains("db:\n    condition: service_healthy"));
         assert!(
             out.fragment
@@ -980,7 +968,7 @@ mod tests {
     #[test]
     fn malformed_template_is_a_recoverable_error_not_a_panic() {
         // A `Template` can come from an external on-disk manifest, so a bad fragment is a
-        // returned `RenderError`, never a panic.
+        // returned `TemplateError`, never a panic.
         let bad_syntax = RenderSpec {
             fragment: "{% if %}".into(), // unparsable
             files: vec![],
