@@ -2,9 +2,8 @@
 //!
 //! These are the common local-Lakehouse modules — a gateway, a relational store, an
 //! object store, experiment tracking (with an AI Gateway), a data catalog, a query engine,
-//! a graph engine, tracing, an agent platform, and the Databricks app-runtime contract — most of them
-//! transcribed from trestle's `local-stack-*` components. They are the corpus the planner
-//! is validated against:
+//! a graph engine, tracing, and an agent platform — most of them transcribed from trestle's
+//! `local-stack-*` components. They are the corpus the planner is validated against:
 //! planning the default selection must re-derive the routes and materialize the
 //! artifacts these components ship today (see the crate's golden tests).
 //!
@@ -140,8 +139,7 @@ pub fn baseline_catalog() -> Catalog {
         marimo(),
         puppygraph(),
         opa(),
-        databricks_emulator_env(),
-    ] as [Arc<dyn Module>; 14])
+    ] as [Arc<dyn Module>; 13])
     .with_default_provider(Role::OBJECT_STORE, "rustfs")
     // No coordinate contracts: a provider vends a typed `Connection`, whose variant fields
     // are all mandatory, so completeness is a compile-time guarantee rather than a runtime
@@ -271,7 +269,7 @@ fn envoy() -> Arc<dyn Module> {
     let provides = Provides::default();
     Arc::new(DataModule {
         id: ModuleId::from("envoy"),
-        display_name: Some("Envoy gateway".into()),
+        display_name: Some("Envoy".into()),
         summary: Some("Single-port gateway, Databricks-shaped URL rewrites.".into()),
         category: Some("gateway".into()),
         provider_of: Some(Role::GATEWAY.into()),
@@ -588,7 +586,7 @@ fn rustfs() -> Arc<dyn Module> {
     ];
     Arc::new(DataModule {
         id: ModuleId::from("rustfs"),
-        display_name: Some("RustFS (local S3 + STS)".into()),
+        display_name: Some("RustFS".into()),
         summary: Some(
             "Self-hosted S3-compatible object store with STS; answers the AWS S3/STS \
              hostnames in-network."
@@ -692,7 +690,7 @@ fn azurite() -> Arc<dyn Module> {
 
     Arc::new(DataModule {
         id: ModuleId::from("azurite"),
-        display_name: Some("Azurite (local Azure Blob)".into()),
+        display_name: Some("Azurite".into()),
         summary: Some("Azure Blob emulator; object store with Azure-shaped wiring.".into()),
         category: Some("storage".into()),
         provider_of: Some(Role::OBJECT_STORE.into()),
@@ -773,7 +771,7 @@ fn mlflow() -> Arc<dyn Module> {
 
     Arc::new(DataModule {
         id: ModuleId::from("mlflow"),
-        display_name: Some("MLflow tracking".into()),
+        display_name: Some("MLflow".into()),
         summary: Some(
             "Experiment + model tracking and an AI Gateway; Databricks-shaped URLs.".into(),
         ),
@@ -903,7 +901,7 @@ fn unity_catalog() -> Arc<dyn Module> {
     Arc::new(DataModule {
         id: ModuleId::from("unity-catalog"),
         display_name: Some("Unity Catalog".into()),
-        summary: Some("Databricks UC server; Databricks-shaped REST API.".into()),
+        summary: Some("Open-source Unity Catalog server; Databricks-shaped REST API.".into()),
         category: Some("catalog".into()),
         provider_of: Some(Role::DATA_CATALOG.into()),
         // Only the gateway is a hard module dependency; Postgres + S3 arrive as demands.
@@ -1001,7 +999,7 @@ fn jaeger() -> Arc<dyn Module> {
     );
     Arc::new(DataModule {
         id: ModuleId::from("jaeger"),
-        display_name: Some("Jaeger tracing".into()),
+        display_name: Some("Jaeger".into()),
         summary: Some("All-in-one OTLP tracing backend with the Jaeger UI.".into()),
         category: Some("observability".into()),
         provider_of: Some(Role::TRACING.into()),
@@ -1173,13 +1171,13 @@ impl Module for Headwaters {
         &self.id
     }
     fn display_name(&self) -> Option<&str> {
-        Some("Headwaters lineage")
+        Some("Headwaters")
     }
     fn summary(&self) -> Option<&str> {
         Some("OpenLineage lineage service; Databricks-style API + optional UI.")
     }
     fn category(&self) -> Option<&str> {
-        Some("observability")
+        Some("lineage")
     }
     fn provider_of(&self) -> Option<&str> {
         Some(Role::LINEAGE)
@@ -1448,7 +1446,7 @@ fn marimo() -> Arc<dyn Module> {
     provides.python.requires_workspace = true;
     Arc::new(DataModule {
         id: ModuleId::from("marimo"),
-        display_name: Some("marimo notebooks".into()),
+        display_name: Some("marimo".into()),
         summary: Some("Hosted marimo editor for the client workspace's notebooks.".into()),
         category: Some("notebooks".into()),
         provider_of: Some(Role::NOTEBOOKS.into()),
@@ -1722,46 +1720,6 @@ fn opa() -> Arc<dyn Module> {
             ],
         )
         .for_compose(),
-    })
-}
-
-/// `databricks-emulator-env` — env-only module: the `DATABRICKS_*` contract Databricks
-/// Apps inject, so app code reads the same names locally. No services, no fragment.
-fn databricks_emulator_env() -> Arc<dyn Module> {
-    let mut provides = Provides::default();
-    // The workspace and app URLs are the gateway origin, resolved per client vantage. No
-    // `DATABRICKS_TOKEN`: the client env is credential-free, and with gateway auth on a token
-    // is the user's own to supply.
-    for k in ["DATABRICKS_HOST", "DATABRICKS_APP_URL"] {
-        provides
-            .client_env
-            .insert(k.into(), ClientValue::GatewayOrigin);
-    }
-    for (k, v) in [
-        ("LOCAL_DEV", "1"),
-        ("DATABRICKS_CLIENT_ID", "local-dev"),
-        ("DATABRICKS_WORKSPACE_ID", "local"),
-        ("DATABRICKS_APP_PORT", "8080"),
-        ("DATABRICKS_FORWARDED_USER", "local-developer@example.com"),
-        ("DATABRICKS_FORWARDED_EMAIL", "local-developer@example.com"),
-    ] {
-        provides
-            .client_env
-            .insert(k.into(), ClientValue::literal(v));
-    }
-    Arc::new(DataModule {
-        id: ModuleId::from("databricks-emulator-env"),
-        display_name: Some("Databricks app runtime contract".into()),
-        summary: Some("DATABRICKS_HOST / app URL / forwarded-user env vars apps expect.".into()),
-        category: Some("app_runtime".into()),
-        provider_of: Some("databricks_apps_contract".into()),
-        requires: vec![],
-        conflicts_with: vec![],
-        needs: vec![],
-        service_specs: vec![],
-        provides,
-        knobs: vec![],
-        renders: RenderSpec::default().for_compose(),
     })
 }
 
