@@ -387,7 +387,7 @@ fn image_knob(key: &str, title: &str, default: &str, legacy: &str) -> Knob {
 /// Every environment runs it: the planner adds the `gateway`-role provider whether or not it
 /// was selected. Sign-in and policy are [`GatewaySettings`](crate::GatewaySettings), realized
 /// in the planner and the Envoy renderer (they pull in `authelia` / `opa` and emit the
-/// `ext_authz` filters), so its only knobs are its images.
+/// `ext_authz` filters), so its knobs are its images and whether the admin port is published.
 fn envoy() -> Arc<dyn Module> {
     let provides = Provides {
         // Mints the local CA and leaf certificate when a module impersonates a public host.
@@ -421,6 +421,20 @@ fn envoy() -> Arc<dyn Module> {
                 images::CERTS,
                 "GATEWAY_CERTS_IMAGE",
             ),
+            Knob {
+                key: "publish_admin".into(),
+                title: Some("Publish the admin port".into()),
+                kind: KnobKind::Bool,
+                default: Some("true".into()),
+                required: false,
+                help: Some(
+                    "Publish Envoy's admin endpoint (`gateway_admin_port`) on the host. The \
+                     gateway still serves it in-network when off."
+                        .into(),
+                ),
+                aliases: vec![],
+                advanced: true,
+            },
         ],
         // The certificate script renders only when the gateway emulates public hostnames
         // (`tls` is set); otherwise it is empty and dropped.
@@ -706,11 +720,15 @@ fn rustfs() -> Arc<dyn Module> {
         host: host.into(),
         service: "sts-shim".into(),
         port: 8080,
+        response_headers: BTreeMap::new(),
     };
     let s3 = |host: &str| ImpersonatedHost {
         host: host.into(),
         service: "rustfs".into(),
         port: 9000,
+        // UC 0.7 reads a bucket's region from this header before it vends Iceberg table
+        // credentials; real S3 sends it on every response, RustFS doesn't.
+        response_headers: [("x-amz-bucket-region".into(), "us-east-1".into())].into(),
     };
     provides.impersonated_hosts = vec![
         sts("sts.amazonaws.com"),
@@ -1325,6 +1343,20 @@ fn unity_catalog() -> Arc<dyn Module> {
                 aliases: vec![],
                 advanced: true,
             },
+            Knob {
+                key: "bucket".into(),
+                title: Some("Bucket".into()),
+                kind: KnobKind::String,
+                default: Some("unity".into()),
+                required: false,
+                help: Some(
+                    "The bucket UC's object-store demand provisions. Other modules that demand \
+                     `unity` (PuppyGraph) get a separate bucket when this changes."
+                        .into(),
+                ),
+                aliases: vec![],
+                advanced: true,
+            },
             optional_string_knob(
                 "master_role_arn",
                 "Master role ARN",
@@ -1465,9 +1497,23 @@ impl Module for UnityCatalog {
     }
     fn needs_in(&self, knobs: &ResolvedKnobs) -> Cow<'_, [ResourceDemand]> {
         if Self::embedded(knobs) {
-            Cow::Borrowed(&[])
-        } else {
-            Cow::Borrowed(self.0.needs())
+            return Cow::Borrowed(&[]);
+        }
+        match knobs.get("bucket") {
+            Some(bucket) if bucket != "unity" => Cow::Owned(
+                self.0
+                    .needs()
+                    .iter()
+                    .cloned()
+                    .map(|mut demand| {
+                        if demand.resource == Role::OBJECT_STORE {
+                            demand.name = bucket.into();
+                        }
+                        demand
+                    })
+                    .collect(),
+            ),
+            _ => Cow::Borrowed(self.0.needs()),
         }
     }
     fn knobs(&self) -> &[Knob] {

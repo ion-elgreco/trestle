@@ -9,10 +9,10 @@
   "catalog": {
     "baseline": "olai-stack-topology@test",
     "manifests": [],
-    "digest": "sha256:5dce43b9894df356bc992068e9ffa17a6dbbaa140b535dd45775a2f28134c136"
+    "digest": "sha256:dc8b2ea27298ea3230b32f129d0bbc85a4c627ad64763ca41d64a5795279288e"
   },
   "recipe": {
-    "digest": "sha256:ac4a6c407f9e72a28d26f884e39eb977356532a14879511aa04ba7b520c2fa20"
+    "digest": "sha256:daee8d4d7c6e5b62955d8ac13b55e8c4da15173c22059b534e42642f48ba40e1"
   },
   "context": {
     "env_name": "uc-docs",
@@ -147,15 +147,10 @@
         "provisions": [
           {
             "resource": "object_store",
-            "name": "unity",
+            "name": "uc-docs",
             "consumers": [
               "unity-catalog"
             ]
-          },
-          {
-            "resource": "object_store",
-            "name": "uc-docs",
-            "consumers": []
           }
         ],
         "resource_nouns": [
@@ -232,7 +227,7 @@
         "role": "object_store",
         "protocol": "S3",
         "resources": [
-          "unity"
+          "uc-docs"
         ]
       }
     ]
@@ -432,9 +427,7 @@
         "sts.amazonaws.com",
         "sts.us-east-1.amazonaws.com",
         "uc-docs.s3.amazonaws.com",
-        "uc-docs.s3.us-east-1.amazonaws.com",
-        "unity.s3.amazonaws.com",
-        "unity.s3.us-east-1.amazonaws.com"
+        "uc-docs.s3.us-east-1.amazonaws.com"
       ],
       "virtual_hosts": [
         {
@@ -449,9 +442,7 @@
           "hosts": [
             "s3.amazonaws.com",
             "s3.us-east-1.amazonaws.com",
-            "unity.s3.amazonaws.com",
             "uc-docs.s3.amazonaws.com",
-            "unity.s3.us-east-1.amazonaws.com",
             "uc-docs.s3.us-east-1.amazonaws.com"
           ]
         }
