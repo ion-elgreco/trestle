@@ -56,8 +56,8 @@ use super::Catalog;
 use crate::catalog::images;
 use crate::catalog::module::{
     ClientNotebook, ClientValue, ConnectionBinding, DataModule, HelperService, ImpersonatedHost,
-    Knob, KnobKind, Module, ModuleId, Provides, PythonClient, Readiness, ReadyGate, RenderSpec,
-    ResolvedKnobs, ResourceDemand, StackFacts, UrlPart,
+    Knob, KnobKind, KnobRejection, Module, ModuleId, Provides, PythonClient, Readiness, ReadyGate,
+    RenderSpec, ResolvedKnobs, ResourceDemand, StackFacts, UrlPart,
 };
 use crate::model::connection::{
     Connection, ConnectionField, ConnectionTemplate, ObjectStoreCredential,
@@ -115,6 +115,12 @@ pub const GATEWAY_AUTH_VAR: &str = "GATEWAY_AUTH";
 /// comma-joined), so a module that launches client processes (an agent runner) can forward
 /// exactly the stack's contract to them without naming other modules' variables.
 pub const CLIENT_ENV_KEYS_VAR: &str = "CLIENT_ENV_KEYS";
+
+/// The prefix of the render-only variables carrying a module's dedicated host listener ports:
+/// `HOST_PORT_<ENDPOINT>` (the endpoint id upper-cased, e.g. `HOST_PORT_S3`) for each of its
+/// gatewayed endpoints the gateway publishes on its own port, which is the same on the host and
+/// in the network. A store that must recognise its host-side name (`localhost:<port>`) reads it.
+pub const HOST_PORT_VAR_PREFIX: &str = "HOST_PORT_";
 
 /// The default value injected for [`DATA_ROOT_VAR`]: `./.data`, relative to the compose
 /// file's directory — matching where the fragments persisted data before the root was
@@ -714,7 +720,7 @@ fn rustfs() -> Arc<dyn Module> {
         s3("{name}.s3.amazonaws.com"),
         s3("{name}.s3.us-east-1.amazonaws.com"),
     ];
-    Arc::new(DataModule {
+    Arc::new(Rustfs(DataModule {
         id: ModuleId::from("rustfs"),
         model: Some("rustfs".into()),
         display_name: Some("RustFS".into()),
@@ -753,6 +759,21 @@ fn rustfs() -> Arc<dyn Module> {
                 images::STS_SHIM,
                 "STS_SHIM_IMAGE",
             ),
+            Knob {
+                key: "generic_endpoint_env".into(),
+                title: Some("Generic endpoint variables".into()),
+                kind: KnobKind::Bool,
+                default: Some("false".into()),
+                required: false,
+                help: Some(
+                    "Also give clients `AWS_ENDPOINT_URL` and `AWS_ALLOW_HTTP=true`, for \
+                     tools that don't read `AWS_ENDPOINT_URL_S3`. Off by default: a global \
+                     endpoint also redirects every AWS SDK client's STS calls."
+                        .into(),
+                ),
+                aliases: vec![],
+                advanced: true,
+            },
         ],
         renders: template_with_files(
             include_str!("../../templates/modules/rustfs/compose.yaml.jinja"),
@@ -766,7 +787,69 @@ fn rustfs() -> Arc<dyn Module> {
             ],
         )
         .for_compose(),
-    })
+    }))
+}
+
+/// RustFS, whose `generic_endpoint_env` knob adds the generic AWS endpoint variables to the
+/// client environment.
+struct Rustfs(DataModule);
+
+impl Module for Rustfs {
+    fn id(&self) -> &ModuleId {
+        self.0.id()
+    }
+    fn model(&self) -> Option<&str> {
+        self.0.model()
+    }
+    fn display_name(&self) -> Option<&str> {
+        self.0.display_name()
+    }
+    fn summary(&self) -> Option<&str> {
+        self.0.summary()
+    }
+    fn category(&self) -> Option<&str> {
+        self.0.category()
+    }
+    fn provider_of(&self) -> Option<&str> {
+        self.0.provider_of()
+    }
+    fn requires(&self) -> &[ModuleId] {
+        self.0.requires()
+    }
+    fn conflicts_with(&self) -> &[ModuleId] {
+        self.0.conflicts_with()
+    }
+    fn needs(&self) -> &[ResourceDemand] {
+        self.0.needs()
+    }
+    fn knobs(&self) -> &[Knob] {
+        self.0.knobs()
+    }
+    fn provides(&self) -> &Provides {
+        self.0.provides()
+    }
+    fn render_for(&self, target: &TargetId) -> Option<&RenderSpec> {
+        self.0.render_for(target)
+    }
+    fn services(&self, knobs: &ResolvedKnobs) -> Vec<ServiceSpec> {
+        self.0.services(knobs)
+    }
+    fn client_env_in(
+        &self,
+        knobs: &ResolvedKnobs,
+        _stack: &StackFacts,
+    ) -> Cow<'_, BTreeMap<String, ClientValue>> {
+        if knobs.get("generic_endpoint_env") != Some("true") {
+            return Cow::Borrowed(&self.0.provides.client_env);
+        }
+        let mut env = self.0.provides.client_env.clone();
+        env.insert(
+            "AWS_ENDPOINT_URL".into(),
+            ClientValue::endpoint("rustfs", "s3", UrlPart::Full),
+        );
+        env.insert("AWS_ALLOW_HTTP".into(), ClientValue::literal("true"));
+        Cow::Owned(env)
+    }
 }
 
 /// The env file every RustFS service loads: the server's root keys, the same keys under the
@@ -1102,7 +1185,11 @@ impl Module for Mlflow {
     fn services(&self, knobs: &ResolvedKnobs) -> Vec<ServiceSpec> {
         self.0.services(knobs)
     }
-    fn client_env_in(&self, stack: &StackFacts) -> Cow<'_, BTreeMap<String, ClientValue>> {
+    fn client_env_in(
+        &self,
+        _knobs: &ResolvedKnobs,
+        stack: &StackFacts,
+    ) -> Cow<'_, BTreeMap<String, ClientValue>> {
         if !stack.has("unity-catalog") {
             return Cow::Borrowed(&self.0.provides.client_env);
         }
@@ -1126,26 +1213,33 @@ impl Module for Mlflow {
 /// Unity Catalog's compose service, and the port its REST API listens on in the container.
 /// Shared with consumers that call UC directly on the compose network (see [`puppygraph`]).
 const UNITY_CATALOG_SERVICE: &str = "unitycatalog";
+/// The helper that registers the stack's object stores in Unity Catalog's database, then
+/// stays up (healthy) so `up --wait` covers it.
+const UNITY_CATALOG_STORAGE: &str = "unitycatalog-storage";
 const UNITY_CATALOG_PORT: u16 = 8080;
 
 /// `unity-catalog` — the data catalog.
 /// Databricks-shaped path at root, so `/api/2.1/unity-catalog` fronts with no rewrite;
 /// a second `/unity-catalog` alias points at the same service.
 fn unity_catalog() -> Arc<dyn Module> {
-    let mut provides = Provides::default();
+    let mut provides = Provides {
+        helpers: vec![HelperService::sidecar(UNITY_CATALOG_STORAGE)],
+        ..Provides::default()
+    };
     provides.client_env.insert(
         "UNITY_CATALOG_URL".into(),
         ClientValue::endpoint(UNITY_CATALOG_SERVICE, "rest", UrlPart::Full),
     );
-    // UC reads its storage config from a rendered `server.properties` and its metadata-store
-    // config from a rendered `hibernate.properties` (both mounted as secrets: they carry keys
-    // and a password). They read the typed connections directly, so this module injects no env
-    // vars of its own. The S3 entries are what you'd write for
-    // real AWS — no endpoint override, which UC doesn't support — so the store must answer the
-    // AWS hostnames itself (see `rustfs`), and the fragment trusts the gateway's local CA when
-    // the connection carries a `tls_trust`.
+    // UC reads its master AWS identity from a rendered `server.properties` and its
+    // metadata-store config from a rendered `hibernate.properties` (both mounted as secrets:
+    // they carry keys and a password). Storage is registered in UC's database instead: with
+    // `storage_bootstrap = api`, the `unitycatalog-storage` helper creates a storage credential and
+    // an external location per S3 bucket. The templates read the typed connections directly,
+    // so this module injects no env vars of its own. There is no endpoint override, which UC
+    // doesn't support, so the store must answer the AWS hostnames itself (see `rustfs`), and
+    // the fragment trusts the gateway's local CA when the connection carries a `tls_trust`.
 
-    Arc::new(DataModule {
+    Arc::new(UnityCatalog(DataModule {
         id: ModuleId::from("unity-catalog"),
         model: Some("unityCatalogOSS".into()),
         display_name: Some("Unity Catalog".into()),
@@ -1201,12 +1295,81 @@ fn unity_catalog() -> Arc<dyn Module> {
             depends_on: vec![],
         }],
         provides,
-        knobs: vec![image_knob(
-            "image",
-            "Unity Catalog image",
-            images::UNITY_CATALOG,
-            "UC_IMAGE",
-        )],
+        knobs: vec![
+            image_knob(
+                "image",
+                "Unity Catalog image",
+                images::UNITY_CATALOG,
+                "UC_IMAGE",
+            ),
+            image_knob(
+                "storage_image",
+                "Unity Catalog storage registration image",
+                images::UNITY_CATALOG_STORAGE,
+                "UC_STORAGE_IMAGE",
+            ),
+            Knob {
+                key: "storage_bootstrap".into(),
+                title: Some("Storage registration".into()),
+                kind: KnobKind::Enum {
+                    options: vec!["api".into(), "none".into()],
+                },
+                default: Some("api".into()),
+                required: false,
+                help: Some(
+                    "`api` registers a storage credential and an external location per S3 \
+                     bucket through UC's API once the server is up. `none` leaves storage \
+                     unregistered, for docs and tests that register it themselves."
+                        .into(),
+                ),
+                aliases: vec![],
+                advanced: true,
+            },
+            optional_string_knob(
+                "master_role_arn",
+                "Master role ARN",
+                "The IAM role UC reports as its own identity (`aws.masterRoleArn`), which a \
+                 storage role's trust policy names. Defaults to the object store's role.",
+            ),
+            optional_string_knob(
+                "default_catalog",
+                "Default catalog",
+                "Also create this catalog, with managed storage under the first registered \
+                 bucket. Needs `storage_bootstrap = api`.",
+            ),
+            Knob {
+                key: "embedded_metadata".into(),
+                title: Some("Embedded metadata".into()),
+                kind: KnobKind::Bool,
+                default: Some("false".into()),
+                required: false,
+                help: Some(
+                    "Keep metadata in the server's own H2 file and store data on local paths, \
+                     so the stack runs no relational or object store. Metadata is lost with \
+                     the container."
+                        .into(),
+                ),
+                aliases: vec![],
+                advanced: false,
+            },
+            optional_string_knob(
+                "container_name",
+                "Container name",
+                "A fixed Docker container name, for `docker exec <name> ...` instructions.",
+            ),
+            optional_string_knob(
+                "extra_mounts",
+                "Extra mounts",
+                "More volumes for the server, `;`-separated, each in Compose short syntax \
+                 (`source:target[:mode]`). Variable interpolation is passed through.",
+            ),
+            optional_string_knob(
+                "build",
+                "Build context",
+                "Build the server image from this directory (relative to the rendered \
+                 compose.yaml) and tag it with the `image` knob.",
+            ),
+        ],
         renders: template_with_files(
             include_str!("../../templates/modules/unity-catalog/compose.yaml.jinja"),
             vec![
@@ -1224,10 +1387,183 @@ fn unity_catalog() -> Arc<dyn Module> {
                         "../../templates/modules/unity-catalog/hibernate.properties.jinja"
                     ),
                 ),
+                // What `unitycatalog-storage` registers (no secrets: names, URLs, role ARNs).
+                config_file(
+                    "storage.txt",
+                    "unitycatalog_storage",
+                    include_str!("../../templates/modules/unity-catalog/storage.txt.jinja"),
+                ),
+                config_file(
+                    "bootstrap_storage.py",
+                    "unitycatalog_bootstrap_storage",
+                    include_str!(
+                        "../../templates/modules/unity-catalog/bootstrap_storage.py.jinja"
+                    ),
+                ),
             ],
         )
         .for_compose(),
-    })
+    }))
+}
+
+/// An optional, advanced string knob with no default.
+fn optional_string_knob(key: &str, title: &str, help: &str) -> Knob {
+    Knob {
+        key: key.into(),
+        title: Some(title.into()),
+        kind: KnobKind::String,
+        default: None,
+        required: false,
+        help: Some(help.into()),
+        aliases: vec![],
+        advanced: true,
+    }
+}
+
+/// Unity Catalog, with knobs that change what it needs: `embedded_metadata` keeps metadata in
+/// the server's H2 file and data on local paths, so it demands no relational or object store.
+struct UnityCatalog(DataModule);
+
+impl UnityCatalog {
+    fn embedded(knobs: &ResolvedKnobs) -> bool {
+        knobs.get("embedded_metadata") == Some("true")
+    }
+
+    /// Whether `unitycatalog-storage` runs: an object store to register, and registration on.
+    fn registers_storage(knobs: &ResolvedKnobs) -> bool {
+        !Self::embedded(knobs) && knobs.get("storage_bootstrap") == Some("api")
+    }
+}
+
+impl Module for UnityCatalog {
+    fn id(&self) -> &ModuleId {
+        self.0.id()
+    }
+    fn model(&self) -> Option<&str> {
+        self.0.model()
+    }
+    fn display_name(&self) -> Option<&str> {
+        self.0.display_name()
+    }
+    fn summary(&self) -> Option<&str> {
+        self.0.summary()
+    }
+    fn category(&self) -> Option<&str> {
+        self.0.category()
+    }
+    fn provider_of(&self) -> Option<&str> {
+        self.0.provider_of()
+    }
+    fn requires(&self) -> &[ModuleId] {
+        self.0.requires()
+    }
+    fn conflicts_with(&self) -> &[ModuleId] {
+        self.0.conflicts_with()
+    }
+    fn needs(&self) -> &[ResourceDemand] {
+        self.0.needs()
+    }
+    fn needs_in(&self, knobs: &ResolvedKnobs) -> Cow<'_, [ResourceDemand]> {
+        if Self::embedded(knobs) {
+            Cow::Borrowed(&[])
+        } else {
+            Cow::Borrowed(self.0.needs())
+        }
+    }
+    fn knobs(&self) -> &[Knob] {
+        self.0.knobs()
+    }
+    fn check_knobs(&self, knobs: &ResolvedKnobs) -> Result<(), KnobRejection> {
+        if let Some(name) = knobs.get("container_name") {
+            let mut chars = name.chars();
+            let valid = chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+                && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+            if !valid {
+                return Err(KnobRejection::new(
+                    "container_name",
+                    "must start with a letter or digit and use only letters, digits, `_`, `.`, `-`",
+                ));
+            }
+        }
+        if let Some(mounts) = knobs.get("extra_mounts") {
+            for mount in mounts.split(';').map(str::trim) {
+                if mount.is_empty() || !mount.contains(':') {
+                    return Err(KnobRejection::new(
+                        "extra_mounts",
+                        "needs `;`-separated `source:target[:mode]` entries",
+                    ));
+                }
+                if mount.contains(['"', '\'', '\n', '\r']) {
+                    return Err(KnobRejection::new(
+                        "extra_mounts",
+                        "can't contain quotes or line breaks",
+                    ));
+                }
+            }
+        }
+        if let Some(arn) = knobs.get("master_role_arn")
+            && !(arn.starts_with("arn:")
+                && arn.contains(":role/")
+                && !arn.contains(char::is_whitespace))
+        {
+            return Err(KnobRejection::new(
+                "master_role_arn",
+                "must be an IAM role ARN (`arn:aws:iam::<account>:role/<name>`)",
+            ));
+        }
+        if let Some(catalog) = knobs.get("default_catalog") {
+            let mut chars = catalog.chars();
+            let valid = chars
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !valid {
+                return Err(KnobRejection::new(
+                    "default_catalog",
+                    "must be letters, digits, and `_`, not starting with a digit",
+                ));
+            }
+            if !Self::registers_storage(knobs) {
+                return Err(KnobRejection::new(
+                    "default_catalog",
+                    "needs `storage_bootstrap = api` and an object store \
+                     (not `embedded_metadata`)",
+                ));
+            }
+        }
+        if let Some(context) = knobs.get("build") {
+            let path = std::path::Path::new(context);
+            let escapes = path
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)));
+            if context.trim().is_empty()
+                || escapes
+                || context.contains(['"', '\'', '\n', '\r', '\\'])
+            {
+                return Err(KnobRejection::new(
+                    "build",
+                    "must be a relative path inside the render root (no `..`, `/`, or `.` prefix)",
+                ));
+            }
+        }
+        Ok(())
+    }
+    fn provides(&self) -> &Provides {
+        self.0.provides()
+    }
+    fn helpers_in(&self, knobs: &ResolvedKnobs) -> Cow<'_, [HelperService]> {
+        if Self::registers_storage(knobs) {
+            Cow::Borrowed(&self.0.provides().helpers)
+        } else {
+            Cow::Borrowed(&[])
+        }
+    }
+    fn render_for(&self, target: &TargetId) -> Option<&RenderSpec> {
+        self.0.render_for(target)
+    }
+    fn services(&self, knobs: &ResolvedKnobs) -> Vec<ServiceSpec> {
+        self.0.services(knobs)
+    }
 }
 
 /// `jaeger` — all-in-one OTLP tracing backend, UI fronted at `/jaeger`.

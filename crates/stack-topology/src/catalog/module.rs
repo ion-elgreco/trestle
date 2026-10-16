@@ -183,6 +183,25 @@ impl HelperService {
     }
 }
 
+/// Why [`Module::check_knobs`] rejected a resolved knob set.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KnobRejection {
+    /// The knob at fault.
+    pub key: String,
+    /// What is wrong with its value, phrased to follow the knob name.
+    pub reason: String,
+}
+
+impl KnobRejection {
+    /// A rejection of knob `key` because `reason`.
+    pub fn new(key: &str, reason: impl Into<String>) -> Self {
+        KnobRejection {
+            key: key.into(),
+            reason: reason.into(),
+        }
+    }
+}
+
 /// The kind of a [`HelperService`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -904,9 +923,22 @@ pub trait Module: Send + Sync {
     fn needs(&self) -> &[ResourceDemand] {
         &[]
     }
+    /// The resources this module needs given its resolved `knobs` — what the planner reads.
+    /// Defaults to [`needs`](Module::needs); a module overrides it only when a knob changes
+    /// which resources it needs (e.g. an embedded store that replaces a demanded one).
+    fn needs_in(&self, knobs: &ResolvedKnobs) -> Cow<'_, [ResourceDemand]> {
+        let _ = knobs;
+        Cow::Borrowed(self.needs())
+    }
     /// User-tunable config knobs this module exposes.
     fn knobs(&self) -> &[Knob] {
         &[]
+    }
+    /// Checks the resolved `knobs` beyond what each knob's [`KnobKind`] expresses: a value's
+    /// syntax, or two knobs that exclude each other. The planner runs it once knobs resolve.
+    fn check_knobs(&self, knobs: &ResolvedKnobs) -> Result<(), KnobRejection> {
+        let _ = knobs;
+        Ok(())
     }
     /// Non-routing declarative contributions (resource kinds it provisions, ports, env vars,
     /// extras).
@@ -932,13 +964,23 @@ pub trait Module: Send + Sync {
         let _ = stack;
         self.services(knobs)
     }
-    /// The client-environment entries this module contributes to a stack with the given
-    /// [`StackFacts`] — what the planner resolves. Defaults to
-    /// [`Provides::client_env`]; a module overrides it only when a stack-wide fact (e.g. an
-    /// optional partner module being present) changes what clients should load.
-    fn client_env_in(&self, stack: &StackFacts) -> Cow<'_, BTreeMap<String, ClientValue>> {
-        let _ = stack;
+    /// The client-environment entries this module contributes, given its resolved `knobs`, to
+    /// a stack with the given [`StackFacts`] — what the planner resolves. Defaults to
+    /// [`Provides::client_env`]; a module overrides it only when a knob or a stack-wide fact
+    /// (e.g. an optional partner module being present) changes what clients should load.
+    fn client_env_in(
+        &self,
+        knobs: &ResolvedKnobs,
+        stack: &StackFacts,
+    ) -> Cow<'_, BTreeMap<String, ClientValue>> {
+        let _ = (knobs, stack);
         Cow::Borrowed(&self.provides().client_env)
+    }
+    /// The helper containers this module renders with the resolved `knobs`. Defaults to
+    /// [`Provides::helpers`]; a module overrides it when a knob turns a helper off.
+    fn helpers_in(&self, knobs: &ResolvedKnobs) -> Cow<'_, [HelperService]> {
+        let _ = knobs;
+        Cow::Borrowed(&self.provides().helpers)
     }
     /// Look up one of this module's services by `name`, given the resolved knobs.
     fn service(&self, name: &str, knobs: &ResolvedKnobs) -> Option<ServiceSpec> {

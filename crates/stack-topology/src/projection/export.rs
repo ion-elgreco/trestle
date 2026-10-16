@@ -11,6 +11,9 @@
 //! Identical inputs give identical bytes: every map is ordered, nothing records a time or an
 //! absolute path, and the version strings come from the caller ([`ExportMeta`]), so a test can
 //! pin them. The schema is `schema/plan.v1.schema.json` in this crate.
+//!
+//! [`CatalogExport`] is the module catalog in the same envelope, for a tool that joins modules
+//! rather than one environment (schema `schema/catalog.v1.schema.json`).
 
 use std::collections::BTreeMap;
 
@@ -28,6 +31,12 @@ pub const PLAN_EXPORT_FORMAT: &str = "trestle-plan";
 /// The `plan.json` schema version this crate writes. Bump it for any change a reader could
 /// misread; adding an optional field is not one.
 pub const PLAN_EXPORT_VERSION: u32 = 1;
+
+/// The `format` every exported catalog carries.
+pub const CATALOG_EXPORT_FORMAT: &str = "trestle-catalog";
+
+/// The catalog schema version this crate writes, versioned like [`PLAN_EXPORT_VERSION`].
+pub const CATALOG_EXPORT_VERSION: u32 = 1;
 
 /// The exported plan (see the [module docs](self)).
 #[derive(Debug, Clone, Serialize)]
@@ -163,6 +172,45 @@ pub struct FileEntryDto {
     pub sensitive: bool,
 }
 
+/// The module catalog with the provenance a [`PlanExport`] records, so a joining tool can tell
+/// which modules a plan was made from.
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogExport {
+    /// Always [`CATALOG_EXPORT_FORMAT`].
+    pub format: &'static str,
+    /// Always [`CATALOG_EXPORT_VERSION`].
+    pub version: u32,
+    /// The tool that wrote the document.
+    pub generator: Generator,
+    /// The catalog's identity, as a plan made from it records it.
+    pub catalog: CatalogIdentity,
+    /// The modules, the default selection, and the deploy targets.
+    #[serde(flatten)]
+    pub projection: CatalogDto,
+}
+
+/// Export `catalog`, the baseline with the module `manifests` merged over it.
+pub fn catalog_export(
+    catalog: &Catalog,
+    manifests: &[String],
+    meta: &ExportMeta,
+) -> Result<CatalogExport, serde_json::Error> {
+    Ok(CatalogExport {
+        format: CATALOG_EXPORT_FORMAT,
+        version: CATALOG_EXPORT_VERSION,
+        generator: meta.generator.clone(),
+        catalog: catalog_identity(catalog, manifests, meta)?,
+        projection: catalog_dto_of(catalog),
+    })
+}
+
+/// Serialize `export` like [`plan_export_json`]: pretty-printed, with a trailing newline.
+pub fn catalog_export_json(export: &CatalogExport) -> Result<String, serde_json::Error> {
+    let mut text = serde_json::to_string_pretty(export)?;
+    text.push('\n');
+    Ok(text)
+}
+
 /// Export `plan`, planned from `manifest` against `catalog`, with `materialized` its rendered
 /// output. Pass the same plan the caller writes to disk, so the export describes exactly those
 /// files.
@@ -244,7 +292,10 @@ fn containers(plan: &Plan) -> Vec<ContainerDto> {
         if module.hosted().is_some() {
             continue;
         }
-        for helper in &module.provides().helpers {
+        let Some(binding) = plan.bindings.get(module.id()) else {
+            continue;
+        };
+        for helper in module.helpers_in(&binding.knobs).iter() {
             out.push(ContainerDto {
                 name: helper.name.clone(),
                 component: component.to_string(),

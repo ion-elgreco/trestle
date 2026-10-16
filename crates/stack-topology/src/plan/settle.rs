@@ -14,7 +14,7 @@ use super::demands::{
 use super::hosted::{HostedProviders, ResolveHostedError, resolve_hosted};
 use super::knobs::resolve_module_knobs;
 use super::resolve::ResolvedGraph;
-use super::{PlanCtx, PlanError, Selection, names};
+use super::{LocalSecrets, PlanCtx, PlanError, Selection, names};
 use crate::catalog::Catalog;
 use crate::catalog::module::{ModuleId, ResolvedKnobs, StackFacts};
 use crate::model::endpoint::RouteIntent;
@@ -69,6 +69,11 @@ pub(super) fn settle(
         .iter()
         .filter_map(|m| Some((m.id().clone(), m.hosted()?)))
         .collect();
+    if ctx.local_secrets == LocalSecrets::Inline && !hosted_modules.is_empty() {
+        return Err(PlanError::InlineSecretsWithHosted {
+            modules: hosted_modules.into_keys().collect(),
+        });
+    }
     let hosted =
         resolve_hosted(&hosted_modules, &selection.hosted, ctx.secrets.as_ref()).map_err(|e| {
             match e {
@@ -98,7 +103,7 @@ pub(super) fn settle(
     // Every name the plan provisions reaches a provider's init job verbatim, so check them all
     // (module demands and environment-level extras alike) before anything renders.
     for module in &graph.nodes {
-        for demand in module.needs() {
+        for demand in graph.needs(module.id()) {
             names::check_resource_name(&demand.resource, &demand.name)?;
         }
     }
@@ -118,7 +123,7 @@ pub(super) fn settle(
         let Some(provider) = hosted.modules.get(&resolved.provider) else {
             continue;
         };
-        let demand = &graph.module(module).expect("in graph").needs()[*idx];
+        let demand = &graph.needs(module)[*idx];
         resolved.connection = provider.template.resolve(&demand.name);
     }
 
@@ -130,6 +135,15 @@ pub(super) fn settle(
     // selection overrides (never on services), so there is no circularity: the services a
     // module emits may *vary* with its knobs, but the knobs are settled first.
     let knobs = resolve_module_knobs(&graph, selection)?;
+    for module in &graph.nodes {
+        module
+            .check_knobs(&knobs[module.id()])
+            .map_err(|rejection| PlanError::RejectedKnob {
+                module: module.id().clone(),
+                key: rejection.key,
+                reason: rejection.reason,
+            })?;
+    }
     let stack_facts = StackFacts {
         gateway_auth,
         modules: graph.nodes.iter().map(|m| m.id().clone()).collect(),

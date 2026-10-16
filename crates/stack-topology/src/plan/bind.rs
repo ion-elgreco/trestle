@@ -12,12 +12,13 @@ use serde::Serialize;
 
 use super::demands::{bind_connection, provider_ready_gate};
 use super::route::Routed;
+use super::routing::Listener;
 use super::settle::Settled;
 use super::{GatewayConfig, PlanCtx, PlanError};
 use crate::catalog::Catalog;
 use crate::catalog::baseline::{
     CLIENT_ENV_KEYS_VAR, DATA_ROOT_VAR, GATEWAY_AUTH_VAR, GATEWAY_HOST_VAR,
-    GATEWAY_INTERNAL_HOST_VAR, GATEWAY_INTERNAL_URL_VAR, GATEWAY_URL_VAR,
+    GATEWAY_INTERNAL_HOST_VAR, GATEWAY_INTERNAL_URL_VAR, GATEWAY_URL_VAR, HOST_PORT_VAR_PREFIX,
 };
 use crate::catalog::module::{
     GatewayTls, ModuleId, PortMapping, Readiness, ReadyGate, RenderCtx, ResolvedKnobs, StackFacts,
@@ -104,7 +105,7 @@ pub(super) fn bind(
         .nodes
         .iter()
         .flat_map(|m| {
-            m.client_env_in(stack_facts)
+            m.client_env_in(&knobs[m.id()], stack_facts)
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>()
@@ -135,6 +136,20 @@ pub(super) fn bind(
             },
         );
         module_env.set(CLIENT_ENV_KEYS_VAR, &client_env_keys);
+        for service in &services_of[module.id()] {
+            for endpoint in &service.endpoints {
+                if let Some(Listener::Dedicated { port }) = routed
+                    .routes
+                    .get(&service.name, &endpoint.id)
+                    .map(|route| &route.listener)
+                {
+                    module_env.set(
+                        format!("{HOST_PORT_VAR_PREFIX}{}", endpoint.id.to_ascii_uppercase()),
+                        port.to_string(),
+                    );
+                }
+            }
+        }
         // Seed each module's render env with its declared env vars.
         for (k, v) in module.provides().env_vars.iter() {
             module_env.set(k, v);
@@ -144,7 +159,7 @@ pub(super) fn bind(
         // injections / container env vars.
         // Bind each demand's resolved connection back into the consuming module's env, by
         // typed field.
-        for (idx, demand) in module.needs().iter().enumerate() {
+        for (idx, demand) in graph.needs(module.id()).iter().enumerate() {
             let connection = &chosen[&(module.id().clone(), idx)].connection;
             bind_connection(&mut module_env, module.id(), demand, connection)?;
         }
@@ -179,7 +194,7 @@ pub(super) fn bind(
                 env.set(k, v);
             }
         }
-        for (idx, demand) in module.needs().iter().enumerate() {
+        for (idx, demand) in graph.needs(module.id()).iter().enumerate() {
             let connection = &chosen[&(module.id().clone(), idx)].connection;
             bind_connection(&mut env, module.id(), demand, connection)?;
         }
@@ -193,7 +208,7 @@ pub(super) fn bind(
         // so a template iterates them instead of hard-coding which backend it waits on.
         let mut connections: BTreeMap<String, Vec<Connection>> = BTreeMap::new();
         let mut dependencies: Vec<ReadyGate> = Vec::new();
-        for (idx, demand) in module.needs().iter().enumerate() {
+        for (idx, demand) in graph.needs(module.id()).iter().enumerate() {
             let resolved = &chosen[&(module.id().clone(), idx)];
             connections
                 .entry(demand.resource.clone())

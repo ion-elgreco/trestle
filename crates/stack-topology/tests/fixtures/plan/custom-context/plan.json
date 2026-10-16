@@ -9,7 +9,7 @@
   "catalog": {
     "baseline": "olai-stack-topology@test",
     "manifests": [],
-    "digest": "sha256:063a91f79a1693a530c88da4ff703800c7a5bfe596d03310fe822155140aac74"
+    "digest": "sha256:5dce43b9894df356bc992068e9ffa17a6dbbaa140b535dd45775a2f28134c136"
   },
   "recipe": {
     "digest": "sha256:763d18679afb3322b9a6dc06877f6443fc99a0de542363a930ffaed2465d7659"
@@ -352,6 +352,11 @@
       "kind": "service"
     },
     {
+      "name": "unitycatalog-storage",
+      "component": "unity-catalog",
+      "kind": "sidecar"
+    },
+    {
       "name": "mlflow",
       "component": "mlflow",
       "kind": "service"
@@ -678,6 +683,14 @@
     {
       "path": "modules/unity-catalog/secrets/hibernate.properties",
       "sensitive": true
+    },
+    {
+      "path": "modules/unity-catalog/storage.txt",
+      "sensitive": false
+    },
+    {
+      "path": "modules/unity-catalog/bootstrap_storage.py",
+      "sensitive": false
     },
     {
       "path": "modules/mlflow/compose.yaml",

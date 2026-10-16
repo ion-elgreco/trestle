@@ -9,7 +9,7 @@
   "catalog": {
     "baseline": "olai-stack-topology@test",
     "manifests": [],
-    "digest": "sha256:063a91f79a1693a530c88da4ff703800c7a5bfe596d03310fe822155140aac74"
+    "digest": "sha256:5dce43b9894df356bc992068e9ffa17a6dbbaa140b535dd45775a2f28134c136"
   },
   "recipe": {
     "digest": "sha256:ba5851f35f1e292a20fba1e8d861c1d67d5fafdb856a6dd18df57f6485c858d5"
@@ -218,6 +218,11 @@
       "name": "unitycatalog",
       "component": "unity-catalog",
       "kind": "service"
+    },
+    {
+      "name": "unitycatalog-storage",
+      "component": "unity-catalog",
+      "kind": "sidecar"
     }
   ],
   "services": {
@@ -425,6 +430,14 @@
     {
       "path": "modules/unity-catalog/secrets/hibernate.properties",
       "sensitive": true
+    },
+    {
+      "path": "modules/unity-catalog/storage.txt",
+      "sensitive": false
+    },
+    {
+      "path": "modules/unity-catalog/bootstrap_storage.py",
+      "sensitive": false
     }
   ]
 }

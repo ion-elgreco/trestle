@@ -313,6 +313,9 @@ pub struct PlanCtx {
     /// relative to the compose file).
     #[serde(default = "PlanCtx::default_data_root")]
     pub data_root: String,
+    /// How the rendered environment holds its local credentials (see [`LocalSecrets`]).
+    #[serde(default, skip_serializing_if = "LocalSecrets::is_separate")]
+    pub local_secrets: LocalSecrets,
     /// The user's app, if any: when set, the gateway gets an `app` cluster and a `/`
     /// catch-all route (emitted last, after every module route) forwarding unmatched
     /// requests to it. Defaults to `None`. Part of the plan because the catch-all is a
@@ -364,9 +367,30 @@ impl Default for PlanCtx {
             dedicated_listener_port_base: PlanCtx::default_dedicated_listener_port_base(),
             provider_preference: BTreeMap::new(),
             data_root: PlanCtx::default_data_root(),
+            local_secrets: LocalSecrets::default(),
             app: None,
             secrets: None,
         }
+    }
+}
+
+/// How a rendered environment holds the credentials of the services it runs (database
+/// passwords, object-store keys): never a hosted resource's, which inline refuses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LocalSecrets {
+    /// Credential-bearing files are marked sensitive: written owner-only, git-ignored, and
+    /// left out of browser projections.
+    #[default]
+    Separate,
+    /// They are ordinary files, so the rendered environment can be committed and shipped
+    /// whole. For local stacks whose only credentials are their own fixed development keys.
+    Inline,
+}
+
+impl LocalSecrets {
+    fn is_separate(&self) -> bool {
+        *self == LocalSecrets::Separate
     }
 }
 
@@ -376,6 +400,16 @@ pub enum PlanError {
     /// Resolving the module graph failed (unknown id, conflict, or cycle).
     #[error(transparent)]
     Resolve(#[from] ResolveError),
+    /// [`LocalSecrets::Inline`] was asked for, but the environment uses hosted resources,
+    /// whose real credentials must never land in an ordinary file.
+    #[error(
+        "local_secrets = \"inline\" can't be used with hosted modules: {}",
+        modules.iter().map(ModuleId::as_str).collect::<Vec<_>>().join(", ")
+    )]
+    InlineSecretsWithHosted {
+        /// The hosted modules in the environment.
+        modules: Vec<ModuleId>,
+    },
     /// A [hosted](Selection::hosted) connection references secrets (`${VAR}`) that
     /// [`PlanCtx::secrets`] does not supply.
     #[error("hosted resources reference unset secrets: {}", vars.join(", "))]
@@ -521,6 +555,17 @@ pub enum PlanError {
         /// The kind the value failed to satisfy.
         kind: crate::catalog::module::KnobKind,
     },
+    /// A module rejected its resolved knobs (see [`Module::check_knobs`](crate::Module::check_knobs)):
+    /// a value's syntax, or a combination of knobs it can't honour.
+    #[error("knob `{key}` on module `{module}` {reason}")]
+    RejectedKnob {
+        /// The module that owns the knob.
+        module: ModuleId,
+        /// The knob's `key`.
+        key: String,
+        /// Why the module rejected it.
+        reason: String,
+    },
     /// Gateway sign-in is on and an `auth`-role provider was selected, but that
     /// provider does not declare what the gateway needs to wire `ext_authz`: a service with an
     /// [`Internal`](crate::RouteIntent::Internal) endpoint (the upstream the filter calls) and the
@@ -651,6 +696,8 @@ impl GatewayFacts {
 pub struct Plan {
     /// The environment's name (the compose project name; see [`PlanCtx::env_name`]).
     pub env_name: String,
+    /// How the rendered environment holds its local credentials (see [`PlanCtx::local_secrets`]).
+    pub local_secrets: LocalSecrets,
     /// The deploy target the plan was made for (see [`PlanCtx::target`]); every module in the
     /// graph has a rendering for it.
     pub target: TargetId,
@@ -872,6 +919,7 @@ fn plan_env(selection: &Selection, catalog: &Catalog, ctx: &PlanCtx) -> Result<P
 
     let mut plan = Plan {
         env_name: ctx.env_name.clone(),
+        local_secrets: ctx.local_secrets,
         target: ctx.target.clone(),
         graph: settled.graph,
         routes: routed.routes,
