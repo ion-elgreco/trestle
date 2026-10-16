@@ -148,6 +148,49 @@ pub struct Provides {
     /// [`HostedConnection`]: crate::HostedConnection
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hosted: Option<HostedKind>,
+    /// The helper containers this module's fragment may run beside its services (an init job,
+    /// a sidecar). They get no routes and fold into the module's node, so only this list lets
+    /// an export name every container the stack runs. Whether one runs can depend on knobs or
+    /// on the rest of the stack.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub helpers: Vec<HelperService>,
+}
+
+/// A container a module's fragment runs to support its services (see [`Provides::helpers`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelperService {
+    /// The compose service name.
+    pub name: String,
+    /// What it does for the module.
+    pub kind: HelperKind,
+}
+
+impl HelperService {
+    /// A one-shot job that runs to completion before (or as) the module starts.
+    pub fn init(name: &str) -> Self {
+        HelperService {
+            name: name.into(),
+            kind: HelperKind::Init,
+        }
+    }
+
+    /// A long-running container serving the module alongside its main service.
+    pub fn sidecar(name: &str) -> Self {
+        HelperService {
+            name: name.into(),
+            kind: HelperKind::Sidecar,
+        }
+    }
+}
+
+/// The kind of a [`HelperService`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HelperKind {
+    /// Runs once and exits (bucket creation, migrations, cert minting, seeding).
+    Init,
+    /// Keeps running next to the main service.
+    Sidecar,
 }
 
 /// A module's contribution to the Python client workspace (see [`Provides::python`]).
@@ -821,6 +864,12 @@ impl ResolvedKnobs {
 pub trait Module: Send + Sync {
     /// The module's stable id within its catalog.
     fn id(&self) -> &ModuleId;
+    /// The implementation this module packages, as an external architecture model's element
+    /// id (a dotted identifier, e.g. `"postgresql"`). Identity only: it says what a node *is*,
+    /// so a downstream tool can join the plan to its model; the planner never reads it.
+    fn model(&self) -> Option<&str> {
+        None
+    }
     /// A human-readable name for a wizard/UI.
     fn display_name(&self) -> Option<&str> {
         None
@@ -916,6 +965,13 @@ pub(crate) fn module_ids(modules: &[std::sync::Arc<dyn Module>]) -> Vec<&ModuleI
 pub struct DataModule {
     /// The module's stable id within its catalog.
     pub id: ModuleId,
+    /// The estate-model implementation this module is (see [`Module::model`]).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_model_ref"
+    )]
+    pub model: Option<String>,
     /// A human-readable name for a wizard/UI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
@@ -953,9 +1009,38 @@ pub struct DataModule {
     pub renders: BTreeMap<TargetId, RenderSpec>,
 }
 
+/// Whether `s` is well-formed as a [`Module::model`] ref: dot-separated identifiers, each an
+/// ASCII letter or `_` followed by letters, digits, or `_`. Only the shape is checked — whether
+/// the element exists is the model's to say.
+pub fn is_model_ref(s: &str) -> bool {
+    s.split('.').all(|seg| {
+        let mut chars = seg.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+fn deserialize_model_ref<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    match value {
+        Some(s) if !is_model_ref(&s) => Err(serde::de::Error::custom(format!(
+            "invalid model ref `{s}`: expected dot-separated identifiers (e.g. `postgresql`)"
+        ))),
+        other => Ok(other),
+    }
+}
+
 impl Module for DataModule {
     fn id(&self) -> &ModuleId {
         &self.id
+    }
+    fn model(&self) -> Option<&str> {
+        self.model.as_deref()
     }
     fn display_name(&self) -> Option<&str> {
         self.display_name.as_deref()
@@ -1167,6 +1252,7 @@ mod tests {
         };
         let m = DataModule {
             id: "svc".into(),
+            model: None,
             display_name: None,
             summary: None,
             category: None,

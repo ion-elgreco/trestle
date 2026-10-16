@@ -80,6 +80,7 @@ pub mod catalog;
 pub mod manifest;
 pub mod model;
 pub mod plan;
+pub mod projection;
 pub mod render;
 pub mod report;
 pub mod target;
@@ -95,9 +96,9 @@ pub use model::role::{Role, ServiceSpec};
 // --- catalog: the module set + how a module is defined ---
 pub use catalog::module::{
     ClientNotebook, ClientValue, ConnectionBinding, DataModule, ExtraResource, GatewayTls,
-    ImpersonatedHost, Knob, KnobKind, Module, ModuleId, PortDecl, PortMapping, Provides,
-    PythonClient, Readiness, ReadyGate, RenderCtx, RenderSpec, ResolvedKnobs, ResourceDemand,
-    StackFacts, TemplateError, UrlPart,
+    HelperKind, HelperService, ImpersonatedHost, Knob, KnobKind, Module, ModuleId, PortDecl,
+    PortMapping, Provides, PythonClient, Readiness, ReadyGate, RenderCtx, RenderSpec,
+    ResolvedKnobs, ResourceDemand, StackFacts, TemplateError, UrlPart, is_model_ref,
 };
 pub use catalog::{
     Catalog, DATA_ROOT_DEFAULT, DATA_ROOT_VAR, baseline_catalog, baseline_selection,
@@ -134,7 +135,7 @@ pub use target::{Compose, DeployTarget, TargetId, builtin_targets};
 pub use address::{AddressError, ServiceRef};
 
 // --- manifest: persist a user's choices, re-plan deterministically ---
-pub use manifest::{EnvManifest, ManifestError, pin_dedicated_ports};
+pub use manifest::{CatalogSource, EnvManifest, ManifestError, pin_dedicated_ports};
 
 // --- report: a human-readable layout summary ---
 pub use report::layout_report;

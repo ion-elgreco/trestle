@@ -1,23 +1,25 @@
-//! The serializable projection layer between the planner and JS.
+//! The serializable projection of a settled [`Plan`](crate::Plan) and of a [`Catalog`].
 //!
 //! Several planner types are deliberately **not** `Serialize`:
-//! [`ResolvedGraph`](olai_stack_topology::ResolvedGraph)'s nodes are `Arc<dyn Module>` trait
-//! objects, and the gateway config types keep serialization at the artifact-renderer boundary.
-//! This module defines plain `#[derive(Serialize)]` DTOs and projects the planner's output into
-//! them, so the JS side never sees a trait object. It is pure and compiles on every target, so
-//! the projection is unit-tested natively (no wasm runner) — only the thin `JsValue` wrappers in
-//! [`bindings`](crate::bindings) are wasm-gated.
+//! [`ResolvedGraph`](crate::ResolvedGraph)'s nodes are `Arc<dyn Module>` trait objects, and the
+//! gateway config types keep serialization at the artifact-renderer boundary. This module
+//! defines plain `#[derive(Serialize)]` DTOs and projects the planner's output into them, so a
+//! consumer (the browser planner, the CLI's JSON output) never sees a trait object. It is pure
+//! and compiles on every target.
+
+pub mod export;
+pub mod topology;
 
 use std::collections::BTreeMap;
 
-use olai_stack_topology::{
-    Catalog, ClusterConfig, GatewayConfig, GatewayRoute, HostedKind, HostedResource, Knob,
-    ListenerConfig, PlanCtx, PlanError, RenderError, Role, Selection, ServiceSpec, TargetId,
-    baseline_catalog, baseline_selection, builtin_targets,
+use crate::{
+    Catalog, ClusterConfig, EnvManifest, GatewayConfig, GatewayRoute, HelperService, HostedKind,
+    HostedResource, Knob, ListenerConfig, Plan, PlanCtx, PlanError, RenderError, Role, Selection,
+    ServiceSpec, TargetId, baseline_catalog, baseline_selection, builtin_targets,
 };
 use serde::Serialize;
 
-pub use crate::topology::{
+pub use self::topology::{
     CLIENTS_NODE_ID, ExposedDto, ExposedKind, GraphDto, GraphNodeDto, NodeKind, ProvisionedDto,
     ResourceNounDto, SurfaceDto, SurfaceKind, TopologyEdgeDto, graph_dto, resource_nouns,
 };
@@ -27,7 +29,7 @@ pub use crate::topology::{
 /// capability it provides, and its tunable knobs.
 #[derive(Debug, Clone, Serialize)]
 pub struct CatalogDto {
-    /// Every module in the baseline catalog, in catalog order.
+    /// Every module in the catalog, in catalog order.
     pub modules: Vec<ModuleDto>,
     /// A sensible starting selection (the baseline lakehouse), so the UI can open pre-populated.
     pub default_selection: Selection,
@@ -49,6 +51,9 @@ pub struct TargetDto {
 pub struct ModuleDto {
     /// Stable module id (e.g. `"mlflow"`).
     pub id: String,
+    /// The implementation the module packages, as an architecture-model element id (see
+    /// [`Module::model`](crate::Module::model)).
+    pub model: Option<String>,
     /// Human-readable name for a card title; falls back to the id when unset.
     pub display_name: Option<String>,
     /// One-line summary for the card body.
@@ -71,6 +76,8 @@ pub struct ModuleDto {
     /// The user-tunable config knobs this module exposes. `Knob` already derives `Serialize`, so
     /// it is reused verbatim.
     pub knobs: Vec<Knob>,
+    /// The helper containers (init jobs, sidecars) the module may run beside its services.
+    pub helpers: Vec<HelperService>,
     /// Set for a hosted provider (a managed database or cloud object store the stack uses but
     /// does not run): what it stands for and the configuration it uses until the selection's
     /// `hosted` entry overrides it.
@@ -90,7 +97,7 @@ pub struct HostedModuleDto {
 /// services, a projected gateway layout, and the non-sensitive materialized files.
 #[derive(Debug, Clone, Serialize)]
 pub struct PlanResultDto {
-    /// The functional topology (see [`crate::topology`]) — the primary input to the React Flow
+    /// The functional topology (see [`topology`]) — the primary input to the React Flow
     /// "markitecture".
     pub graph: GraphDto,
     /// Each module's resolved services (`ServiceSpec` is `Serialize`), keyed by module id.
@@ -129,7 +136,7 @@ pub struct GatewayDto {
     pub policy: Option<PolicyDto>,
 }
 
-/// The gateway's forward-auth wiring, projected from [`AuthConfig`](olai_stack_topology::AuthConfig).
+/// The gateway's forward-auth wiring, projected from [`AuthConfig`](crate::AuthConfig).
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthDto {
     /// The upstream cluster the `ext_authz` check calls.
@@ -139,7 +146,7 @@ pub struct AuthDto {
 }
 
 /// The gateway's authorization-policy wiring, projected from
-/// [`PolicyConfig`](olai_stack_topology::PolicyConfig).
+/// [`PolicyConfig`](crate::PolicyConfig).
 #[derive(Debug, Clone, Serialize)]
 pub struct PolicyDto {
     /// The upstream cluster the gRPC `ext_authz` check calls.
@@ -147,7 +154,7 @@ pub struct PolicyDto {
 }
 
 /// The gateway's emulated-hostname TLS listener, projected from
-/// [`TlsListenerConfig`](olai_stack_topology::TlsListenerConfig).
+/// [`TlsListenerConfig`](crate::TlsListenerConfig).
 #[derive(Debug, Clone, Serialize)]
 pub struct TlsDto {
     /// The listener's in-network port (never host-published).
@@ -203,12 +210,18 @@ pub struct ClusterDto {
 /// Reads each module through the [`Module`] trait accessors (the trait is not `Serialize`) and
 /// reuses `Knob`'s own `Serialize` impl for the knob list.
 pub fn catalog_dto() -> CatalogDto {
-    let catalog = baseline_catalog();
+    catalog_dto_of(&baseline_catalog())
+}
+
+/// Project `catalog` (the baseline, or the baseline merged with custom manifests) for a picker
+/// or a JSON listing.
+pub fn catalog_dto_of(catalog: &Catalog) -> CatalogDto {
     let modules = catalog
         .modules()
         .iter()
         .map(|m| ModuleDto {
             id: m.id().as_str().to_string(),
+            model: m.model().map(str::to_string),
             display_name: m.display_name().map(str::to_string),
             summary: m.summary().map(str::to_string),
             category: m.category().map(str::to_string),
@@ -226,6 +239,7 @@ pub fn catalog_dto() -> CatalogDto {
             resource_kinds: m.provides().resource_kinds.keys().cloned().collect(),
             resource_nouns: resource_nouns(m.as_ref()),
             knobs: m.knobs().to_vec(),
+            helpers: m.provides().helpers.clone(),
             hosted: m.hosted().map(|kind| HostedModuleDto {
                 kind,
                 default: kind.default_resource(),
@@ -324,6 +338,20 @@ pub fn plan_result(
         ..PlanCtx::default()
     };
     let plan = catalog.plan(selection, &ctx)?;
+    project_result(&plan)
+}
+
+/// Plan `manifest` with its whole [`PlanCtx`] (gateway ports, provider preferences, env name,
+/// …) against `catalog`, and project the result as [`plan_result`] does. Where
+/// [`plan_result`] defaults everything but the target, this honours a saved environment.
+pub fn plan_result_for_manifest(
+    manifest: &EnvManifest,
+    catalog: &Catalog,
+) -> Result<PlanResultDto, PlanResultError> {
+    project_result(&manifest.plan(catalog)?)
+}
+
+fn project_result(plan: &Plan) -> Result<PlanResultDto, PlanResultError> {
     let materialized = plan.materialize()?;
     // Omit secrets and LAYOUT.md — the topology diagram is the richer layout view.
     let files = materialized
@@ -336,15 +364,19 @@ pub fn plan_result(
         })
         .collect();
     Ok(PlanResultDto {
-        graph: graph_dto(&plan),
-        services: plan
-            .services
-            .iter()
-            .map(|(id, specs)| (id.as_str().to_string(), specs.clone()))
-            .collect(),
+        graph: graph_dto(plan),
+        services: services_by_module(plan),
         gateway: gateway_dto(&plan.gateway),
         files,
     })
+}
+
+/// Each module's resolved services, keyed by module id.
+fn services_by_module(plan: &Plan) -> BTreeMap<String, Vec<ServiceSpec>> {
+    plan.services
+        .iter()
+        .map(|(id, specs)| (id.as_str().to_string(), specs.clone()))
+        .collect()
 }
 
 /// Well-known role strings, re-exported as a convenience for the JS side's role→theme map. Kept
@@ -466,7 +498,7 @@ mod tests {
     /// The selection the `node/stack-wasm` fixtures are captured from.
     fn fixture_selection() -> Selection {
         Selection {
-            gateway: olai_stack_topology::GatewaySettings::POLICY,
+            gateway: crate::GatewaySettings::POLICY,
             ..Selection::modules(["postgres", "rustfs", "unity-catalog", "mlflow", "jaeger"])
         }
     }
@@ -557,7 +589,7 @@ mod tests {
 
     #[test]
     fn hosted_providers_are_external_nodes_grouped_by_cloud() {
-        use olai_stack_topology::HostedConnection;
+        use crate::HostedConnection;
         let mut selection = Selection::modules(["envoy", "hosted-postgres", "aws-s3", "mlflow"]);
         selection.hosted.insert(
             "hosted-postgres".into(),
@@ -598,6 +630,27 @@ mod tests {
                 .iter()
                 .any(|f| f.path.starts_with("modules/hosted-postgres/"))
         );
+    }
+
+    #[test]
+    fn a_manifest_plans_with_its_whole_context() {
+        let selection = Selection::modules(["unity-catalog"]);
+        let ctx = PlanCtx {
+            gateway_host_port: 8080,
+            ..PlanCtx::default()
+        };
+        let manifest = EnvManifest::new(selection.clone(), ctx);
+        let host_ports = |r: &PlanResultDto| -> Vec<u16> {
+            r.gateway.listeners.iter().map(|l| l.host_port).collect()
+        };
+        let saved = plan_result_for_manifest(&manifest, &baseline_catalog()).unwrap();
+        let defaulted = plan_result(&selection, None).unwrap();
+        assert!(
+            host_ports(&saved).contains(&8080),
+            "{:?}",
+            host_ports(&saved)
+        );
+        assert!(!host_ports(&defaulted).contains(&8080));
     }
 
     #[test]

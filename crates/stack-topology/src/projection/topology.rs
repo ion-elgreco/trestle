@@ -13,7 +13,7 @@
 //!   components' APIs and UIs together under path prefixes, and a *service* surface per
 //!   dedicated listener for a backend that must own its origin because clients speak its wire
 //!   protocol (an S3 endpoint). Locally these are ports; hosted, each is its own subdomain.
-//!   Every endpoint comes from the [`RoutePlan`](olai_stack_topology::RoutePlan), attributed to
+//!   Every endpoint comes from the [`RoutePlan`](crate::RoutePlan), attributed to
 //!   the backend it reaches, and flagged when forward-auth gates it.
 //! - **Edges** — clients reaching each surface, the gateway routing to each backend, the gateway
 //!   delegating authentication to the identity provider and authorization to the policy engine,
@@ -22,7 +22,7 @@
 
 use std::collections::BTreeMap;
 
-use olai_stack_topology::{
+use crate::{
     Connection, Listener, Module, ObjectStoreCredential, Placement, Plan, Role, RouteIntent,
 };
 use serde::Serialize;
@@ -61,6 +61,9 @@ pub enum NodeKind {
 pub struct GraphNodeDto {
     /// Module id, or [`CLIENTS_NODE_ID`].
     pub id: String,
+    /// The implementation the component is, as an architecture-model element id (see
+    /// [`Module::model`]). `None` for the clients node and for a module without one.
+    pub model: Option<String>,
     /// What the node stands for.
     pub kind: NodeKind,
     /// The implementation's human-readable name (e.g. `"RustFS"`).
@@ -76,7 +79,7 @@ pub struct GraphNodeDto {
     /// `external:<origin>`).
     pub placement: Option<String>,
     /// For a hosted provider (see
-    /// [`Plan::hosted`](olai_stack_topology::Plan::hosted)): its cloud environment's label
+    /// [`Plan::hosted`](crate::Plan::hosted)): its cloud environment's label
     /// (e.g. `"aws"`), or `""` when it is unnamed. The UI groups these nodes by it. `None`
     /// for everything the stack runs.
     pub cloud: Option<String>,
@@ -171,7 +174,6 @@ pub fn resource_nouns(module: &dyn Module) -> Vec<ResourceNounDto> {
                 } => ("container", "containers"),
                 Connection::ObjectStore { .. } => ("bucket", "buckets"),
                 Connection::RelationalDb { .. } => ("database", "databases"),
-                _ => ("resource", "resources"),
             };
             ResourceNounDto {
                 kind: kind.clone(),
@@ -197,12 +199,18 @@ pub struct ProvisionedDto {
 /// A typed, request-direction edge (`from` calls `to`).
 ///
 /// Internally tagged, with the endpoints on every variant, so it serializes to a flat JS object
-/// (`{ kind, from, to, … }`) through `serde-wasm-bindgen` without needing map support.
+/// (`{ kind, key, from, to, … }`) through `serde-wasm-bindgen` without needing map support.
+///
+/// Every variant carries a `key` that is unique within its graph and stable across re-plans of
+/// the same input (see [`TopologyEdgeDto::derive_key`]), so a consumer can address an edge;
+/// [`graph_dto`] assigns it once every edge is built.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TopologyEdgeDto {
     /// Clients reach one of the gateway's surfaces.
     Access {
+        /// The edge's stable key (`kind:from→to:qualifier`).
+        key: String,
         /// Always [`CLIENTS_NODE_ID`].
         from: String,
         /// The gateway component.
@@ -213,6 +221,8 @@ pub enum TopologyEdgeDto {
     /// The gateway forwards part of one surface to a backend. The routed endpoints are that
     /// [`SurfaceDto`]'s `exposes` entries for `to`.
     Route {
+        /// The edge's stable key (`kind:from→to:qualifier`).
+        key: String,
         /// The gateway component.
         from: String,
         /// The backend component.
@@ -224,6 +234,8 @@ pub enum TopologyEdgeDto {
     },
     /// The gateway delegates authentication of gated requests to the identity provider.
     Authenticates {
+        /// The edge's stable key (`kind:from→to:qualifier`).
+        key: String,
         /// The gateway component.
         from: String,
         /// The identity provider.
@@ -236,6 +248,8 @@ pub enum TopologyEdgeDto {
     /// The gateway asks the policy engine to authorize each gated request, after the identity
     /// provider has authenticated it.
     Authorizes {
+        /// The edge's stable key (`kind:from→to:qualifier`).
+        key: String,
         /// The gateway component.
         from: String,
         /// The policy engine.
@@ -245,6 +259,8 @@ pub enum TopologyEdgeDto {
     },
     /// A component uses a capability another component provides.
     Uses {
+        /// The edge's stable key (`kind:from→to:qualifier`).
+        key: String,
         /// The consumer.
         from: String,
         /// The provider the planner chose.
@@ -267,6 +283,44 @@ impl TopologyEdgeDto {
             | Self::Authenticates { from, to, .. }
             | Self::Authorizes { from, to, .. }
             | Self::Uses { from, to, .. } => (from, to),
+        }
+    }
+
+    /// The key this edge's other fields determine: `kind:from→to:qualifier`, where the
+    /// qualifier is the capability for a `uses` edge (one per consumer, provider, and
+    /// capability) and the surface's host port for the gateway's edges (one per surface and
+    /// backend).
+    pub fn derive_key(&self) -> String {
+        let (kind, qualifier) = match self {
+            Self::Access { host_port, .. } => ("access", host_port.to_string()),
+            Self::Route { host_port, .. } => ("route", host_port.to_string()),
+            Self::Authenticates { host_port, .. } => ("authenticates", host_port.to_string()),
+            Self::Authorizes { host_port, .. } => ("authorizes", host_port.to_string()),
+            Self::Uses { role, .. } => ("uses", role.clone()),
+        };
+        let (from, to) = self.endpoints();
+        format!("{kind}:{from}→{to}:{qualifier}")
+    }
+
+    /// The edge's key (see [`derive_key`](Self::derive_key)).
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Access { key, .. }
+            | Self::Route { key, .. }
+            | Self::Authenticates { key, .. }
+            | Self::Authorizes { key, .. }
+            | Self::Uses { key, .. } => key,
+        }
+    }
+
+    fn assign_key(&mut self) {
+        let derived = self.derive_key();
+        match self {
+            Self::Access { key, .. }
+            | Self::Route { key, .. }
+            | Self::Authenticates { key, .. }
+            | Self::Authorizes { key, .. }
+            | Self::Uses { key, .. } => *key = derived,
         }
     }
 }
@@ -294,14 +348,12 @@ fn protocol(connection: &Connection, full: bool) -> String {
             } if full => "S3 + STS".to_string(),
             ObjectStoreCredential::S3 { .. } => "S3".to_string(),
             ObjectStoreCredential::AzureBlob { .. } => "Azure Blob".to_string(),
-            _ => "object store".to_string(),
         },
         Connection::RelationalDb { url, .. } => match url.split_once("://") {
             Some(("postgres" | "postgresql", _)) => "PostgreSQL".to_string(),
             Some((scheme, _)) => scheme.to_string(),
             None => "SQL".to_string(),
         },
-        _ => "connection".to_string(),
     }
 }
 
@@ -430,6 +482,7 @@ pub fn graph_dto(plan: &Plan) -> GraphDto {
                     resources.push(demand.name.clone());
                 }
                 _ => uses.push(TopologyEdgeDto::Uses {
+                    key: String::new(),
                     from: from.to_string(),
                     to: to.to_string(),
                     role: demand.resource.clone(),
@@ -486,6 +539,7 @@ pub fn graph_dto(plan: &Plan) -> GraphDto {
                 .or_else(|| primary(to).map(|s| s.role.as_str().to_string()))
                 .unwrap_or_default();
             uses.push(TopologyEdgeDto::Uses {
+                key: String::new(),
                 from: from.to_string(),
                 to: to.to_string(),
                 role,
@@ -566,6 +620,7 @@ pub fn graph_dto(plan: &Plan) -> GraphDto {
         };
         nodes.push(GraphNodeDto {
             id: id.to_string(),
+            model: m.model().map(str::to_string),
             kind,
             display_name: m.display_name().map(str::to_string),
             summary: m.summary().map(str::to_string),
@@ -594,6 +649,7 @@ pub fn graph_dto(plan: &Plan) -> GraphDto {
                 0,
                 GraphNodeDto {
                     id: CLIENTS_NODE_ID.to_string(),
+                    model: None,
                     kind: NodeKind::Clients,
                     display_name: Some("Clients".to_string()),
                     summary: Some("Browsers, SDKs and CLIs on the host.".to_string()),
@@ -609,6 +665,7 @@ pub fn graph_dto(plan: &Plan) -> GraphDto {
             );
             for surface in &surfaces {
                 edges.push(TopologyEdgeDto::Access {
+                    key: String::new(),
                     from: CLIENTS_NODE_ID.to_string(),
                     to: gw.clone(),
                     host_port: surface.host_port,
@@ -630,6 +687,7 @@ pub fn graph_dto(plan: &Plan) -> GraphDto {
             }
             for (to, gated) in routed {
                 edges.push(TopologyEdgeDto::Route {
+                    key: String::new(),
                     from: gw.clone(),
                     to: to.to_string(),
                     host_port: surface.host_port,
@@ -639,6 +697,7 @@ pub fn graph_dto(plan: &Plan) -> GraphDto {
         }
         if let (Some(a), Some(idp)) = (auth, &auth_module) {
             edges.push(TopologyEdgeDto::Authenticates {
+                key: String::new(),
                 from: gw.clone(),
                 to: idp.clone(),
                 host_port: shared_port.unwrap_or_default(),
@@ -648,6 +707,7 @@ pub fn graph_dto(plan: &Plan) -> GraphDto {
         // The policy check runs on the shared listener, after forward-auth.
         if let Some(engine) = &policy_module {
             edges.push(TopologyEdgeDto::Authorizes {
+                key: String::new(),
                 from: gw.clone(),
                 to: engine.clone(),
                 host_port: shared_port.unwrap_or_default(),
@@ -655,13 +715,16 @@ pub fn graph_dto(plan: &Plan) -> GraphDto {
         }
     }
     edges.extend(uses);
+    for edge in &mut edges {
+        edge.assign_key();
+    }
 
     GraphDto { nodes, edges }
 }
 
 #[cfg(test)]
 mod tests {
-    use olai_stack_topology::{Catalog, ExtraResource, PlanCtx, Selection, baseline_catalog};
+    use crate::{Catalog, ExtraResource, PlanCtx, Selection, baseline_catalog};
 
     use super::*;
 
@@ -919,7 +982,7 @@ mod tests {
         let gateway_port = PlanCtx::default().gateway_host_port;
         assert!(g.edges.iter().any(|e| matches!(
             e,
-            TopologyEdgeDto::Authorizes { from, to, host_port }
+            TopologyEdgeDto::Authorizes { from, to, host_port, .. }
                 if from == "envoy" && to == "opa" && *host_port == gateway_port
         )));
         // Authorization comes on top of sign-in, not instead of it.
@@ -977,5 +1040,76 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Selections that between them reach every edge kind: auth + policy, every in-stack
+    /// module that coexists (one object store), and the lakehouse with and without auth.
+    fn edge_rich_selections() -> Vec<Selection> {
+        let mut authorized = lakehouse(false);
+        authorized.modules.extend(["authelia".into(), "opa".into()]);
+        let everything = Selection::modules([
+            "envoy",
+            "authelia",
+            "opa",
+            "postgres",
+            "rustfs",
+            "mlflow",
+            "unity-catalog",
+            "jaeger",
+            "headwaters",
+            "omnigent",
+            "marimo",
+            "puppygraph",
+            "rivers",
+        ]);
+        vec![lakehouse(false), lakehouse(true), authorized, everything]
+    }
+
+    #[test]
+    fn edge_keys_are_unique_and_derived_from_the_edge() {
+        let mut kinds = std::collections::BTreeSet::new();
+        for selection in edge_rich_selections() {
+            let g = graph_dto(&plan(&selection));
+            let mut seen = std::collections::BTreeSet::new();
+            for e in &g.edges {
+                assert_eq!(e.key(), e.derive_key(), "unassigned key on {e:?}");
+                assert!(
+                    seen.insert(e.key().to_string()),
+                    "duplicate key {}",
+                    e.key()
+                );
+                kinds.insert(e.key().split(':').next().unwrap().to_string());
+            }
+        }
+        // Every variant was exercised, so the uniqueness check above covers each one.
+        assert_eq!(
+            kinds.into_iter().collect::<Vec<_>>(),
+            ["access", "authenticates", "authorizes", "route", "uses"]
+        );
+    }
+
+    #[test]
+    fn edge_keys_read_kind_endpoints_and_qualifier() {
+        let g = graph_dto(&plan(&lakehouse(false)));
+        let keys: Vec<&str> = g.edges.iter().map(TopologyEdgeDto::key).collect();
+        assert!(
+            keys.contains(&"uses:mlflow→postgres:relational_db"),
+            "{keys:?}"
+        );
+        assert!(
+            keys.iter().any(|k| k.starts_with("access:@clients→envoy:")),
+            "{keys:?}"
+        );
+    }
+
+    #[test]
+    fn component_nodes_carry_their_model_ref() {
+        let g = graph_dto(&plan(&lakehouse(false)));
+        assert_eq!(node(&g, "postgres").model.as_deref(), Some("postgresql"));
+        assert_eq!(
+            node(&g, "unity-catalog").model.as_deref(),
+            Some("unityCatalogOSS")
+        );
+        assert_eq!(node(&g, CLIENTS_NODE_ID).model, None);
     }
 }
