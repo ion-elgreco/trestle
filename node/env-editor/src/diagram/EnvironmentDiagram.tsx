@@ -1,11 +1,19 @@
 import { cn } from "@open-lakehouse/ui-kit";
 import { type ColorMode, Panel, useReactFlow, useStore } from "@xyflow/react";
 import { Maximize2, X } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ConnectionLegend,
   MarkitectureCanvas,
 } from "../graph/MarkitectureCanvas";
+import { DiagramPortalContext, type NodeSlots } from "../graph/nodeSlots";
 import type { GraphDto } from "../types";
 import { useDiagramReady } from "./exportImage";
 import { parseGraphSnapshot } from "./snapshot";
@@ -46,6 +54,12 @@ export interface EnvironmentDiagramProps {
    * The diagram's accessible name. Defaults to the snapshot's `title`.
    */
   label?: string;
+  /**
+   * Host renderers for a node's name and role lines, e.g. links to the host's
+   * own pages with a hover card. A popover inside them portals into
+   * `useDiagramPortal()` (or `document.body` when it returns `null`).
+   */
+  slots?: NodeSlots;
   className?: string;
 }
 
@@ -68,6 +82,7 @@ export function EnvironmentDiagram({
   legend = true,
   expandable = true,
   label,
+  slots,
   className,
 }: EnvironmentDiagramProps) {
   const resolved = useMemo(() => {
@@ -85,7 +100,8 @@ export function EnvironmentDiagram({
 
   // The whole root takes the theme (not just the canvas, which React Flow
   // themes itself), so the legend row and expand dialog match it.
-  const root = cn("trestle-diagram", dark && "dark", className);
+  const scope = cn("trestle-diagram", dark && "dark");
+  const root = cn(scope, className);
 
   if ("error" in resolved) {
     return (
@@ -101,43 +117,51 @@ export function EnvironmentDiagram({
   }
 
   return (
-    <figure
-      className={root}
-      aria-label={label ?? resolved.title ?? "Environment diagram"}
-    >
-      <div
-        className="relative w-full overflow-hidden rounded-lg"
-        style={{ height: height ?? fitted ?? minHeight }}
+    <>
+      <figure
+        className={root}
+        aria-label={label ?? resolved.title ?? "Environment diagram"}
       >
-        <MarkitectureCanvas
-          graph={resolved.graph}
-          colorMode={colorMode}
-          interactive={false}
-          legend={false}
+        <div
+          className="relative w-full overflow-hidden rounded-lg"
+          style={{ height: height ?? fitted ?? minHeight }}
         >
-          <FitViewport />
-          {height === undefined && (
-            <FitHeight min={minHeight} max={maxHeight} onHeight={setFitted} />
-          )}
-          {expandable && (
-            <Panel position="bottom-right">
-              <ChromeButton
-                label="Expand diagram"
-                onClick={() => setExpanded(true)}
-              >
-                <Maximize2 className="h-4 w-4" />
-              </ChromeButton>
-            </Panel>
-          )}
-        </MarkitectureCanvas>
-      </div>
-      {legend && <ConnectionLegend graph={resolved.graph} layout="row" />}
+          <MarkitectureCanvas
+            graph={resolved.graph}
+            colorMode={colorMode}
+            interactive={false}
+            legend={false}
+            slots={slots}
+          >
+            <FitViewport />
+            {height === undefined && (
+              <FitHeight min={minHeight} max={maxHeight} onHeight={setFitted} />
+            )}
+            {expandable && (
+              <Panel position="bottom-right">
+                <ChromeButton
+                  label="Expand diagram"
+                  onClick={() => setExpanded(true)}
+                >
+                  <Maximize2 className="h-4 w-4" />
+                </ChromeButton>
+              </Panel>
+            )}
+          </MarkitectureCanvas>
+        </div>
+        {legend && <ConnectionLegend graph={resolved.graph} layout="row" />}
+      </figure>
       {expandable && (
-        <ExpandedDialog open={expanded} onClose={() => setExpanded(false)}>
+        <ExpandedDialog
+          open={expanded}
+          scope={scope}
+          onClose={() => setExpanded(false)}
+        >
           <MarkitectureCanvas
             graph={resolved.graph}
             colorMode={colorMode}
             legend={legend}
+            slots={slots}
           >
             <Panel position="top-left">
               <ChromeButton label="Close" onClick={() => setExpanded(false)}>
@@ -147,7 +171,7 @@ export function EnvironmentDiagram({
           </MarkitectureCanvas>
         </ExpandedDialog>
       )}
-    </figure>
+    </>
   );
 }
 
@@ -217,20 +241,51 @@ function FitViewport() {
   return null;
 }
 
+// The dialog element itself sits outside the style scope (so does the host
+// portal inside it); it is only the top-layer frame, sized inline.
+const DIALOG_STYLE: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  width: "100vw",
+  height: "100vh",
+  maxWidth: "none",
+  maxHeight: "none",
+  margin: 0,
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  overflow: "hidden",
+};
+
+const OVERLAY_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "100%",
+  height: "100%",
+  background: "rgb(0 0 0 / 0.6)",
+};
+
 /**
- * A native modal `<dialog>`. Unlike a portal-based dialog it stays inside the
- * `.trestle-diagram` root in the DOM, so the scoped styles still apply.
+ * A native modal `<dialog>`, a sibling of the figure rather than inside it.
+ * Its content is a fresh `.trestle-diagram` root (the scoped styles apply),
+ * and next to it an unscoped container for host popovers (`useDiagramPortal`):
+ * a modal draws above anything portaled to the body, and inside the root the
+ * scoped preflight and tokens would restyle the host's own markup.
  */
 function ExpandedDialog({
   open,
+  scope,
   onClose,
   children,
 }: {
   open: boolean;
+  scope: string;
   onClose: () => void;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const [portal, setPortal] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const dialog = ref.current;
@@ -240,19 +295,34 @@ function ExpandedDialog({
   }, [open]);
 
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: the click only catches the backdrop; Escape already closes a modal <dialog> natively.
     <dialog
       ref={ref}
       aria-label="Environment diagram"
-      className="m-auto h-[90vh] max-h-none w-[92vw] max-w-none overflow-hidden rounded-xl border border-border bg-background p-0 shadow-2xl backdrop:bg-black/60"
+      style={DIALOG_STYLE}
       // Escape fires `close`; keep React's state in step with it.
       onClose={onClose}
-      // A click on the backdrop lands on the dialog element itself.
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
-      {open && <div className="relative h-full w-full">{children}</div>}
+      {open && (
+        <>
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: the click only catches the backdrop; Escape already closes a modal <dialog> natively. */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: see above. */}
+          <div
+            // The scope root: scoped utilities match only its descendants.
+            className={scope}
+            style={OVERLAY_STYLE}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) onClose();
+            }}
+          >
+            <div className="relative h-[90vh] w-[92vw] overflow-hidden rounded-xl border border-border bg-background shadow-2xl">
+              <DiagramPortalContext.Provider value={portal}>
+                {children}
+              </DiagramPortalContext.Provider>
+            </div>
+          </div>
+          <div ref={setPortal} data-trestle-portal="" />
+        </>
+      )}
     </dialog>
   );
 }
