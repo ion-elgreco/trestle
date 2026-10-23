@@ -10,9 +10,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use olai_codegen::{BindingsConfig, CodeGenConfig, CodeGenOutput, DEFAULT_TRANSPORT_TYPE_PATH};
+use olai_codegen::{
+    BindingsConfig, CodeGenConfig, CodeGenOutput, DEFAULT_TRANSPORT_TYPE_PATH, ErrorModuleConfig,
+    REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions,
+};
 
-use super::{GenerateConfig, MODELS_GEN_SUBDIR, Transport, TrestleConfig};
+use super::{GenerateConfig, JsonInt64, MODELS_GEN_SUBDIR, Transport, TrestleConfig};
 use crate::error::{Error, Result};
 
 /// Convention subdir for handler/client/binding glue (mounted `mod codegen;`).
@@ -126,7 +129,28 @@ impl GenerateConfig {
                 .rust
                 .as_ref()
                 .and_then(|r| r.connect_client_path.clone()),
+            rest_client: self.rest_client_options(),
         })
+    }
+
+    /// The REST client options: the `json_int64` setting plus the `clients.rust` knobs.
+    fn rest_client_options(&self) -> RestClientOptions {
+        let rust = self.clients.rust.as_ref();
+        RestClientOptions {
+            json_int64_as_number: self.json_int64 == JsonInt64::Number,
+            ignore_unknown_enum_values: rust.is_some_and(|r| r.ignore_unknown_enum_values),
+            error_module: rust
+                .and_then(|r| r.error_module.as_ref())
+                .map(|e| ErrorModuleConfig {
+                    code_field: e.code_field.clone(),
+                    message_field: e.message_field.clone(),
+                    details_field: e.details_field.clone(),
+                    code_enum: e.code_enum.clone(),
+                }),
+            form_encoded_methods: rust
+                .map(|r| r.form_encoded_methods.clone())
+                .unwrap_or_default(),
+        }
     }
 
     /// Which client protocol layer(s) to emit for the generated Rust client.
@@ -158,8 +182,10 @@ impl GenerateConfig {
             if let Some(path) = &rust.transport_type_path {
                 return path.clone();
             }
-            if rust.transport == Transport::Wasm {
-                return "olai_http_wasm::WasmClient".to_string();
+            match rust.transport {
+                Transport::Wasm => return "olai_http_wasm::WasmClient".to_string(),
+                Transport::Reqwest => return REQWEST_TRANSPORT_TYPE_PATH.to_string(),
+                Transport::Cloud => {}
             }
         }
         // A WASM browser client implies the wasm transport even without an
@@ -230,6 +256,11 @@ impl GenerateConfig {
             String::new()
         };
 
+        let python = match py {
+            Some(py) => lower_python_options(&py.options)?,
+            None => Default::default(),
+        };
+
         Ok(Some(BindingsConfig {
             aggregate_client_name,
             client_crate_name,
@@ -241,8 +272,40 @@ impl GenerateConfig {
             ts_error_code_prefix: b
                 .and_then(|b| b.error_code_prefix.clone())
                 .unwrap_or_default(),
+            python,
         }))
     }
+}
+
+/// Lower the Python options; the package directory is resolved (and created) like the outputs.
+fn lower_python_options(options: &super::PythonOptions) -> Result<olai_codegen::PythonOptions> {
+    let package = options
+        .package
+        .as_ref()
+        .map(|p| -> Result<olai_codegen::PyPackageConfig> {
+            Ok(olai_codegen::PyPackageConfig {
+                dir: resolve_dir(&p.dir)?,
+                name: p.name.clone(),
+                error_base_class: p.error_base_class.clone(),
+            })
+        })
+        .transpose()?;
+    Ok(olai_codegen::PythonOptions {
+        frozen_models: options.frozen_models,
+        constructors: match options.constructors {
+            super::PyConstructors::All => olai_codegen::PyConstructors::All,
+            super::PyConstructors::Inputs => olai_codegen::PyConstructors::Inputs,
+        },
+        python_repr: options.python_repr,
+        module: options.module.clone(),
+        async_methods: options.async_methods,
+        keyword_only: options.keyword_only,
+        str_enums: options.str_enums,
+        hide_unspecified: options.hide_unspecified,
+        stub_gen: options.stub_gen,
+        error_module: options.error_module,
+        package,
+    })
 }
 
 /// Create the directory if missing (the generator owns everything under it) and

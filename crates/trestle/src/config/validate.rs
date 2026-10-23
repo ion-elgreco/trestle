@@ -15,7 +15,7 @@
 //! are hard errors. Rules (3)–(5) are always hard errors — they're enforced by
 //! the schema being `required`, but checked here too for a friendly message.
 
-use super::{JsonFieldNames, ProtoLib, Transport, TrestleConfig};
+use super::{JsonFieldNames, JsonInt64, ProtoLib, Transport, TrestleConfig};
 use crate::error::{Error, Result};
 
 impl TrestleConfig {
@@ -41,6 +41,66 @@ impl TrestleConfig {
                 "`json_field_names: proto` only applies to `proto_lib: buffa`; under \
                  prost, use the prost-serde `preserve_proto_field_names` option instead",
             ));
+        }
+
+        // The other model rewrites and the unknown-enum option are buffa-only too.
+        if self.generate.proto_lib != ProtoLib::Buffa {
+            let buffa_only = [
+                (
+                    !self.generate.json_field_names_by_package.is_empty(),
+                    "json_field_names_by_package",
+                ),
+                (
+                    self.generate.json_int64 == JsonInt64::Number,
+                    "json_int64: number",
+                ),
+                (
+                    self.generate
+                        .clients
+                        .rust
+                        .as_ref()
+                        .is_some_and(|r| r.ignore_unknown_enum_values),
+                    "clients.rust.ignore_unknown_enum_values",
+                ),
+            ];
+            if let Some((_, what)) = buffa_only.iter().find(|(set, _)| *set) {
+                return Err(Error::other(format!(
+                    "`{what}` only applies to `proto_lib: buffa`"
+                )));
+            }
+        }
+
+        // The generated reqwest transport is one transport for every target; it does not mix
+        // with the cfg-gated CloudClient/WasmClient pair.
+        if let Some(rust) = &self.generate.clients.rust
+            && rust.transport == Transport::Reqwest
+            && (rust.dual_transport || rust.transport_type_path.is_some())
+        {
+            return Err(Error::other(
+                "`transport: reqwest` builds for native and wasm32 by itself; drop \
+                 `dual_transport` and `transport_type_path`",
+            ));
+        }
+
+        // Python options that build on each other.
+        if let Some(python) = &self.generate.clients.python {
+            let o = &python.options;
+            if (o.str_enums || o.error_module) && o.package.is_none() {
+                return Err(Error::other(
+                    "`clients.python.options.str_enums` and `error_module` write Python files: \
+                     set `clients.python.options.package`",
+                ));
+            }
+            if o.hide_unspecified && !o.str_enums {
+                return Err(Error::other(
+                    "`clients.python.options.hide_unspecified` needs `str_enums`",
+                ));
+            }
+            if o.str_enums && self.generate.proto_lib != ProtoLib::Buffa {
+                return Err(Error::other(
+                    "`clients.python.options.str_enums` only applies to `proto_lib: buffa`",
+                ));
+            }
         }
 
         // Identity / per-client required fields. The schema already makes these
@@ -124,6 +184,8 @@ mod tests {
             generate: GenerateConfig {
                 proto_lib: ProtoLib::Prost,
                 json_field_names: Default::default(),
+                json_field_names_by_package: Default::default(),
+                json_int64: Default::default(),
                 descriptors: "api.bin".into(),
                 servers: Servers::default(),
                 clients: Clients::default(),

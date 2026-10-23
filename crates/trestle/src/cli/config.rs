@@ -147,6 +147,8 @@ fn default_config() -> TrestleConfig {
         generate: GenerateConfig {
             proto_lib: ProtoLib::default(),
             json_field_names: Default::default(),
+            json_field_names_by_package: Default::default(),
+            json_int64: Default::default(),
             descriptors: "api.bin".to_string(),
             servers: Servers::default(),
             clients: Clients::default(),
@@ -198,6 +200,9 @@ fn apply_flags(cfg: &mut TrestleConfig, args: &ConfigArgs) {
                 dual_transport: false,
                 protocols: vec![crate::config::ClientProtocol::Rest],
                 connect_client_path: None,
+                ignore_unknown_enum_values: false,
+                error_module: None,
+                form_encoded_methods: Vec::new(),
             });
         }
         if args.clients.contains(&ClientArg::Python) {
@@ -206,6 +211,7 @@ fn apply_flags(cfg: &mut TrestleConfig, args: &ConfigArgs) {
                 error_type: String::new(),
                 result_type: String::new(),
                 typings_package_filter: None,
+                options: Default::default(),
             });
         }
         if args.clients.contains(&ClientArg::Node) {
@@ -289,6 +295,9 @@ fn prompt_missing(cfg: &mut TrestleConfig) -> Result<()> {
             dual_transport: false,
             protocols: vec![crate::config::ClientProtocol::Rest],
             connect_client_path: None,
+            ignore_unknown_enum_values: false,
+            error_module: None,
+            form_encoded_methods: Vec::new(),
         });
     }
     if clients.contains(&ClientSel::Python) && cfg.generate.clients.python.is_none() {
@@ -297,6 +306,7 @@ fn prompt_missing(cfg: &mut TrestleConfig) -> Result<()> {
             error_type: String::new(),
             result_type: String::new(),
             typings_package_filter: None,
+            options: Default::default(),
         });
     }
     if clients.contains(&ClientSel::Node) && cfg.generate.clients.node.is_none() {
