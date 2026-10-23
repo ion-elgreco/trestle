@@ -210,6 +210,11 @@ assert [x.name for x in client.list_widgets()] == ["w1", "w2", "w3"]
 # Only models that a request takes have a constructor; optional arguments are keyword-only.
 label = Label(key="k", value="v")
 assert Label("k").key == "k"
+# Models compare by value; a `debug_redact` field is hidden in the repr, not in the attribute.
+assert Label("k") == Label("k") and Label("k") != Label("j")
+hidden = Label("k", secret="s3cret")
+assert hidden.secret == "s3cret" and "s3cret" not in repr(hidden), repr(hidden)
+assert repr(hidden) == "Label(key='k', value='', secret='***')", repr(hidden)
 try:
     Label(value="v")
     raise AssertionError("expected a TypeError for the missing key")
@@ -278,6 +283,13 @@ try:
     raise AssertionError("expected a TypeError")
 except TypeError:
     pass
+# JSON has no NaN or infinity: refused before the request.
+for bad in (float("nan"), float("inf")):
+    try:
+        client.create_widget("w3", attributes={"bad": bad})
+        raise AssertionError("expected a ValueError")
+    except ValueError:
+        pass
 
 # A HEAD request tells whether the widget exists; other errors raise. A GET can carry a JSON body.
 assert client.widget_exists("w") is True
@@ -348,6 +360,8 @@ fn stubs() {
         "def color(self) -> typing.Optional[_enums.Color]:",
         // A field named after a Rust keyword keeps its Python name.
         "def type(self) -> typing.Optional[builtins.str]:",
+        // `#[pyclass(eq)]`: comparable with any object, positional-only.
+        "def __eq__(self, other: builtins.object, /) -> builtins.bool:",
         "The color of the widget.",
         "def __new__(cls, key: builtins.str, *, value: typing.Optional[builtins.str] = None",
         "def get_async(self) -> asyncio.Future[Widget]:",

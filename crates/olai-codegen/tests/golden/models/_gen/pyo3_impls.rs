@@ -132,8 +132,8 @@ impl ::core::convert::From<PySchemaType> for super::schemas::v1::SchemaType {
     }
 }
 
-#[::pyo3::pyclass(name = "AzureConfig", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "AzureConfig", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyAzureConfig(pub super::catalog::v1::AzureConfig);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -161,10 +161,6 @@ impl PyAzureConfig {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::AzureConfig> for PyAzureConfig {
@@ -179,8 +175,8 @@ impl ::core::convert::From<PyAzureConfig> for super::catalog::v1::AzureConfig {
     }
 }
 
-#[::pyo3::pyclass(name = "Catalog", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "Catalog", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalog(pub super::catalog::v1::Catalog);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -306,10 +302,6 @@ impl PyCatalog {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::Catalog> for PyCatalog {
@@ -324,8 +316,8 @@ impl ::core::convert::From<PyCatalog> for super::catalog::v1::Catalog {
     }
 }
 
-#[::pyo3::pyclass(name = "CatalogStatus", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CatalogStatus", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalogStatus(pub super::catalog::v1::CatalogStatus);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -353,10 +345,6 @@ impl PyCatalogStatus {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::CatalogStatus> for PyCatalogStatus {
@@ -371,8 +359,8 @@ impl ::core::convert::From<PyCatalogStatus> for super::catalog::v1::CatalogStatu
     }
 }
 
-#[::pyo3::pyclass(name = "CatalogToken", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CatalogToken", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalogToken(pub super::catalog::v1::CatalogToken);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -400,10 +388,6 @@ impl PyCatalogToken {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::CatalogToken> for PyCatalogToken {
@@ -418,8 +402,8 @@ impl ::core::convert::From<PyCatalogToken> for super::catalog::v1::CatalogToken 
     }
 }
 
-#[::pyo3::pyclass(name = "CreateCatalogRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CreateCatalogRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCreateCatalogRequest(pub super::catalog::v1::CreateCatalogRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -448,10 +432,6 @@ impl PyCreateCatalogRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::CreateCatalogRequest>
@@ -468,8 +448,8 @@ for super::catalog::v1::CreateCatalogRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "DeleteCatalogRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteCatalogRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteCatalogRequest(pub super::catalog::v1::DeleteCatalogRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -497,10 +477,6 @@ impl PyDeleteCatalogRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::DeleteCatalogRequest>
@@ -517,8 +493,8 @@ for super::catalog::v1::DeleteCatalogRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "DeleteCatalogResponse", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteCatalogResponse", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteCatalogResponse(pub super::catalog::v1::DeleteCatalogResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -530,10 +506,6 @@ impl PyDeleteCatalogResponse {
 
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -551,8 +523,8 @@ for super::catalog::v1::DeleteCatalogResponse {
     }
 }
 
-#[::pyo3::pyclass(name = "GenerateCatalogTokenRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GenerateCatalogTokenRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGenerateCatalogTokenRequest(
     pub super::catalog::v1::GenerateCatalogTokenRequest,
 );
@@ -582,10 +554,6 @@ impl PyGenerateCatalogTokenRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::GenerateCatalogTokenRequest>
@@ -602,8 +570,8 @@ for super::catalog::v1::GenerateCatalogTokenRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "GetCatalogRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GetCatalogRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGetCatalogRequest(pub super::catalog::v1::GetCatalogRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -631,10 +599,6 @@ impl PyGetCatalogRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::GetCatalogRequest>
@@ -651,8 +615,8 @@ for super::catalog::v1::GetCatalogRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "GetCatalogStatusRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GetCatalogStatusRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGetCatalogStatusRequest(pub super::catalog::v1::GetCatalogStatusRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -680,10 +644,6 @@ impl PyGetCatalogStatusRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::GetCatalogStatusRequest>
@@ -700,8 +660,8 @@ for super::catalog::v1::GetCatalogStatusRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "ListByCatalogTypeRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListByCatalogTypeRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListByCatalogTypeRequest(pub super::catalog::v1::ListByCatalogTypeRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -739,10 +699,6 @@ impl PyListByCatalogTypeRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::ListByCatalogTypeRequest>
@@ -759,8 +715,8 @@ for super::catalog::v1::ListByCatalogTypeRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "ListByTagsRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListByTagsRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListByTagsRequest(pub super::catalog::v1::ListByTagsRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -805,10 +761,6 @@ impl PyListByTagsRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::ListByTagsRequest>
@@ -825,8 +777,8 @@ for super::catalog::v1::ListByTagsRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "ListByTagsResponse", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListByTagsResponse", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListByTagsResponse(pub super::catalog::v1::ListByTagsResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -856,10 +808,6 @@ impl PyListByTagsResponse {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::ListByTagsResponse>
@@ -876,8 +824,8 @@ for super::catalog::v1::ListByTagsResponse {
     }
 }
 
-#[::pyo3::pyclass(name = "ListCatalogsRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListCatalogsRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListCatalogsRequest(pub super::catalog::v1::ListCatalogsRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -921,10 +869,6 @@ impl PyListCatalogsRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::ListCatalogsRequest>
@@ -941,8 +885,8 @@ for super::catalog::v1::ListCatalogsRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "ListCatalogsResponse", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListCatalogsResponse", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListCatalogsResponse(pub super::catalog::v1::ListCatalogsResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -989,10 +933,6 @@ impl PyListCatalogsResponse {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::ListCatalogsResponse>
@@ -1009,8 +949,8 @@ for super::catalog::v1::ListCatalogsResponse {
     }
 }
 
-#[::pyo3::pyclass(name = "S3Config", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "S3Config", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyS3Config(pub super::catalog::v1::S3Config);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1038,10 +978,6 @@ impl PyS3Config {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::S3Config> for PyS3Config {
@@ -1056,8 +992,8 @@ impl ::core::convert::From<PyS3Config> for super::catalog::v1::S3Config {
     }
 }
 
-#[::pyo3::pyclass(name = "StorageConfig", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "StorageConfig", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyStorageConfig(pub super::catalog::v1::StorageConfig);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1143,10 +1079,6 @@ impl PyStorageConfig {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::StorageConfig> for PyStorageConfig {
@@ -1161,8 +1093,8 @@ impl ::core::convert::From<PyStorageConfig> for super::catalog::v1::StorageConfi
     }
 }
 
-#[::pyo3::pyclass(name = "UpdateCatalogRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "UpdateCatalogRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyUpdateCatalogRequest(pub super::catalog::v1::UpdateCatalogRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1207,10 +1139,6 @@ impl PyUpdateCatalogRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::catalog::v1::UpdateCatalogRequest>
@@ -1227,8 +1155,8 @@ for super::catalog::v1::UpdateCatalogRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "CreateSchemaRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CreateSchemaRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCreateSchemaRequest(pub super::schemas::v1::CreateSchemaRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1299,10 +1227,6 @@ impl PyCreateSchemaRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::schemas::v1::CreateSchemaRequest>
@@ -1319,8 +1243,8 @@ for super::schemas::v1::CreateSchemaRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "DeleteSchemaRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteSchemaRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteSchemaRequest(pub super::schemas::v1::DeleteSchemaRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1348,10 +1272,6 @@ impl PyDeleteSchemaRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::schemas::v1::DeleteSchemaRequest>
@@ -1368,8 +1288,8 @@ for super::schemas::v1::DeleteSchemaRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "DeleteSchemaResponse", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteSchemaResponse", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteSchemaResponse(pub super::schemas::v1::DeleteSchemaResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1381,10 +1301,6 @@ impl PyDeleteSchemaResponse {
 
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -1402,8 +1318,8 @@ for super::schemas::v1::DeleteSchemaResponse {
     }
 }
 
-#[::pyo3::pyclass(name = "GetSchemaRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GetSchemaRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGetSchemaRequest(pub super::schemas::v1::GetSchemaRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1456,10 +1372,6 @@ impl PyGetSchemaRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::schemas::v1::GetSchemaRequest> for PyGetSchemaRequest {
@@ -1474,8 +1386,8 @@ impl ::core::convert::From<PyGetSchemaRequest> for super::schemas::v1::GetSchema
     }
 }
 
-#[::pyo3::pyclass(name = "ListSchemasRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListSchemasRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListSchemasRequest(pub super::schemas::v1::ListSchemasRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1534,10 +1446,6 @@ impl PyListSchemasRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::schemas::v1::ListSchemasRequest>
@@ -1554,8 +1462,8 @@ for super::schemas::v1::ListSchemasRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "ListSchemasResponse", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListSchemasResponse", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListSchemasResponse(pub super::schemas::v1::ListSchemasResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1599,10 +1507,6 @@ impl PyListSchemasResponse {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::schemas::v1::ListSchemasResponse>
@@ -1622,8 +1526,8 @@ for super::schemas::v1::ListSchemasResponse {
 /// A Schema is a child resource of a Catalog. This fixture exercises the generated nested
 /// resource-scoped client: `catalog.schema(name)` navigation, `catalog.create_schema(...)`, and the
 /// cross-module model import for the create method's enum parameter (`SchemaType`).
-#[::pyo3::pyclass(name = "Schema", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "Schema", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PySchema(pub super::schemas::v1::Schema);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1762,10 +1666,6 @@ impl PySchema {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::schemas::v1::Schema> for PySchema {
@@ -1780,8 +1680,8 @@ impl ::core::convert::From<PySchema> for super::schemas::v1::Schema {
     }
 }
 
-#[::pyo3::pyclass(name = "UpdateSchemaRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "UpdateSchemaRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyUpdateSchemaRequest(pub super::schemas::v1::UpdateSchemaRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1826,10 +1726,6 @@ impl PyUpdateSchemaRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::schemas::v1::UpdateSchemaRequest>
@@ -1846,8 +1742,8 @@ for super::schemas::v1::UpdateSchemaRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "CreateTagAssignmentRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CreateTagAssignmentRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCreateTagAssignmentRequest(pub super::tags::v1::CreateTagAssignmentRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1906,10 +1802,6 @@ impl PyCreateTagAssignmentRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::tags::v1::CreateTagAssignmentRequest>
@@ -1926,8 +1818,8 @@ for super::tags::v1::CreateTagAssignmentRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "DeleteTagAssignmentRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteTagAssignmentRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteTagAssignmentRequest(pub super::tags::v1::DeleteTagAssignmentRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -1985,10 +1877,6 @@ impl PyDeleteTagAssignmentRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::tags::v1::DeleteTagAssignmentRequest>
@@ -2005,8 +1893,8 @@ for super::tags::v1::DeleteTagAssignmentRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "DeleteTagAssignmentResponse", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteTagAssignmentResponse", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteTagAssignmentResponse(
     pub super::tags::v1::DeleteTagAssignmentResponse,
 );
@@ -2020,10 +1908,6 @@ impl PyDeleteTagAssignmentResponse {
 
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -2041,8 +1925,8 @@ for super::tags::v1::DeleteTagAssignmentResponse {
     }
 }
 
-#[::pyo3::pyclass(name = "GetTagAssignmentRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GetTagAssignmentRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGetTagAssignmentRequest(pub super::tags::v1::GetTagAssignmentRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -2100,10 +1984,6 @@ impl PyGetTagAssignmentRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::tags::v1::GetTagAssignmentRequest>
@@ -2120,8 +2000,8 @@ for super::tags::v1::GetTagAssignmentRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "ListTagAssignmentsRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListTagAssignmentsRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListTagAssignmentsRequest(pub super::tags::v1::ListTagAssignmentsRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -2200,10 +2080,6 @@ impl PyListTagAssignmentsRequest {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::tags::v1::ListTagAssignmentsRequest>
@@ -2220,8 +2096,8 @@ for super::tags::v1::ListTagAssignmentsRequest {
     }
 }
 
-#[::pyo3::pyclass(name = "ListTagAssignmentsResponse", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListTagAssignmentsResponse", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListTagAssignmentsResponse(pub super::tags::v1::ListTagAssignmentsResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -2271,10 +2147,6 @@ impl PyListTagAssignmentsResponse {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::tags::v1::ListTagAssignmentsResponse>
@@ -2291,8 +2163,8 @@ for super::tags::v1::ListTagAssignmentsResponse {
     }
 }
 
-#[::pyo3::pyclass(name = "TagAssignment", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "TagAssignment", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyTagAssignment(pub super::tags::v1::TagAssignment);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -2371,10 +2243,6 @@ impl PyTagAssignment {
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
     }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
 }
 
 impl ::core::convert::From<super::tags::v1::TagAssignment> for PyTagAssignment {
@@ -2389,8 +2257,8 @@ impl ::core::convert::From<PyTagAssignment> for super::tags::v1::TagAssignment {
     }
 }
 
-#[::pyo3::pyclass(name = "TouchTagAssignmentRequest", from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "TouchTagAssignmentRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyTouchTagAssignmentRequest(pub super::tags::v1::TouchTagAssignmentRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3::pymethods]
@@ -2447,10 +2315,6 @@ impl PyTouchTagAssignmentRequest {
 
     fn __repr__(&self) -> ::std::string::String {
         ::std::format!("{:?}", self.0)
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 

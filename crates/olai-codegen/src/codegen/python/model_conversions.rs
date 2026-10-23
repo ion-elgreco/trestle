@@ -242,7 +242,13 @@ fn json_conversions() -> TokenStream {
             if obj.is_instance_of::<::pyo3::types::PyInt>()
                 || obj.is_instance_of::<::pyo3::types::PyFloat>()
             {
-                return ::core::result::Result::Ok(Value::from(obj.extract::<f64>()?));
+                let number = obj.extract::<f64>()?;
+                if !number.is_finite() {
+                    return ::core::result::Result::Err(::pyo3::exceptions::PyValueError::new_err(
+                        ::std::format!("not a JSON number: {number}"),
+                    ));
+                }
+                return ::core::result::Result::Ok(Value::from(number));
             }
             if obj.is_instance_of::<::pyo3::types::PyString>() {
                 return ::core::result::Result::Ok(Value::from(obj.extract::<::std::string::String>()?));
@@ -492,16 +498,21 @@ impl Ctx<'_> {
 fn python_repr_fn() -> TokenStream {
     quote! {
         /// `Name(field=value, …)` with the `repr` of each attribute in `fields`, without the
-        /// ones that are `None`.
+        /// ones that are `None`. A field marked `true` (`debug_redact` in the proto) shows `'***'`.
         fn __python_repr(
             obj: &::pyo3::Bound<'_, ::pyo3::PyAny>,
-            fields: &[&str],
+            fields: &[(&str, bool)],
         ) -> ::pyo3::PyResult<::std::string::String> {
             use ::pyo3::types::{PyAnyMethods, PyTypeMethods};
             let mut shown = ::std::vec::Vec::with_capacity(fields.len());
-            for field in fields {
+            for (field, redact) in fields {
                 let value = obj.getattr(*field)?;
-                if !value.is_none() {
+                if value.is_none() {
+                    continue;
+                }
+                if *redact {
+                    shown.push(::std::format!("{field}='***'"));
+                } else {
                     shown.push(::std::format!("{field}={}", value.repr()?));
                 }
             }
@@ -853,9 +864,17 @@ fn message_wrapper(
         // The Python names: a raw identifier (`r#type`) is `type` in Python.
         let fields = accessors
             .iter()
-            .map(|a| a.ident.clone())
-            .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents))
-            .map(|ident| syn::ext::IdentExt::unraw(&ident).to_string());
+            .map(|a| (a.ident.clone(), a.sensitive))
+            .chain(
+                oneofs
+                    .iter()
+                    .flat_map(OneofAccessor::variant_param_idents)
+                    .map(|ident| (ident, false)),
+            )
+            .map(|(ident, redact)| {
+                let name = syn::ext::IdentExt::unraw(&ident).to_string();
+                quote! { (#name, #redact) }
+            });
         quote! {
             fn __repr__(slf: &::pyo3::Bound<'_, Self>) -> ::pyo3::PyResult<::std::string::String> {
                 __python_repr(slf.as_any(), &[#(#fields),*])
@@ -882,8 +901,8 @@ fn message_wrapper(
         // `FromPyObject` derive for `Clone` `#[pyclass]` types opt-in. Keep the pre-0.28
         // behavior (derive it) explicitly so Python callers can still pass a wrapper into
         // Rust-side functions and to silence the deprecation under `-D warnings`.
-        #[::pyo3::pyclass(name = #class_name, #frozen_arg #module_arg from_py_object)]
-        #[derive(Clone, Debug)]
+        #[::pyo3::pyclass(name = #class_name, eq, #frozen_arg #module_arg from_py_object)]
+        #[derive(Clone, Debug, PartialEq)]
         pub struct #wrapper(pub #inner);
 
         #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
@@ -898,10 +917,6 @@ fn message_wrapper(
             #(#oneof_setters)*
 
             #repr
-
-            fn __eq__(&self, other: &Self) -> bool {
-                self.0 == other.0
-            }
         }
 
         impl ::core::convert::From<#inner> for #wrapper {
@@ -1025,6 +1040,8 @@ struct FieldAccessor {
     /// Whether the proto marks the field `REQUIRED`: a required argument of the constructor
     /// with [`PythonOptions::keyword_only`](crate::PythonOptions::keyword_only).
     required: bool,
+    /// Whether the proto marks the field `debug_redact`: the Python repr hides its value.
+    sensitive: bool,
 }
 
 impl FieldAccessor {
@@ -1079,6 +1096,7 @@ impl FieldAccessor {
             required: field
                 .field_behavior
                 .contains(&crate::google::api::FieldBehavior::Required),
+            sensitive: field.is_sensitive,
         }
     }
 

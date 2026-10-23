@@ -81,6 +81,8 @@ message Label {
   string key = 1 [(google.api.field_behavior) = REQUIRED];
   // The value.
   string value = 2;
+  // A secret: the Python repr hides it.
+  optional string secret = 3 [debug_redact = true];
 }
 
 message ListWidgetsResponse {
