@@ -125,6 +125,8 @@ fn generate_method_typings_signature(method: &MethodHandler<'_>) -> Option<Strin
         _ => {
             if let Some(output_type) = method.output_type() {
                 streamed_annotation(method, python_type_annotation_from_ident(&output_type))
+            } else if method.is_existence_check() {
+                "bool".to_string()
             } else {
                 "Any".to_string()
             }
@@ -526,6 +528,8 @@ fn generate_aggregate_method_typing(
             // Empty-returning RPCs (e.g. a `Touch*` custom method) are typed `None` in Python.
             if let Some(output_type) = method.output_type() {
                 streamed_annotation(method, python_type_annotation_from_ident(&output_type))
+            } else if method.is_existence_check() {
+                "bool".to_string()
             } else {
                 "None".to_string()
             }

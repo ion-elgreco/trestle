@@ -156,8 +156,17 @@ pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> Result<Token
 
     let read_response = match method.output_type() {
         Some(output_type) => read_output(&method, &output_type)?,
+        None if method.is_existence_check() => quote! { Ok(true) },
         None => quote! { Ok(()) },
     };
+    // An existence check answers `false` for a 404 instead of failing.
+    let not_found = method.is_existence_check().then(|| {
+        quote! {
+            if response.status().as_u16() == 404 {
+                return Ok(false);
+            }
+        }
+    });
 
     Ok(quote! {
         #doc_attrs
@@ -165,6 +174,7 @@ pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> Result<Token
             #url_formatting
             #query_handling
             let response = self.client.#http_method(url)#body_handling.send().await?;
+            #not_found
             if !response.status().is_success() {
                 return Err(#error_module::parse_error_response(response).await);
             }

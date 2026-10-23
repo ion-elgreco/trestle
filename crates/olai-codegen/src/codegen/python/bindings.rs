@@ -44,6 +44,9 @@ fn qualified_wrapper_ident(ty: &UnifiedType) -> Ident {
 /// Returns `(return_type, convert_expr)`, or `None` for an `Empty`-returning method
 /// ([`MethodHandler::output_type`] is `None`). A server-streaming method returns a list.
 fn wrap_single_output(method: &MethodHandler<'_>) -> Option<(TokenStream, TokenStream)> {
+    if method.is_existence_check() {
+        return Some((quote! { bool }, quote! { result }));
+    }
     let w = wrapper_ident(&method.output_type()?);
     if method.plan.metadata.server_streaming {
         Some((

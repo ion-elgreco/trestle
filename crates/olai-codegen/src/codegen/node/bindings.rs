@@ -438,13 +438,14 @@ impl NapiBackend {
         } else {
             // Custom POST/PATCH RPCs that target a resource can return `Empty` (e.g. a
             // delta-commit-style `Commit`). Emit a `()` return rather than a `Buffer` of an
-            // empty message.
+            // empty message; an existence check returns its `bool`.
+            let ret = method.result_type();
             quote! {
                 #[napi(catch_unwind)]
                 pub async fn #method_name(
                     &self,
                     #(#param_defs,)*
-                ) -> napi::Result<()> {
+                ) -> napi::Result<#ret> {
                     let mut request = #client_call;
                     #(#builder_calls)*
                     request

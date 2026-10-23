@@ -1543,13 +1543,21 @@ impl MethodHandler<'_> {
     }
 
     /// The type a client call resolves to: the output message, a `Vec` of them for a
-    /// server-streaming method (one per NDJSON line), or `()` for `Empty`.
+    /// server-streaming method (one per NDJSON line), `bool` for an existence check
+    /// ([`Self::is_existence_check`]), or `()` for `Empty`.
     pub(crate) fn result_type(&self) -> TokenStream {
         match self.output_type() {
             Some(output) if self.plan.metadata.server_streaming => quote! { Vec<#output> },
             Some(output) => quote! { #output },
+            None if self.is_existence_check() => quote! { bool },
             None => quote! { () },
         }
+    }
+
+    /// Whether the method is a `HEAD` request without an answer: it tells whether something
+    /// exists, as a `bool` that is `false` for a 404.
+    pub(crate) fn is_existence_check(&self) -> bool {
+        self.plan.http_method.eq_ignore_ascii_case("head") && self.output_type().is_none()
     }
 
     /// The output fields that come from HTTP response headers instead of the body.

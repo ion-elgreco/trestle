@@ -145,10 +145,10 @@ async fn exchange_token(
 
 async fn widget_exists(State(seen): State<Seen>, Path(name): Path<String>) -> StatusCode {
     seen.push(format!("HEAD {name}"));
-    if name == "missing" {
-        StatusCode::NOT_FOUND
-    } else {
-        StatusCode::OK
+    match name.as_str() {
+        "missing" => StatusCode::NOT_FOUND,
+        "denied" => StatusCode::FORBIDDEN,
+        _ => StatusCode::OK,
     }
 }
 
@@ -395,9 +395,11 @@ async fn free_form_json_keeps_whole_numbers() {
 async fn head_requests_and_get_bodies() {
     let (base, seen) = serve().await;
     let client = DemoClient::new_unauthenticated(base);
-    client.widget_exists("w").await.unwrap();
-    let err = client.widget_exists("missing").await.unwrap_err();
-    assert_eq!(err.status(), Some(404));
+    // A HEAD request without an answer tells whether the widget exists; other errors fail.
+    assert!(client.widget_exists("w").await.unwrap());
+    assert!(!client.widget_exists("missing").await.unwrap());
+    let err = client.widget_exists("denied").await.unwrap_err();
+    assert_eq!(err.status(), Some(403));
     let found = client
         .search_widgets(
             "w",

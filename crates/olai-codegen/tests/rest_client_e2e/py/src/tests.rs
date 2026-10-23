@@ -67,10 +67,10 @@ async fn create_widget(body: String) -> Response {
 }
 
 async fn widget_exists(Path(name): Path<String>) -> StatusCode {
-    if name == "missing" {
-        StatusCode::NOT_FOUND
-    } else {
-        StatusCode::OK
+    match name.as_str() {
+        "missing" => StatusCode::NOT_FOUND,
+        "denied" => StatusCode::FORBIDDEN,
+        _ => StatusCode::OK,
     }
 }
 
@@ -162,7 +162,7 @@ fn python_api() {
 import asyncio
 import pickle
 
-from demo._core import DemoClient, DemoError, NotFoundError, ServerError
+from demo._core import DemoClient, DemoError, NotFoundError, PermissionDeniedError, ServerError
 from demo._core.demo import Label, Widget, WidgetClient
 from demo._enums import Color
 
@@ -279,12 +279,13 @@ try:
 except TypeError:
     pass
 
-# A HEAD request gives None, or raises for a missing widget; a GET can carry a JSON body.
-assert client.widget_exists("w") is None
+# A HEAD request tells whether the widget exists; other errors raise. A GET can carry a JSON body.
+assert client.widget_exists("w") is True
+assert client.widget_exists("missing") is False
 try:
-    client.widget_exists("missing")
+    client.widget_exists("denied")
     raise AssertionError("expected an error")
-except NotFoundError:
+except PermissionDeniedError:
     pass
 assert [w.name for w in client.search_widgets("w", ["a"], {"t": [1, 2]}).widgets] == ["w1", "w2"]
 
