@@ -92,7 +92,7 @@ impl PyExampleClient {
     pub fn list_by_tags(
         &self,
         py: Python,
-        tags: Option<Vec<String>>,
+        tags: Vec<String>,
         max_results: i32,
     ) -> PyExampleResult<PyListByTagsResponse> {
         let request = self.client.list_by_tags(tags, max_results);
