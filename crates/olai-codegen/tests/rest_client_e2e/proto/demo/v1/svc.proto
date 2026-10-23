@@ -77,8 +77,8 @@ message ListWidgetsRequest {
 
 // A label of a widget. Only requests take it, so only it gets a Python constructor.
 message Label {
-  // The key.
-  string key = 1;
+  // The key: a required argument of the constructor.
+  string key = 1 [(google.api.field_behavior) = REQUIRED];
   // The value.
   string value = 2;
 }

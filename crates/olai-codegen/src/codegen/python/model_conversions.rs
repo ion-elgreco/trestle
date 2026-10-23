@@ -847,7 +847,7 @@ fn message_wrapper(
         .flat_map(OneofAccessor::variant_setters);
     let ctor = ctx
         .has_constructor(fq_name)
-        .then(|| constructor(&accessors, &oneofs, &inner));
+        .then(|| constructor(&accessors, &oneofs, &inner, ctx.options.keyword_only));
 
     let repr = if ctx.options.python_repr {
         // The Python names: a raw identifier (`r#type`) is `type` in Python.
@@ -1022,6 +1022,9 @@ struct FieldAccessor {
     json: Option<JsonType>,
     /// Whether the getters carry `pyo3-stub-gen` type overrides.
     stub_gen: bool,
+    /// Whether the proto marks the field `REQUIRED`: a required argument of the constructor
+    /// with [`PythonOptions::keyword_only`](crate::PythonOptions::keyword_only).
+    required: bool,
 }
 
 impl FieldAccessor {
@@ -1073,6 +1076,9 @@ impl FieldAccessor {
             documentation: field.documentation.clone(),
             json: JsonType::of_field(&field.unified_type).filter(|_| runtime == Runtime::Buffa),
             stub_gen: false,
+            required: field
+                .field_behavior
+                .contains(&crate::google::api::FieldBehavior::Required),
         }
     }
 
@@ -1887,10 +1893,14 @@ fn read_map(access: &TokenStream, value: &UnifiedType, in_project: bool) -> Toke
 /// adopters used, see issue #99). Provided values are stored; omitted ones fall
 /// back to the inner type's `Default`. If more than one variant of the same oneof
 /// is supplied, the last one in proto declaration order wins.
+/// The `#[new]` constructor of an input model. Every argument is optional (`None`), except, with
+/// `keyword_only`, the `REQUIRED` fields: they come first, as required arguments, and the others
+/// are keyword-only.
 fn constructor(
     accessors: &[FieldAccessor],
     oneofs: &[OneofAccessor],
     inner: &syn::Path,
+    keyword_only: bool,
 ) -> TokenStream {
     if accessors.is_empty() && oneofs.is_empty() {
         return quote! {
@@ -1901,11 +1911,29 @@ fn constructor(
         };
     }
 
-    // Plain-field params: fields whose Python type is *already* `Option<..>`
+    let is_required = |a: &&FieldAccessor| keyword_only && a.required;
+    let (required, optional): (Vec<&FieldAccessor>, Vec<&FieldAccessor>) =
+        accessors.iter().partition(is_required);
+
+    // A required argument is the bare Python type: a field whose Python type is an `Option`
+    // (a singular message, an explicit-presence scalar) takes its inner type.
+    let required_params = required.iter().map(|a| {
+        let ident = &a.ident;
+        if a.json.is_some() {
+            return quote! { #ident: ::pyo3::Bound<'_, ::pyo3::PyAny> };
+        }
+        let ty = if a.py_type_is_optional() {
+            a.base_py_type()
+        } else {
+            a.py_type()
+        };
+        quote! { #ident: #ty }
+    });
+    // Optional plain fields: fields whose Python type is *already* `Option<..>`
     // (singular messages, explicit-presence scalars) must not be double-wrapped —
     // `Option<Option<T>>` makes pyo3's `#[new]` arg-coercion ambiguous. For those
     // the single `Option` already encodes the "omitted/None" keyword default.
-    let field_params = accessors.iter().map(|a| {
+    let optional_params = optional.iter().map(|a| {
         let ident = &a.ident;
         if a.json.is_some() {
             return quote! { #ident: ::core::option::Option<::pyo3::Bound<'_, ::pyo3::PyAny>> };
@@ -1919,17 +1947,53 @@ fn constructor(
     });
     // One `Option<PyPayload>` param per oneof variant, flattened across all oneofs.
     let oneof_params = oneofs.iter().flat_map(OneofAccessor::ctor_params);
-    let params = field_params.chain(oneof_params);
+    let params = required_params.chain(optional_params).chain(oneof_params);
 
-    // `<name> = None` for every plain field then every oneof variant, in order.
-    let sig_parts = accessors
+    // The required arguments, then `*` with `keyword_only`, then `<name> = None` for every
+    // other plain field and every oneof variant, in order.
+    let optional_idents: Vec<proc_macro2::Ident> = optional
         .iter()
         .map(|a| a.ident.clone())
         .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents))
-        .map(|ident| quote! { #ident = None });
+        .collect();
+    let mut sig_parts: Vec<TokenStream> = required
+        .iter()
+        .map(|a| {
+            let ident = &a.ident;
+            quote! { #ident }
+        })
+        .collect();
+    if keyword_only && !optional_idents.is_empty() {
+        sig_parts.push(quote! { * });
+    }
+    sig_parts.extend(optional_idents.iter().map(|ident| quote! { #ident = None }));
     let sig = quote! { #(#sig_parts),* };
 
-    let assigns = accessors.iter().map(|a| {
+    let required_assigns = required.iter().map(|a| {
+        let ident = &a.ident;
+        let store = match a.json {
+            Some(json) => a.json_store(json),
+            None => a.write_expr(),
+        };
+        // The store expressions read `value`: the `Option` that an optional argument would be,
+        // for a field whose Python type is an `Option`.
+        if a.json.is_none() && a.py_type_is_optional() {
+            quote! {
+                {
+                    let value = ::core::option::Option::Some(#ident);
+                    inner.#ident = #store;
+                }
+            }
+        } else {
+            quote! {
+                {
+                    let value = #ident;
+                    inner.#ident = #store;
+                }
+            }
+        }
+    });
+    let optional_assigns = optional.iter().map(|a| {
         let ident = &a.ident;
         if let Some(json) = a.json {
             let store = a.json_store(json);
@@ -1974,7 +2038,8 @@ fn constructor(
         #[pyo3(signature = (#sig))]
         fn new(#(#params,)*) -> #ret {
             let mut inner = <#inner as ::core::default::Default>::default();
-            #(#assigns)*
+            #(#required_assigns)*
+            #(#optional_assigns)*
             #(#oneof_assigns)*
             #result
         }

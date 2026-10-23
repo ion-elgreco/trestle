@@ -259,7 +259,8 @@ pub struct PythonOptions {
     /// `pyo3-async-runtimes` for the `_async` methods. The binding crate depends on `tokio`.
     /// Without it, the binding crate supplies `crate::runtime::get_runtime(py)`.
     pub runtime: bool,
-    /// Optional parameters of client methods are keyword-only (`*` in the signature).
+    /// Optional parameters of client methods and model constructors are keyword-only (`*` in
+    /// the signature). A constructor then takes the `REQUIRED` fields as required arguments.
     pub keyword_only: bool,
     /// Enums are Python `enum.StrEnum` classes (Python 3.11+): a member equals its name, and
     /// parameters take a member or a name. See [`PyPackageConfig`].

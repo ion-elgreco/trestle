@@ -209,6 +209,12 @@ assert [x.name for x in client.list_widgets()] == ["w1", "w2", "w3"]
 
 # Only models that a request takes have a constructor; optional arguments are keyword-only.
 label = Label(key="k", value="v")
+assert Label("k").key == "k"
+try:
+    Label(value="v")
+    raise AssertionError("expected a TypeError for the missing key")
+except TypeError:
+    pass
 assert label.key == "k"
 try:
     Widget(name="x")
@@ -342,7 +348,7 @@ fn stubs() {
         // A field named after a Rust keyword keeps its Python name.
         "def type(self) -> typing.Optional[builtins.str]:",
         "The color of the widget.",
-        "def __new__(cls, key: typing.Optional[builtins.str] = None",
+        "def __new__(cls, key: builtins.str, *, value: typing.Optional[builtins.str] = None",
         "def get_async(self) -> asyncio.Future[Widget]:",
         "def delete_async(self) -> asyncio.Future[None]:",
         "def attributes(self) -> typing.Optional[dict[str, typing.Any]]:",
