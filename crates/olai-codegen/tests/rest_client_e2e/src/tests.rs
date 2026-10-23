@@ -119,6 +119,30 @@ async fn exchange_token(
     axum::Json(json!({"access_token": "issued", "expires_in": 3600})).into_response()
 }
 
+async fn widget_exists(State(seen): State<Seen>, Path(name): Path<String>) -> StatusCode {
+    seen.push(format!("HEAD {name}"));
+    if name == "missing" {
+        StatusCode::NOT_FOUND
+    } else {
+        StatusCode::OK
+    }
+}
+
+async fn search_widgets(State(seen): State<Seen>, body: Bytes) -> Response {
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    seen.push(format!("GET body {body}"));
+    let prefix = serde_json::from_str::<Value>(&body).unwrap()["prefix"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let widgets: Vec<Value> = ["w1", "w2", "x1"]
+        .into_iter()
+        .filter(|name| name.starts_with(&prefix))
+        .map(|name| json!({"name": name}))
+        .collect();
+    axum::Json(json!({"widgets": widgets})).into_response()
+}
+
 /// Start the demo server on a free port; returns its base URL and what it saw.
 async fn serve() -> (url::Url, Seen) {
     let seen = Seen::default();
@@ -126,8 +150,9 @@ async fn serve() -> (url::Url, Seen) {
         .route("/api/v1/widgets", get(list_widgets).post(create_widget))
         .route(
             "/api/v1/widgets/{name}",
-            get(get_widget).delete(delete_widget),
+            get(get_widget).delete(delete_widget).head(widget_exists),
         )
+        .route("/api/v1/search", get(search_widgets))
         .route("/auth/tokens", post(exchange_token))
         .with_state(seen.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -250,6 +275,24 @@ async fn list_stream_reads_all_pages() {
         .unwrap();
     let names: Vec<_> = all.iter().map(|w| w.name.as_str()).collect();
     assert_eq!(names, ["w1", "w2", "w3"]);
+}
+
+#[tokio::test]
+async fn head_requests_and_get_bodies() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    client.widget_exists("w").await.unwrap();
+    let err = client.widget_exists("missing").await.unwrap_err();
+    assert_eq!(err.status(), Some(404));
+    let found = client.search_widgets("w").await.unwrap();
+    let names: Vec<_> = found.widgets.iter().map(|w| w.name.as_str()).collect();
+    assert_eq!(names, ["w1", "w2"]);
+    let seen = seen.all();
+    assert!(seen.contains(&"HEAD w".to_string()), "{seen:?}");
+    assert!(
+        seen.contains(&r#"GET body {"prefix":"w"}"#.to_string()),
+        "{seen:?}"
+    );
 }
 
 #[tokio::test]

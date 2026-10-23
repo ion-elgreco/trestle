@@ -73,6 +73,11 @@ pub(crate) fn generate() -> String {
                 self.request(Method::DELETE, url)
             }
 
+            /// Start a `HEAD` request.
+            pub fn head(&self, url: Url) -> RequestBuilder {
+                self.request(Method::HEAD, url)
+            }
+
             /// Start a request with any method.
             pub fn request(&self, method: Method, url: Url) -> RequestBuilder {
                 let builder = self.client.request(method, url);

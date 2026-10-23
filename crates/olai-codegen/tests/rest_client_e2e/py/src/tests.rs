@@ -47,6 +47,25 @@ async fn create_widget(axum::Json(body): axum::Json<serde_json::Value>) -> Respo
     axum::Json(json!({"name": body["name"], "created_at": body["created_at"]})).into_response()
 }
 
+async fn widget_exists(Path(name): Path<String>) -> StatusCode {
+    if name == "missing" {
+        StatusCode::NOT_FOUND
+    } else {
+        StatusCode::OK
+    }
+}
+
+/// A `GET` with a JSON body: the widgets whose names start with `prefix`.
+async fn search_widgets(axum::Json(body): axum::Json<serde_json::Value>) -> Response {
+    let prefix = body["prefix"].as_str().unwrap_or_default().to_string();
+    let widgets: Vec<_> = ["w1", "w2", "x1"]
+        .into_iter()
+        .filter(|name| name.starts_with(&prefix))
+        .map(|name| json!({"name": name}))
+        .collect();
+    axum::Json(json!({"widgets": widgets})).into_response()
+}
+
 /// Start the demo server on its own Tokio runtime; returns its base URL and the runtime, which
 /// must stay alive while the test runs.
 fn serve() -> (String, tokio::runtime::Runtime) {
@@ -56,8 +75,11 @@ fn serve() -> (String, tokio::runtime::Runtime) {
             .route("/api/v1/widgets", get(list_widgets).post(create_widget))
             .route(
                 "/api/v1/widgets/{name}",
-                get(get_widget).delete(|| async { StatusCode::OK }),
-            );
+                get(get_widget)
+                    .delete(|| async { StatusCode::OK })
+                    .head(widget_exists),
+            )
+            .route("/api/v1/search", get(search_widgets));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -186,6 +208,15 @@ try:
     raise AssertionError("expected an error")
 except DemoError as e:
     assert type(e) is DemoError and e.status is None and e.code is None
+
+# A HEAD request gives None, or raises for a missing widget; a GET can carry a JSON body.
+assert client.widget_exists("w") is None
+try:
+    client.widget_exists("missing")
+    raise AssertionError("expected an error")
+except NotFoundError:
+    pass
+assert [w.name for w in client.search_widgets("w").widgets] == ["w1", "w2"]
 
 # Each method has an `_async` twin.
 async def main():

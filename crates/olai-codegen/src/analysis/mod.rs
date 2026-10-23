@@ -464,7 +464,10 @@ pub(crate) fn analyze_method(
         .chain(body_fields.into_iter().map(Into::into))
         .collect();
 
-    let has_request_body = types::request_has_body(&request_type);
+    // A write verb has a body; so does any method whose HTTP rule names one (a `GET` with a JSON
+    // body, as some APIs take).
+    let has_request_body =
+        types::request_has_body(&request_type) || !method.http_rule.body.is_empty();
     let needs_request_parts = types::request_needs_request_parts(&request_type);
     let scoped_verb = types::scoped_verb(&request_type);
 

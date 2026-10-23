@@ -126,6 +126,37 @@ service WidgetService {
   }
 }
 
+message WidgetExistsRequest {
+  // The name of the widget.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message SearchWidgetsRequest {
+  // The start of the names to find.
+  string prefix = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Requests that `google.api.http` writes in less common ways.
+service ProbeService {
+  // Whether a widget exists: a `HEAD` request, which fails for a missing widget.
+  rpc WidgetExists(WidgetExistsRequest) returns (Empty) {
+    option (google.api.http) = {
+      custom: {
+        kind: "HEAD"
+        path: "/api/v1/widgets/{name}"
+      }
+    };
+  }
+
+  // Find widgets: a `GET` with a JSON body.
+  rpc SearchWidgets(SearchWidgetsRequest) returns (ListWidgetsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/search"
+      body: "*"
+    };
+  }
+}
+
 // Exchange tokens.
 service TokenService {
   // Exchange a token for an access token.
