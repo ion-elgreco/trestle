@@ -146,6 +146,9 @@ impl GenerateConfig {
                     message_field: e.message_field.clone(),
                     details_field: e.details_field.clone(),
                     code_enum: e.code_enum.clone(),
+                    more_code_fields: e.more_code_fields.clone(),
+                    more_message_fields: e.more_message_fields.clone(),
+                    envelope_fields: e.envelope_fields.clone(),
                 }),
             form_encoded_methods: rust
                 .map(|r| r.form_encoded_methods.clone())

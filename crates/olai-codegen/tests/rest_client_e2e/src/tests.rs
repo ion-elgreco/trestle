@@ -60,6 +60,18 @@ async fn get_widget(
         )
             .into_response(),
         "text" => (StatusCode::BAD_GATEWAY, "bad gateway\n").into_response(),
+        "nested" => (
+            StatusCode::CONFLICT,
+            axum::Json(json!({
+                "error": {"message": "table exists", "type": "AlreadyExistsException", "code": 409}
+            })),
+        )
+            .into_response(),
+        "oauth" => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(json!({"error": "invalid_grant", "error_description": "token expired"})),
+        )
+            .into_response(),
         "json" => axum::Json(json!({
             "name": name,
             "attributes": {"count": 3, "ratio": 0.5, "nested": {"id": 7}},
@@ -297,6 +309,14 @@ async fn error_answers_keep_status_code_message_and_details() {
     assert_eq!(err.status(), Some(502));
     assert_eq!(err.code(), None);
     assert_eq!(err.to_string(), "HTTP 502: bad gateway");
+
+    // An error object under `error`, and OAuth's error keys.
+    let err = client.widget("nested").get().await.unwrap_err();
+    assert_eq!(err.code(), Some("AlreadyExistsException"));
+    assert_eq!(err.to_string(), "AlreadyExistsException: table exists");
+    let err = client.widget("oauth").get().await.unwrap_err();
+    assert_eq!(err.code(), Some("invalid_grant"));
+    assert_eq!(err.to_string(), "invalid_grant: token expired");
 }
 
 #[tokio::test]

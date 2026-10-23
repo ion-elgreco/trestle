@@ -63,6 +63,10 @@ fn demo_config(out: &Path) -> CodeGenConfig {
             ignore_unknown_enum_values: true,
             error_module: Some(ErrorModuleConfig {
                 code_enum: Some(".demo.v1.ErrorCode".into()),
+                // `{"error": {"message", "type"}}` and OAuth's `{"error", "error_description"}`.
+                more_code_fields: vec!["type".into(), "error".into()],
+                more_message_fields: vec!["error_description".into()],
+                envelope_fields: vec!["error".into()],
                 ..Default::default()
             }),
             form_encoded_methods: vec!["demo.v1.TokenService.ExchangeToken".into()],

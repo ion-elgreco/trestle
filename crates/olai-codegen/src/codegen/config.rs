@@ -479,6 +479,16 @@ pub struct ErrorModuleConfig {
     /// error codes. When set, the error exposes the code as that enum; a code that is not in it
     /// is still kept as a string.
     pub code_enum: Option<String>,
+    /// More keys of the code, read in order when `code_field` is not a string in the body: the
+    /// codes of other error shapes of the API, such as OAuth's `error`. Default none.
+    pub more_code_fields: Vec<String>,
+    /// More keys of the message, read in order when `message_field` is not a string in the
+    /// body, such as OAuth's `error_description`. Default none.
+    pub more_message_fields: Vec<String>,
+    /// Keys that hold the whole error object in some answers (`{"error": {"message": …}}`).
+    /// When the body has an object under one of them, the fields are read from the first such
+    /// object. Default none.
+    pub envelope_fields: Vec<String>,
 }
 
 impl Default for ErrorModuleConfig {
@@ -488,6 +498,9 @@ impl Default for ErrorModuleConfig {
             message_field: "message".into(),
             details_field: Some("details".into()),
             code_enum: None,
+            more_code_fields: Vec::new(),
+            more_message_fields: Vec::new(),
+            envelope_fields: Vec::new(),
         }
     }
 }
