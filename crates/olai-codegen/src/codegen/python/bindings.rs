@@ -88,7 +88,7 @@ impl<'a> PyBackend<'a> {
     /// The module that defines the Python error and result types: the generated
     /// `crate::codegen::error` with [`PythonOptions::error_module`], else `crate::error`.
     fn error_module(&self) -> TokenStream {
-        if self.python.error_module {
+        if self.python.error_module.is_some() {
             quote! { crate::codegen::error }
         } else {
             quote! { crate::error }
@@ -167,10 +167,16 @@ impl<'a> PyBackend<'a> {
         // With the generated runtime, the `_async` methods run on it too.
         let init_async = (self.python.runtime && self.python.async_methods)
             .then(|| quote! { crate::codegen::runtime::init_async_runtime(); });
+        let exceptions = self
+            .python
+            .error_module
+            .is_some()
+            .then(|| quote! { crate::codegen::error::add_exceptions(module)?; });
         quote! {
             /// Add the generated classes to the extension module `module`.
             pub fn register(module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>) -> ::pyo3::PyResult<()> {
                 #init_async
+                #exceptions
                 #body
                 Ok(())
             }
@@ -322,7 +328,11 @@ impl BindingBackend for PyBackend<'_> {
         let root_module_arg = super::module_arg(self.python, None);
         let runtime_import = self.runtime_import();
         let helper_modules = {
-            let error = self.python.error_module.then(|| quote! { pub mod error; });
+            let error = self
+                .python
+                .error_module
+                .is_some()
+                .then(|| quote! { pub mod error; });
             let future = self
                 .python
                 .async_methods

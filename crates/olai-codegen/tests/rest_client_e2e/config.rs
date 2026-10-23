@@ -7,7 +7,7 @@ use std::process::Command;
 use olai_codegen::postprocess::{JsonFieldNames, ModelRewrites};
 use olai_codegen::{
     BindingsConfig, CodeGenConfig, CodeGenOutput, ErrorModuleConfig, PyConstructors,
-    PyPackageConfig, PythonOptions, REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions, Runtime,
+    PyErrorModuleConfig, PyPackageConfig, PythonOptions, REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions, Runtime,
 };
 
 /// The fixture directory (the one with `proto/`).
@@ -104,11 +104,12 @@ fn demo_config(out: &Path) -> CodeGenConfig {
                 str_enums: true,
                 hide_unspecified: true,
                 stub_gen: true,
-                error_module: true,
+                error_module: Some(PyErrorModuleConfig {
+                    base_class: "DemoError".into(),
+                }),
                 package: Some(PyPackageConfig {
                     dir: package_dir,
                     name: "demo".into(),
-                    error_base_class: "DemoError".into(),
                 }),
             },
         }),

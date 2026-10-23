@@ -57,8 +57,8 @@ mod wasm;
 
 pub use config::{
     BindingsConfig, ClientProtocol, ClientProtocols, CodeGenConfig, CodeGenOutput,
-    DEFAULT_TRANSPORT_TYPE_PATH, ErrorModuleConfig, ModelsPath, PyConstructors, PyPackageConfig,
-    PythonOptions, RestClientOptions, Runtime,
+    DEFAULT_TRANSPORT_TYPE_PATH, ErrorModuleConfig, ModelsPath, PyConstructors,
+    PyErrorModuleConfig, PyPackageConfig, PythonOptions, RestClientOptions, Runtime,
 };
 pub(crate) use tokens::{doc_tokens, format_tokens, format_tokens_static};
 pub use transport::REQWEST_TRANSPORT_TYPE_PATH;

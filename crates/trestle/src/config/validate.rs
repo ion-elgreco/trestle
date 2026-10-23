@@ -85,10 +85,10 @@ impl TrestleConfig {
         // Python options that build on each other.
         if let Some(python) = &self.generate.clients.python {
             let o = &python.options;
-            if (o.str_enums || o.error_module) && o.package.is_none() {
+            if o.str_enums && o.package.is_none() {
                 return Err(Error::other(
-                    "`clients.python.options.str_enums` and `error_module` write Python files: \
-                     set `clients.python.options.package`",
+                    "`clients.python.options.str_enums` writes `_enums.py`: set \
+                     `clients.python.options.package`",
                 ));
             }
             if o.hide_unspecified && !o.str_enums {

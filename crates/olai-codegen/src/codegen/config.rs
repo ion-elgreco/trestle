@@ -272,12 +272,22 @@ pub struct PythonOptions {
     /// crates depend on `pyo3-stub-gen`.
     pub stub_gen: bool,
     /// Generate the Python error module: `codegen/error.rs` with the error type the bindings
-    /// return, raising the exception classes of the generated `_errors.py`. See
-    /// [`PyPackageConfig`].
-    pub error_module: bool,
-    /// The pure-Python package files: `_enums.py` (with [`str_enums`](Self::str_enums)) and
-    /// `_errors.py` (with [`error_module`](Self::error_module)).
+    /// return and the PyO3 exception classes it raises, which `register` adds to the module. See
+    /// [`PyErrorModuleConfig`]. Needs the client's
+    /// [`RestClientOptions::error_module`].
+    pub error_module: Option<PyErrorModuleConfig>,
+    /// The pure-Python package file `_enums.py` (with [`str_enums`](Self::str_enums)).
     pub package: Option<PyPackageConfig>,
+}
+
+/// The exception classes of the generated Python error module.
+///
+/// The base class has `message`, `code`, `status` and `details`; a subclass per kind of HTTP
+/// error status (`NotFoundError`, `ServerError`, ...) extends it.
+#[derive(Debug, Clone)]
+pub struct PyErrorModuleConfig {
+    /// Name of the base exception class (e.g. `MyServiceError`).
+    pub base_class: String,
 }
 
 /// Which generated Python model classes get a keyword constructor.
@@ -291,16 +301,13 @@ pub enum PyConstructors {
     Inputs,
 }
 
-/// Where the generated pure-Python files go.
+/// Where the generated pure-Python file `_enums.py` goes.
 #[derive(Debug, Clone)]
 pub struct PyPackageConfig {
     /// Directory of the Python package (e.g. `python/my_pkg`).
     pub dir: PathBuf,
-    /// Import name of that package (e.g. `my_pkg`). The files are imported as `<name>._enums`
-    /// and `<name>._errors`.
+    /// Import name of that package (e.g. `my_pkg`). The file is imported as `<name>._enums`.
     pub name: String,
-    /// Name of the base exception class (e.g. `MyServiceError`).
-    pub error_base_class: String,
 }
 
 /// Configuration for code generation, including import paths and output directories.
@@ -567,14 +574,13 @@ impl CodeGenConfig {
     pub(crate) fn validate_options(&self) -> Result<()> {
         let python = self.python_options();
         if self.output.python.is_some() {
-            if (python.str_enums || python.error_module) && python.package.is_none() {
+            if python.str_enums && python.package.is_none() {
                 return Err(Error::Build(
-                    "the Python `str_enums` and `error_module` write Python files: they need \
-                     `PythonOptions::package`"
+                    "the Python `str_enums` write `_enums.py`: they need `PythonOptions::package`"
                         .into(),
                 ));
             }
-            if python.error_module && self.rest_client.error_module.is_none() {
+            if python.error_module.is_some() && self.rest_client.error_module.is_none() {
                 return Err(Error::Build(
                     "the Python `error_module` raises the errors of the client error module: it \
                      needs `RestClientOptions::error_module`"

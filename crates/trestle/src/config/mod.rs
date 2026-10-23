@@ -380,11 +380,11 @@ pub struct PythonOptions {
     /// Annotate for `pyo3-stub-gen` instead of writing the `.pyi` file.
     #[serde(default)]
     pub stub_gen: bool,
-    /// Generate the error module, raising the exceptions of `<package>/_errors.py`. Needs
-    /// `package`.
+    /// Generate the error module with its PyO3 exception classes; the base class is
+    /// `bindings.error_base_class`.
     #[serde(default)]
     pub error_module: bool,
-    /// The pure-Python package that gets `_enums.py` and `_errors.py`.
+    /// The pure-Python package that gets `_enums.py`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub package: Option<PythonPackage>,
 }
@@ -408,8 +408,6 @@ pub struct PythonPackage {
     pub dir: String,
     /// Import name of the package (e.g. `my_pkg`).
     pub name: String,
-    /// Name of the base exception class (e.g. `MyServiceError`).
-    pub error_base_class: String,
 }
 
 /// Node.js client config (NAPI / TypeScript / WASM browser variants).
@@ -653,8 +651,7 @@ mod tests {
              \x20       hide_unspecified: true\n\
              \x20       package:\n\
              \x20         dir: python/client/demo\n\
-             \x20         name: demo\n\
-             \x20         error_base_class: DemoError\n";
+             \x20         name: demo\n";
         let mut cfg: TrestleConfig = serde_yaml::from_str(yaml).unwrap();
         let g = &cfg.generate;
         assert_eq!(g.json_int64, JsonInt64::Number);

@@ -98,9 +98,9 @@ fn python_api() {
     run_python(
         r#"
 import asyncio
+import pickle
 
-from demo import _errors
-from demo._core import DemoClient
+from demo._core import DemoClient, DemoError, NotFoundError, ServerError
 from demo._core.demo import Label, Widget, WidgetClient
 from demo._enums import Color
 
@@ -164,16 +164,28 @@ except TypeError:
 try:
     client.widget("missing").get()
     raise AssertionError("expected an error")
-except _errors.NotFoundError as e:
-    assert isinstance(e, _errors.DemoError)
+except NotFoundError as e:
+    assert isinstance(e, DemoError) and isinstance(e, Exception)
+    assert type(e).__module__ == "demo._core", type(e).__module__
     assert e.code == "WIDGET_NOT_FOUND" and e.status == 404, (e.code, e.status)
     assert e.details == [{"reason": "gone"}], e.details
     assert str(e) == "WIDGET_NOT_FOUND: no widget named missing", str(e)
+    assert repr(e) == "NotFoundError('no widget named missing', code='WIDGET_NOT_FOUND', status=404)", repr(e)
+    # Pickle keeps the class and the fields, as multiprocessing needs.
+    again = pickle.loads(pickle.dumps(e))
+    assert type(again) is NotFoundError and str(again) == str(e) and again.details == e.details
+    assert e.args == ("no widget named missing",), e.args
+# Users can raise them too.
+try:
+    raise ServerError("down", status=503)
+except DemoError as e:
+    assert str(e) == "HTTP 503: down" and e.details == [], (str(e), e.details)
+    assert e.args == ("down",), e.args
 try:
     DemoClient("http://127.0.0.1:9/").widget("w").get()
     raise AssertionError("expected an error")
-except _errors.DemoError as e:
-    assert type(e) is _errors.DemoError and e.status is None and e.code is None
+except DemoError as e:
+    assert type(e) is DemoError and e.status is None and e.code is None
 
 # Each method has an `_async` twin.
 async def main():
@@ -185,7 +197,7 @@ async def main():
     try:
         await client.widget("missing").get_async()
         raise AssertionError("expected an error")
-    except _errors.NotFoundError:
+    except NotFoundError:
         pass
 
 asyncio.run(main())
@@ -217,6 +229,9 @@ fn stubs() {
          color: typing.Optional[_enums.Color | str] = None) -> builtins.list[demo.Widget]:",
         "-> asyncio.Future[builtins.list[demo.Widget]]:",
         "def widget(self, widget_name: builtins.str) -> demo.WidgetClient:",
+        "class DemoError(builtins.Exception):",
+        "class NotFoundError(DemoError):",
+        "def details(self) -> list[typing.Any]:",
     ] {
         assert!(root.contains(expected), "missing `{expected}` in:\n{root}");
     }

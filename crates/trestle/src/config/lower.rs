@@ -257,7 +257,9 @@ impl GenerateConfig {
         };
 
         let python = match py {
-            Some(py) => lower_python_options(&py.options)?,
+            Some(py) => {
+                lower_python_options(&py.options, b.and_then(|b| b.error_base_class.as_deref()))?
+            }
             None => Default::default(),
         };
 
@@ -278,7 +280,21 @@ impl GenerateConfig {
 }
 
 /// Lower the Python options; the package directory is resolved (and created) like the outputs.
-fn lower_python_options(options: &super::PythonOptions) -> Result<olai_codegen::PythonOptions> {
+/// The exceptions of the error module take `error_base_class` (`bindings.error_base_class`).
+fn lower_python_options(
+    options: &super::PythonOptions,
+    error_base_class: Option<&str>,
+) -> Result<olai_codegen::PythonOptions> {
+    let error_module = if options.error_module {
+        let base_class = error_base_class.ok_or_else(|| {
+            Error::other("`clients.python.options.error_module` needs `bindings.error_base_class`")
+        })?;
+        Some(olai_codegen::PyErrorModuleConfig {
+            base_class: base_class.to_string(),
+        })
+    } else {
+        None
+    };
     let package = options
         .package
         .as_ref()
@@ -286,7 +302,6 @@ fn lower_python_options(options: &super::PythonOptions) -> Result<olai_codegen::
             Ok(olai_codegen::PyPackageConfig {
                 dir: resolve_dir(&p.dir)?,
                 name: p.name.clone(),
-                error_base_class: p.error_base_class.clone(),
             })
         })
         .transpose()?;
@@ -304,7 +319,7 @@ fn lower_python_options(options: &super::PythonOptions) -> Result<olai_codegen::
         str_enums: options.str_enums,
         hide_unspecified: options.hide_unspecified,
         stub_gen: options.stub_gen,
-        error_module: options.error_module,
+        error_module,
         package,
     })
 }

@@ -24,12 +24,8 @@ pub(crate) fn helper_files(config: &crate::codegen::CodeGenConfig) -> Vec<(Strin
     };
     let python = &bindings.python;
     let mut files = Vec::new();
-    if python.error_module {
-        let package = python
-            .package
-            .as_ref()
-            .expect("validated: the Python `error_module` has a package");
-        files.push(("error.rs".to_string(), errors::generate(bindings, package)));
+    if let Some(errors) = &python.error_module {
+        files.push(("error.rs".to_string(), errors::generate(bindings, errors)));
     }
     if python.async_methods {
         files.push((
@@ -46,33 +42,22 @@ pub(crate) fn helper_files(config: &crate::codegen::CodeGenConfig) -> Vec<(Strin
     files
 }
 
-/// The pure-Python files of the package (`_enums.py`, `_errors.py`), by file name, when their
-/// options are on.
+/// The pure-Python file of the package, `_enums.py`, by file name, when its option is on.
 pub(crate) fn package_files(
     config: &crate::codegen::CodeGenConfig,
     plan: &crate::analysis::GenerationPlan,
     metadata: &crate::parsing::CodeGenMetadata,
 ) -> Vec<(String, String)> {
     let python = config.python_options();
-    let Some(package) = python.package.as_ref() else {
+    if python.package.is_none() || !python.str_enums {
         return Vec::new();
-    };
-    let mut files = Vec::new();
-    if python.str_enums {
-        let services: Vec<_> = plan.services.iter().collect();
-        let classes = model_conversions::ModelClasses::new(&services, metadata, python);
-        files.push((
-            "_enums.py".to_string(),
-            package::enums_py(metadata, &classes.enums, python),
-        ));
     }
-    if python.error_module {
-        files.push((
-            "_errors.py".to_string(),
-            package::errors_py(&package.error_base_class),
-        ));
-    }
-    files
+    let services: Vec<_> = plan.services.iter().collect();
+    let classes = model_conversions::ModelClasses::new(&services, metadata, python);
+    vec![(
+        "_enums.py".to_string(),
+        package::enums_py(metadata, &classes.enums, python),
+    )]
 }
 
 /// The `pyo3-stub-gen` attribute that goes before a `#[pyclass]`, with

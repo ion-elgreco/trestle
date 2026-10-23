@@ -707,11 +707,12 @@ fn rest_client_and_python_options_generate_valid_code() {
             str_enums: true,
             hide_unspecified: true,
             stub_gen: true,
-            error_module: true,
+            error_module: Some(olai_codegen::PyErrorModuleConfig {
+                base_class: "ExampleError".into(),
+            }),
             package: Some(olai_codegen::PyPackageConfig {
                 dir: package.clone(),
                 name: "example".into(),
-                error_base_class: "ExampleError".into(),
             }),
         },
     });
@@ -770,9 +771,12 @@ fn rest_client_and_python_options_generate_valid_code() {
         !enums.contains("_UNSPECIFIED ="),
         "hidden zero values: {enums}"
     );
-    let errors = std::fs::read_to_string(package.join("_errors.py")).unwrap();
     assert!(
-        errors.contains("class NotFoundError(ExampleError):"),
-        "{errors}"
+        !package.join("_errors.py").exists(),
+        "the exceptions are PyO3 classes"
+    );
+    assert!(
+        bindings.contains("extends = ExampleError") && bindings.contains("add_exceptions(module)"),
+        "PyO3 exception classes missing"
     );
 }

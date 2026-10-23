@@ -172,8 +172,8 @@ Every option is off by default.
 | `str_enums` | Enums are `enum.StrEnum` classes (Python 3.11+) in `<package>/_enums.py`; parameters take a member or a name. |
 | `hide_unspecified` | The zero `*_UNSPECIFIED` value is not a member; a field that holds it reads as `None`. |
 | `stub_gen` | Annotate for `pyo3-stub-gen`, with the proto comments as docs, instead of writing the `.pyi`. |
-| `error_module` | Emit `codegen/error.rs`: client errors raise the exceptions of `<package>/_errors.py`, one class per kind of HTTP error status. Needs the client `error_module`. |
-| `package` | Where `_enums.py` and `_errors.py` go: `{ dir, name, error_base_class }`. |
+| `error_module` | Emit `codegen/error.rs`: client errors raise PyO3 exception classes, a base class (`bindings.error_base_class`) with `message`, `code`, `status` and `details`, and one subclass per kind of HTTP error status, which `register` adds to the module. Needs the client `error_module`. |
+| `package` | Where `_enums.py` goes: `{ dir, name }`. |
 
 `tests/rest_client_e2e` runs a client and Python bindings with all of these against a server.
 

@@ -2,43 +2,125 @@
 //!
 //! It defines the error and result types that the binding methods return
 //! ([`BindingsConfig::py_error_type`] / [`BindingsConfig::py_result_type`]): a client error, or
-//! a Python error. A client error becomes an exception of the generated `_errors.py`: the class
-//! by the HTTP status of the answer, with its message, code, status and details.
+//! a Python error. A client error becomes one of the generated PyO3 exception classes: one base
+//! class with `message`, `code`, `status` and `details`, and one subclass per kind of HTTP
+//! error status. The generated `register` adds them to the extension module.
 //!
 //! [`PythonOptions::error_module`]: crate::codegen::PythonOptions::error_module
 //! [`BindingsConfig::py_error_type`]: crate::codegen::BindingsConfig::py_error_type
 //! [`BindingsConfig::py_result_type`]: crate::codegen::BindingsConfig::py_result_type
 
-use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::package::ERROR_CLASSES;
-use crate::codegen::{BindingsConfig, PyPackageConfig, format_tokens_static};
+use crate::codegen::{BindingsConfig, PyErrorModuleConfig, format_tokens_static};
+
+/// The exception subclasses, one per kind of HTTP error status: `(name, statuses, doc)`.
+/// `ServerError` takes every 5xx status.
+const ERROR_CLASSES: &[(&str, &[u16], &str)] = &[
+    (
+        "BadRequestError",
+        &[400],
+        "The server answered `400 Bad Request`: the request is not valid.",
+    ),
+    (
+        "UnauthenticatedError",
+        &[401],
+        "The server answered `401 Unauthorized`: the request has no valid credentials.",
+    ),
+    (
+        "PermissionDeniedError",
+        &[403],
+        "The server answered `403 Forbidden`: the caller may not do this.",
+    ),
+    (
+        "NotFoundError",
+        &[404],
+        "The server answered `404 Not Found`: the resource does not exist.",
+    ),
+    (
+        "ConflictError",
+        &[409],
+        "The server answered `409 Conflict`: the resource exists or changed.",
+    ),
+    (
+        "RateLimitError",
+        &[429],
+        "The server answered `429 Too Many Requests`.",
+    ),
+    (
+        "ServerError",
+        &[],
+        "The server answered with a `5xx` status: it failed to do the request.",
+    ),
+];
 
 /// The `error.rs` file of the Python bindings.
-pub(crate) fn generate(bindings: &BindingsConfig, package: &PyPackageConfig) -> String {
+pub(crate) fn generate(bindings: &BindingsConfig, errors: &PyErrorModuleConfig) -> String {
+    let python = &bindings.python;
     let error = format_ident!("{}", bindings.py_error_type);
     let result = format_ident!("{}", bindings.py_result_type);
     let client_crate = format_ident!("{}", bindings.client_crate_name);
-    let errors_module = format!("{}._errors", package.name);
-    let base = &package.error_base_class;
+    let base_name = &errors.base_class;
+    let base = format_ident!("{}", errors.base_class);
+    let module_arg = super::module_arg(python, None);
+    let stub_class = super::stub_class_attr(python);
+    let stub_methods = super::stub_methods_attr(python);
+    // The details are JSON values: `list[typing.Any]`, not a bare `list`.
+    let details_stub_type = python.stub_gen.then(|| {
+        quote! {
+            #[gen_stub(override_return_type(type_repr = "list[typing.Any]", imports = ("typing")))]
+        }
+    });
     let error_doc = format!(
-        " The error of a binding call: a client error, raised as an exception of \
-         `{errors_module}`, or a Python error, raised as is."
+        " The error of a binding call: a client error, raised as a `{base_name}`, or a Python \
+         error, raised as is."
     );
 
-    let status_arms: Vec<TokenStream> = ERROR_CLASSES
-        .iter()
-        .filter(|(_, statuses, _)| !statuses.is_empty())
-        .map(|(class, statuses, _)| {
+    let subclasses = ERROR_CLASSES.iter().map(|(name, _, doc)| {
+        let ident = format_ident!("{}", name);
+        let doc = format!(" {doc}");
+        quote! {
+            #[doc = #doc]
+            #stub_class
+            #[::pyo3::pyclass(extends = #base, frozen, name = #name, #module_arg)]
+            pub struct #ident;
+
+            #stub_methods
+            #[::pyo3::pymethods]
+            impl #ident {
+                #[new]
+                #[pyo3(signature = (message, code = None, status = None, details = None))]
+                fn new(
+                    py: Python<'_>,
+                    message: String,
+                    code: Option<String>,
+                    status: Option<u16>,
+                    details: Option<Bound<'_, PyList>>,
+                ) -> PyClassInitializer<Self> {
+                    PyClassInitializer::from(#base::new(py, message, code, status, details))
+                        .add_subclass(Self)
+                }
+            }
+        }
+    });
+    let status_arms = ERROR_CLASSES.iter().map(|(name, statuses, _)| {
+        let ident = format_ident!("{}", name);
+        let pattern = if statuses.is_empty() {
+            quote! { Some(500..=599) }
+        } else {
             let statuses = statuses.iter();
-            quote! { #(Some(#statuses))|* => #class, }
-        })
-        .collect();
+            quote! { #(Some(#statuses))|* }
+        };
+        quote! { #pattern => Bound::new(py, base.add_subclass(#ident))?.into_any(), }
+    });
+    let class_idents = ERROR_CLASSES
+        .iter()
+        .map(|(name, _, _)| format_ident!("{}", name));
 
     let tokens = quote! {
         //! Errors of the Python bindings.
 
+        use pyo3::exceptions::PyException;
         use pyo3::prelude::*;
         use pyo3::types::{PyDict, PyList, PyString};
 
@@ -86,33 +168,156 @@ pub(crate) fn generate(bindings: &BindingsConfig, package: &PyPackageConfig) -> 
             }
         }
 
-        /// The exception class of an answer with HTTP status `status`.
-        fn class_name(status: Option<u16>) -> &'static str {
-            match status {
-                #(#status_arms)*
-                Some(500..=599) => "ServerError",
-                _ => #base,
+        /// An error answer of the server, or a request that got no answer. A subclass tells the
+        /// kind of HTTP error status.
+        #stub_class
+        #[::pyo3::pyclass(
+            // A single ident: pyo3-stub-gen reads `extends` only in that form.
+            extends = PyException,
+            subclass,
+            frozen,
+            name = #base_name,
+            #module_arg
+        )]
+        pub struct #base {
+            message: String,
+            code: Option<String>,
+            status: Option<u16>,
+            details: Py<PyList>,
+        }
+
+        #stub_methods
+        #[::pyo3::pymethods]
+        impl #base {
+            #[new]
+            #[pyo3(signature = (message, code = None, status = None, details = None))]
+            fn new(
+                py: Python<'_>,
+                message: String,
+                code: Option<String>,
+                status: Option<u16>,
+                details: Option<Bound<'_, PyList>>,
+            ) -> Self {
+                Self {
+                    message,
+                    code,
+                    status,
+                    details: details.map_or_else(|| PyList::empty(py).unbind(), Bound::unbind),
+                }
+            }
+
+            /// The fields come from the constructor. `BaseException.__init__` takes no keyword
+            /// arguments, so this one sets `args` to the message, as that one would.
+            #[pyo3(signature = (message, code = None, status = None, details = None))]
+            #[allow(unused_variables)]
+            fn __init__(
+                slf: &Bound<'_, Self>,
+                message: String,
+                code: Option<String>,
+                status: Option<u16>,
+                details: Option<Bound<'_, PyList>>,
+            ) -> PyResult<()> {
+                slf.setattr("args", (message,))
+            }
+
+            /// The error message.
+            #[getter]
+            fn message(&self) -> &str {
+                &self.message
+            }
+
+            /// The error code of the answer, such as `NOT_FOUND`. `None` when the answer has
+            /// none, or when the request got no answer.
+            #[getter]
+            fn code(&self) -> Option<&str> {
+                self.code.as_deref()
+            }
+
+            /// The HTTP status of the answer. `None` when the request got no answer.
+            #[getter]
+            fn status(&self) -> Option<u16> {
+                self.status
+            }
+
+            /// The details of the answer.
+            #details_stub_type
+            #[getter]
+            fn details<'py>(&self, py: Python<'py>) -> Bound<'py, PyList> {
+                self.details.bind(py).clone()
+            }
+
+            fn __str__(&self) -> String {
+                match (&self.code, self.status) {
+                    (Some(code), _) => format!("{code}: {}", self.message),
+                    (None, Some(status)) => format!("HTTP {status}: {}", self.message),
+                    (None, None) => self.message.clone(),
+                }
+            }
+
+            fn __repr__(slf: &Bound<'_, Self>) -> PyResult<String> {
+                let this = slf.get();
+                let py = slf.py();
+                let mut parts = vec![PyString::new(py, &this.message).repr()?.to_string()];
+                if let Some(code) = &this.code {
+                    parts.push(format!("code={}", PyString::new(py, code).repr()?));
+                }
+                if let Some(status) = this.status {
+                    parts.push(format!("status={status}"));
+                }
+                Ok(format!("{}({})", slf.get_type().name()?, parts.join(", ")))
+            }
+
+            /// The class and the arguments that make the exception again, for `pickle`.
+            #[allow(clippy::type_complexity)]
+            fn __reduce__<'py>(
+                slf: &Bound<'py, Self>,
+            ) -> (
+                Bound<'py, ::pyo3::types::PyType>,
+                (String, Option<String>, Option<u16>, Py<PyList>),
+            ) {
+                let this = slf.get();
+                let args = (
+                    this.message.clone(),
+                    this.code.clone(),
+                    this.status,
+                    this.details.clone_ref(slf.py()),
+                );
+                (slf.get_type(), args)
             }
         }
 
-        /// The exception of a client error.
+        #(#subclasses)*
+
+        /// Add the exception classes to the extension module `module`.
+        pub fn add_exceptions(module: &Bound<'_, ::pyo3::types::PyModule>) -> PyResult<()> {
+            module.add_class::<#base>()?;
+            #(module.add_class::<#class_idents>()?;)*
+            Ok(())
+        }
+
+        /// The exception of a client error: the subclass of its HTTP status.
         fn client_exception(py: Python<'_>, e: ClientError) -> PyResult<PyErr> {
-            static ERRORS: ::pyo3::sync::PyOnceLock<Py<::pyo3::types::PyModule>> =
-                ::pyo3::sync::PyOnceLock::new();
             let (message, code, status, details) = match e {
-                ClientError::Api(api) => {
-                    let details = api
-                        .details
-                        .iter()
-                        .map(|d| json_value(py, d))
-                        .collect::<PyResult<::std::vec::Vec<_>>>()?;
-                    (api.message, api.code, Some(api.status), details)
-                }
+                ClientError::Api(api) => (api.message, api.code, Some(api.status), api.details),
                 other => (other.to_string(), None, None, ::std::vec::Vec::new()),
             };
-            let errors = ERRORS.get_or_try_init(py, || py.import(#errors_module).map(Bound::unbind))?;
-            let class = errors.bind(py).getattr(class_name(status))?;
-            let exception = class.call1((message, code, status, PyList::new(py, details)?))?;
+            let details = details
+                .iter()
+                .map(|d| json_value(py, d))
+                .collect::<PyResult<::std::vec::Vec<_>>>()?;
+            let args = (message.clone(),);
+            let base = PyClassInitializer::from(#base {
+                message,
+                code,
+                status,
+                details: PyList::new(py, details)?.unbind(),
+            });
+            let exception = match status {
+                #(#status_arms)*
+                _ => Bound::new(py, base)?.into_any(),
+            };
+            // As `__init__` does for an exception made in Python.
+            exception.setattr("args", args)?;
             Ok(PyErr::from_value(exception))
         }
 
