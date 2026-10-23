@@ -154,8 +154,10 @@ pub(crate) fn generate(
 
         #[derive(Clone)]
         pub struct #aggregate_ident {
-            client: #transport_ident,
-            base_url: Url,
+            // `pub(crate)`: hand-written methods of the client crate can send requests that
+            // the protos cannot describe, with the same transport and base URL.
+            pub(crate) client: #transport_ident,
+            pub(crate) base_url: Url,
         }
 
         impl #aggregate_ident {

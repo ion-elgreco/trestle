@@ -11,8 +11,8 @@ use example_common::models::schemas::v1::*;
 use example_common::models::tags::v1::*;
 #[derive(Clone)]
 pub struct ExampleClient {
-    client: CloudClient,
-    base_url: Url,
+    pub(crate) client: CloudClient,
+    pub(crate) base_url: Url,
 }
 impl ExampleClient {
     /// Create a new aggregate client from a cloud client and base URL.
