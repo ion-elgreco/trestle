@@ -19,7 +19,7 @@ impl ListByTagsBuilder {
     /// Obtain via the corresponding method on `QueryClient`.
     pub(crate) fn new(client: QueryClient, tags: Vec<String>, max_results: i32) -> Self {
         let request = ListByTagsRequest {
-            tags: tags.into(),
+            tags,
             max_results,
         };
         Self { client, request }
