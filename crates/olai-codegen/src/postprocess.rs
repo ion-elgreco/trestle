@@ -213,6 +213,85 @@ fn camel_to_snake(name: &str) -> String {
     out
 }
 
+/// Put blank lines between the items of a pretty-printed Rust file. prettyplease prints none,
+/// and rustfmt keeps blank lines but never adds them.
+///
+/// A blank line goes before an item (an attribute, a doc comment, or an item keyword) that
+/// follows, at the same indentation, a closing `}` or the end of a `use` group; and after the
+/// inner attributes and docs of the file. That covers the items of a module and the functions
+/// of an `impl`. A file that already has these blank lines is returned unchanged.
+pub fn space_items(src: &str) -> String {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = String::with_capacity(src.len() + src.len() / 16);
+    for (i, line) in lines.iter().enumerate() {
+        out.push_str(line);
+        out.push('\n');
+        if lines
+            .get(i + 1)
+            .is_some_and(|next| blank_between(line, next))
+        {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Whether a blank line goes between the lines `line` and `next`.
+fn blank_between(line: &str, next: &str) -> bool {
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    if line.trim().is_empty() || next.trim().is_empty() || indent(line) != indent(next) {
+        return false;
+    }
+    let (line, next) = (line.trim(), next.trim());
+    let is_use = |l: &str| {
+        ["use ", "pub use ", "pub(crate) use ", "pub(super) use "]
+            .iter()
+            .any(|p| l.starts_with(p))
+    };
+    let is_inner = |l: &str| l.starts_with("//!") || l.starts_with("#![");
+    if is_inner(line) {
+        return !is_inner(next);
+    }
+    if !starts_item(next) {
+        return false;
+    }
+    match line {
+        "}" => true,
+        // A multi-line `use` ends with `};`: the next `use` stays in the group.
+        "};" => !is_use(next),
+        _ => is_use(line) && line.ends_with(';') && !is_use(next),
+    }
+}
+
+/// Whether `line` (trimmed) starts an item, or the attributes or docs of one.
+fn starts_item(line: &str) -> bool {
+    const STARTS: &[&str] = &[
+        "#[",
+        "///",
+        "/**",
+        "pub ",
+        "pub(",
+        "fn ",
+        "async fn ",
+        "const fn ",
+        "unsafe ",
+        "extern ",
+        "impl ",
+        "impl<",
+        "struct ",
+        "enum ",
+        "trait ",
+        "mod ",
+        "type ",
+        "const ",
+        "static ",
+        "use ",
+        "macro_rules!",
+        "include!",
+    ];
+    STARTS.iter().any(|p| line.starts_with(p))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,5 +435,68 @@ mod tests {
         assert!(read("demo.v1.rs").contains("crate::models::json_int64::int64"));
         assert_eq!(read("mod.rs"), src);
         assert_eq!(read("extractors/mod.rs"), src);
+    }
+
+    #[test]
+    fn space_items_separates_items_and_functions() {
+        let src = "//! Docs.
+use a::B;
+use c::D;
+/// A thing.
+pub struct S {
+    x: u8,
+}
+impl S {
+    fn a(&self) {
+        if true {
+            f();
+        }
+        g();
+    }
+    #[inline]
+    fn b(&self) -> u8 {
+        match self.x {
+            0 => {
+                1
+            }
+            _ => 2,
+        }
+    }
+}
+";
+        let spaced = space_items(src);
+        assert_eq!(
+            spaced,
+            "//! Docs.
+
+use a::B;
+use c::D;
+
+/// A thing.
+pub struct S {
+    x: u8,
+}
+
+impl S {
+    fn a(&self) {
+        if true {
+            f();
+        }
+        g();
+    }
+
+    #[inline]
+    fn b(&self) -> u8 {
+        match self.x {
+            0 => {
+                1
+            }
+            _ => 2,
+        }
+    }
+}
+"
+        );
+        assert_eq!(space_items(&spaced), spaced);
     }
 }

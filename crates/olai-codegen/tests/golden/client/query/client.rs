@@ -1,15 +1,18 @@
 // @generated — do not edit by hand.
 #![allow(unused_imports)]
+
 use olai_http::CloudClient;
 use url::Url;
 use crate::Result;
 use example_common::models::catalog::v1::*;
+
 /// HTTP client for service operations
 #[derive(Clone)]
 pub struct QueryClient {
     pub(crate) client: CloudClient,
     pub(crate) base_url: Url,
 }
+
 impl QueryClient {
     /// Create a new client instance
     pub fn new(client: CloudClient, mut base_url: Url) -> Self {
@@ -18,6 +21,7 @@ impl QueryClient {
         }
         Self { client, base_url }
     }
+
     /// Repeated string query param
     pub async fn list_by_tags(
         &self,
@@ -36,6 +40,7 @@ impl QueryClient {
         let result = response.bytes().await?;
         Ok(serde_json::from_slice(&result)?)
     }
+
     /// Enum query param
     pub async fn list_by_catalog_type(
         &self,

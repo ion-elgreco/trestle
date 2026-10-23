@@ -1,16 +1,19 @@
 // @generated — do not edit by hand.
 #![allow(unused_imports)]
+
 use olai_http::CloudClient;
 use url::Url;
 use crate::Result;
 use example_common::models::tags::v1::*;
 use super::super::encode_path_value;
+
 /// HTTP client for service operations
 #[derive(Clone)]
 pub struct TagAssignmentClient {
     pub(crate) client: CloudClient,
     pub(crate) base_url: Url,
 }
+
 impl TagAssignmentClient {
     /// Create a new client instance
     pub fn new(client: CloudClient, mut base_url: Url) -> Self {
@@ -19,6 +22,7 @@ impl TagAssignmentClient {
         }
         Self { client, base_url }
     }
+
     /// List assignments for an entity. Path params: entity_type, entity_name.
     pub async fn list_tag_assignments(
         &self,
@@ -39,6 +43,7 @@ impl TagAssignmentClient {
         let result = response.bytes().await?;
         Ok(serde_json::from_slice(&result)?)
     }
+
     /// Create/assign a tag. Path params: entity_type, entity_name; body: tag.
     pub async fn create_tag_assignment(
         &self,
@@ -56,6 +61,7 @@ impl TagAssignmentClient {
         let result = response.bytes().await?;
         Ok(serde_json::from_slice(&result)?)
     }
+
     /// Get a single assignment. Composite key: entity_type, entity_name, tag_key.
     /// Carries a gnostic `operation_id` to exercise annotation-driven binding method naming
     /// (the binding method should be named `fetch_tag_assignment`, not `get_tag_assignment`).
@@ -76,6 +82,7 @@ impl TagAssignmentClient {
         let result = response.bytes().await?;
         Ok(serde_json::from_slice(&result)?)
     }
+
     /// Delete a single assignment. Composite key path params.
     pub async fn delete_tag_assignment(
         &self,
@@ -94,6 +101,7 @@ impl TagAssignmentClient {
         let result = response.bytes().await?;
         Ok(serde_json::from_slice(&result)?)
     }
+
     /// Custom POST RPC targeting a composite key that returns `Empty` — exercises
     /// the `<()>` / void-return path for a resource-less, path-param'd method.
     pub async fn touch_tag_assignment(

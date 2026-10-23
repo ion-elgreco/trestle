@@ -6,10 +6,12 @@ use example_common::models::catalog::v1::*;
 use example_common::models::*;
 use crate::error::{PyExampleError, PyExampleResult};
 use crate::runtime::get_runtime;
+
 #[pyclass(name = "CatalogClient")]
 pub struct PyCatalogClient {
     pub(crate) client: CatalogClient,
 }
+
 #[pymethods]
 impl PyCatalogClient {
     pub fn get(&self, py: Python) -> PyExampleResult<PyCatalog> {
@@ -21,6 +23,7 @@ impl PyCatalogClient {
             Ok::<_, PyExampleError>(PyCatalog::from(result))
         })
     }
+
     #[pyo3(signature = (catalog = None))]
     pub fn update(
         &self,
@@ -36,6 +39,7 @@ impl PyCatalogClient {
             Ok::<_, PyExampleError>(PyCatalog::from(result))
         })
     }
+
     pub fn delete(&self, py: Python) -> PyExampleResult<()> {
         let request = self.client.delete();
         let runtime = get_runtime(py)?;
@@ -45,6 +49,7 @@ impl PyCatalogClient {
             Ok::<_, PyExampleError>(result)
         })
     }
+
     pub fn get_catalog_status(&self, py: Python) -> PyExampleResult<PyCatalogStatus> {
         let request = self.client.get_catalog_status();
         let runtime = get_runtime(py)?;
@@ -55,6 +60,7 @@ impl PyCatalogClient {
         })
     }
 }
+
 impl PyCatalogClient {
     pub fn new(client: CatalogClient) -> Self {
         Self { client }

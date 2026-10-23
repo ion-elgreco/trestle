@@ -1,16 +1,19 @@
 // @generated — do not edit by hand.
 #![allow(unused_imports)]
+
 use olai_http::CloudClient;
 use url::Url;
 use crate::Result;
 use example_common::models::schemas::v1::*;
 use super::super::encode_path_value;
+
 /// HTTP client for service operations
 #[derive(Clone)]
 pub struct SchemaServiceClient {
     pub(crate) client: CloudClient,
     pub(crate) base_url: Url,
 }
+
 impl SchemaServiceClient {
     /// Create a new client instance
     pub fn new(client: CloudClient, mut base_url: Url) -> Self {
@@ -19,6 +22,7 @@ impl SchemaServiceClient {
         }
         Self { client, base_url }
     }
+
     pub async fn create_schema(&self, request: &CreateSchemaRequest) -> Result<Schema> {
         let url = self.base_url.join("schemas")?;
         let response = self.client.post(url).json(request).send().await?;
@@ -28,6 +32,7 @@ impl SchemaServiceClient {
         let result = response.bytes().await?;
         Ok(serde_json::from_slice(&result)?)
     }
+
     pub async fn get_schema(&self, request: &GetSchemaRequest) -> Result<Schema> {
         let formatted_path = format!(
             "schemas/{}", encode_path_value(& request.full_name, false)
@@ -44,6 +49,7 @@ impl SchemaServiceClient {
         let result = response.bytes().await?;
         Ok(serde_json::from_slice(&result)?)
     }
+
     pub async fn list_schemas(
         &self,
         request: &ListSchemasRequest,
@@ -60,6 +66,7 @@ impl SchemaServiceClient {
         let result = response.bytes().await?;
         Ok(serde_json::from_slice(&result)?)
     }
+
     pub async fn update_schema(&self, request: &UpdateSchemaRequest) -> Result<Schema> {
         let formatted_path = format!(
             "schemas/{}", encode_path_value(& request.full_name, false)
@@ -72,6 +79,7 @@ impl SchemaServiceClient {
         let result = response.bytes().await?;
         Ok(serde_json::from_slice(&result)?)
     }
+
     pub async fn delete_schema(
         &self,
         request: &DeleteSchemaRequest,

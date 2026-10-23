@@ -1,16 +1,19 @@
 // @generated — do not edit by hand.
 #![allow(unused_mut)]
 #![allow(unused_imports)]
+
 type BoxFut<'a, T> = ::futures::future::BoxFuture<'a, T>;
 use std::future::IntoFuture;
 use crate::Result;
 use example_common::models::catalog::v1::*;
 use super::client::*;
+
 /// Builder for by tags
 pub struct ListByTagsBuilder {
     client: QueryClient,
     request: ListByTagsRequest,
 }
+
 impl ListByTagsBuilder {
     /// Create a new builder instance.
     /// Obtain via the corresponding method on `QueryClient`.
@@ -27,6 +30,7 @@ impl ListByTagsBuilder {
         Self { client, request }
     }
 }
+
 impl IntoFuture for ListByTagsBuilder {
     type Output = Result<ListByTagsResponse>;
     type IntoFuture = BoxFut<'static, Self::Output>;
@@ -36,11 +40,13 @@ impl IntoFuture for ListByTagsBuilder {
         Box::pin(async move { client.list_by_tags(&request).await })
     }
 }
+
 /// Builder for by catalog type
 pub struct ListByCatalogTypeBuilder {
     client: QueryClient,
     request: ListByCatalogTypeRequest,
 }
+
 impl ListByCatalogTypeBuilder {
     /// Create a new builder instance.
     /// Obtain via the corresponding method on `QueryClient`.
@@ -52,6 +58,7 @@ impl ListByCatalogTypeBuilder {
         Self { client, request }
     }
 }
+
 impl IntoFuture for ListByCatalogTypeBuilder {
     type Output = Result<ListByTagsResponse>;
     type IntoFuture = BoxFut<'static, Self::Output>;

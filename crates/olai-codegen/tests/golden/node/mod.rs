@@ -1,5 +1,6 @@
 // @generated — do not edit by hand.
 #![allow(unused_mut, unused_imports, dead_code, clippy::all)]
+
 pub mod catalog;
 pub mod schema;
 use std::collections::HashMap;
@@ -17,10 +18,12 @@ use example_common::models::schemas::v1::*;
 use example_common::models::tags::v1::*;
 use crate::codegen::catalog::NapiCatalogClient;
 use crate::codegen::schema::NapiSchemaClient;
+
 #[napi]
 pub struct NapiExampleClient {
     client: ExampleClient,
 }
+
 #[napi]
 impl NapiExampleClient {
     #[napi(factory)]
@@ -39,11 +42,13 @@ impl NapiExampleClient {
             client: ExampleClient::new(client, base_url),
         })
     }
+
     #[napi(catch_unwind)]
     pub async fn create_catalog(&self) -> napi::Result<Buffer> {
         let mut request = self.client.create_catalog();
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
     #[napi(catch_unwind)]
     pub async fn list_catalogs(&self, max_results: i32) -> napi::Result<Vec<Buffer>> {
         let mut request = self.client.list_catalogs(max_results, page_token);
@@ -54,6 +59,7 @@ impl NapiExampleClient {
             .await
             .default_error()
     }
+
     #[napi(catch_unwind)]
     pub fn list_catalogs_stream(
         &self,
@@ -71,6 +77,7 @@ impl NapiExampleClient {
                 }),
         )
     }
+
     #[napi(catch_unwind)]
     pub async fn generate_catalog_token(
         &self,
@@ -79,6 +86,7 @@ impl NapiExampleClient {
         let mut request = self.client.generate_catalog_token(catalog_id);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
     #[napi(catch_unwind)]
     pub async fn list_by_tags(
         &self,
@@ -88,6 +96,7 @@ impl NapiExampleClient {
         let mut request = self.client.list_by_tags(tags, max_results);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
     #[napi(catch_unwind)]
     pub async fn list_by_catalog_type(&self, catalog_type: i32) -> napi::Result<Buffer> {
         let mut request = self
@@ -102,6 +111,7 @@ impl NapiExampleClient {
             );
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
     #[napi(catch_unwind)]
     pub async fn create_schema(
         &self,
@@ -123,6 +133,7 @@ impl NapiExampleClient {
             );
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
     #[napi(catch_unwind)]
     pub async fn list_schemas(
         &self,
@@ -139,6 +150,7 @@ impl NapiExampleClient {
             .await
             .default_error()
     }
+
     #[napi(catch_unwind)]
     pub fn list_schemas_stream(
         &self,
@@ -159,6 +171,7 @@ impl NapiExampleClient {
                 }),
         )
     }
+
     #[napi(catch_unwind)]
     pub async fn list_tag_assignments(
         &self,
@@ -172,6 +185,7 @@ impl NapiExampleClient {
             .list_tag_assignments(entity_type, entity_name, max_results, page_token);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
     #[napi(catch_unwind)]
     pub async fn create_tag_assignment(
         &self,
@@ -181,6 +195,7 @@ impl NapiExampleClient {
         let mut request = self.client.create_tag_assignment(entity_type, entity_name);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
     #[napi(catch_unwind)]
     pub async fn fetch_tag_assignment(
         &self,
@@ -193,6 +208,7 @@ impl NapiExampleClient {
             .get_tag_assignment(entity_type, entity_name, tag_key);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
     #[napi(catch_unwind)]
     pub async fn delete_tag_assignment(
         &self,
@@ -205,6 +221,7 @@ impl NapiExampleClient {
             .delete_tag_assignment(entity_type, entity_name, tag_key);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
     #[napi(catch_unwind)]
     pub async fn touch_tag_assignment(
         &self,
@@ -217,12 +234,14 @@ impl NapiExampleClient {
             .touch_tag_assignment(entity_type, entity_name, tag_key);
         request.await.default_error()
     }
+
     #[napi]
     pub fn catalog(&self, catalog_name: String) -> NapiCatalogClient {
         NapiCatalogClient {
             client: self.client.catalog(catalog_name),
         }
     }
+
     #[napi]
     pub fn schema(&self, catalog_name: String, schema_name: String) -> NapiSchemaClient {
         let full_name = format!("{}.{}", catalog_name, schema_name);

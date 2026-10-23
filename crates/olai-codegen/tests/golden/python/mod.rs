@@ -1,5 +1,6 @@
 // @generated — do not edit by hand.
 #![allow(dead_code, unused_imports, clippy::too_many_arguments)]
+
 #[allow(dead_code, unused_imports, clippy::too_many_arguments)]
 pub mod catalog;
 #[allow(dead_code, unused_imports, clippy::too_many_arguments)]
@@ -16,10 +17,12 @@ use example_common::models::tags::v1::*;
 use example_common::models::*;
 use crate::codegen::catalog::PyCatalogClient;
 use crate::codegen::schema::PySchemaClient;
+
 #[pyclass(name = "ExampleClient")]
 pub struct PyExampleClient {
     pub(crate) client: ExampleClient,
 }
+
 #[pymethods]
 impl PyExampleClient {
     #[new]
@@ -32,6 +35,7 @@ impl PyExampleClient {
         };
         Ok(Self { client })
     }
+
     #[pyo3(signature = (catalog = None))]
     pub fn create_catalog(
         &self,
@@ -47,6 +51,7 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(PyCatalog::from(result))
         })
     }
+
     #[pyo3(signature = (max_results))]
     pub fn list_catalogs(
         &self,
@@ -67,6 +72,7 @@ impl PyExampleClient {
             >(result.into_iter().map(PyCatalog::from).collect::<::std::vec::Vec<_>>())
         })
     }
+
     #[pyo3(signature = (catalog_id))]
     pub fn generate_catalog_token(
         &self,
@@ -81,6 +87,7 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(PyCatalogToken::from(result))
         })
     }
+
     #[pyo3(signature = (tags, max_results))]
     pub fn list_by_tags(
         &self,
@@ -96,6 +103,7 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(PyListByTagsResponse::from(result))
         })
     }
+
     #[pyo3(signature = (catalog_type))]
     pub fn list_by_catalog_type(
         &self,
@@ -110,6 +118,7 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(PyListByTagsResponse::from(result))
         })
     }
+
     #[pyo3(signature = (name, catalog_name, schema_type))]
     pub fn create_schema(
         &self,
@@ -126,6 +135,7 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(PySchema::from(result))
         })
     }
+
     #[pyo3(signature = (catalog_name, max_results))]
     pub fn list_schemas(
         &self,
@@ -147,6 +157,7 @@ impl PyExampleClient {
             >(result.into_iter().map(PySchema::from).collect::<::std::vec::Vec<_>>())
         })
     }
+
     #[pyo3(signature = (entity_type, entity_name, max_results, page_token))]
     pub fn list_tag_assignments(
         &self,
@@ -166,6 +177,7 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(PyListTagAssignmentsResponse::from(result))
         })
     }
+
     #[pyo3(signature = (entity_type, entity_name, tag = None))]
     pub fn create_tag_assignment(
         &self,
@@ -183,6 +195,7 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(PyTagAssignment::from(result))
         })
     }
+
     #[pyo3(signature = (entity_type, entity_name, tag_key))]
     pub fn fetch_tag_assignment(
         &self,
@@ -199,6 +212,7 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(PyTagAssignment::from(result))
         })
     }
+
     #[pyo3(signature = (entity_type, entity_name, tag_key))]
     pub fn delete_tag_assignment(
         &self,
@@ -217,6 +231,7 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(PyDeleteTagAssignmentResponse::from(result))
         })
     }
+
     #[pyo3(signature = (entity_type, entity_name, tag_key))]
     pub fn touch_tag_assignment(
         &self,
@@ -235,11 +250,13 @@ impl PyExampleClient {
             Ok::<_, PyExampleError>(result)
         })
     }
+
     pub fn catalog(&self, catalog_name: String) -> PyCatalogClient {
         PyCatalogClient {
             client: self.client.catalog(catalog_name),
         }
     }
+
     pub fn schema(&self, catalog_name: String, schema_name: String) -> PySchemaClient {
         let full_name = format!("{}.{}", catalog_name, schema_name);
         PySchemaClient {
@@ -247,6 +264,7 @@ impl PyExampleClient {
         }
     }
 }
+
 /// Add the generated classes to the extension module `module`.
 pub fn register(
     module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>,

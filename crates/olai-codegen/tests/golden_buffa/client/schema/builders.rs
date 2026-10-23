@@ -1,6 +1,7 @@
 // @generated — do not edit by hand.
 #![allow(unused_mut)]
 #![allow(unused_imports)]
+
 type BoxFut<'a, T> = ::futures::future::BoxFuture<'a, T>;
 type BoxStr<'a, T> = ::futures::stream::BoxStream<'a, T>;
 use futures::{TryStreamExt, StreamExt};
@@ -9,11 +10,13 @@ use std::future::IntoFuture;
 use crate::Result;
 use example_common::models::schemas::v1::*;
 use super::client::*;
+
 /// Builder for creating a schema
 pub struct CreateSchemaBuilder {
     client: SchemaServiceClient,
     request: CreateSchemaRequest,
 }
+
 impl CreateSchemaBuilder {
     /// Create a new builder instance.
     /// Obtain via the corresponding method on `SchemaServiceClient`.
@@ -32,6 +35,7 @@ impl CreateSchemaBuilder {
         Self { client, request }
     }
 }
+
 impl IntoFuture for CreateSchemaBuilder {
     type Output = Result<Schema>;
     type IntoFuture = BoxFut<'static, Self::Output>;
@@ -41,11 +45,13 @@ impl IntoFuture for CreateSchemaBuilder {
         Box::pin(async move { client.create_schema(&request).await })
     }
 }
+
 /// Builder for getting a schema
 pub struct GetSchemaBuilder {
     client: SchemaServiceClient,
     request: GetSchemaRequest,
 }
+
 impl GetSchemaBuilder {
     /// Create a new builder instance.
     /// Obtain via the corresponding method on `SchemaServiceClient`.
@@ -62,6 +68,7 @@ impl GetSchemaBuilder {
         Self { client, request }
     }
 }
+
 impl IntoFuture for GetSchemaBuilder {
     type Output = Result<Schema>;
     type IntoFuture = BoxFut<'static, Self::Output>;
@@ -71,11 +78,13 @@ impl IntoFuture for GetSchemaBuilder {
         Box::pin(async move { client.get_schema(&request).await })
     }
 }
+
 /// Builder for listing schemas
 pub struct ListSchemasBuilder {
     client: SchemaServiceClient,
     request: ListSchemasRequest,
 }
+
 impl ListSchemasBuilder {
     /// Create a new builder instance.
     /// Obtain via the corresponding method on `SchemaServiceClient`.
@@ -93,6 +102,7 @@ impl ListSchemasBuilder {
         };
         Self { client, request }
     }
+
     /// Convert paginated request into stream of results
     pub fn into_stream(self) -> BoxStr<'static, Result<Schema>> {
         let remaining = self.request.max_results;
@@ -117,6 +127,7 @@ impl ListSchemasBuilder {
         stream.boxed()
     }
 }
+
 impl IntoFuture for ListSchemasBuilder {
     type Output = Result<ListSchemasResponse>;
     type IntoFuture = BoxFut<'static, Self::Output>;
@@ -126,11 +137,13 @@ impl IntoFuture for ListSchemasBuilder {
         Box::pin(async move { client.list_schemas(&request).await })
     }
 }
+
 /// Builder for updating a schema
 pub struct UpdateSchemaBuilder {
     client: SchemaServiceClient,
     request: UpdateSchemaRequest,
 }
+
 impl UpdateSchemaBuilder {
     /// Create a new builder instance.
     /// Obtain via the corresponding method on `SchemaServiceClient`.
@@ -144,6 +157,7 @@ impl UpdateSchemaBuilder {
         };
         Self { client, request }
     }
+
     /// Set schema
     pub fn with_schema(mut self, schema: impl Into<Option<Schema>>) -> Self {
         self.request.schema = {
@@ -153,6 +167,7 @@ impl UpdateSchemaBuilder {
         self
     }
 }
+
 impl IntoFuture for UpdateSchemaBuilder {
     type Output = Result<Schema>;
     type IntoFuture = BoxFut<'static, Self::Output>;
@@ -162,11 +177,13 @@ impl IntoFuture for UpdateSchemaBuilder {
         Box::pin(async move { client.update_schema(&request).await })
     }
 }
+
 /// Builder for deleting a schema
 pub struct DeleteSchemaBuilder {
     client: SchemaServiceClient,
     request: DeleteSchemaRequest,
 }
+
 impl DeleteSchemaBuilder {
     /// Create a new builder instance.
     /// Obtain via the corresponding method on `SchemaServiceClient`.
@@ -181,6 +198,7 @@ impl DeleteSchemaBuilder {
         Self { client, request }
     }
 }
+
 impl IntoFuture for DeleteSchemaBuilder {
     type Output = Result<DeleteSchemaResponse>;
     type IntoFuture = BoxFut<'static, Self::Output>;

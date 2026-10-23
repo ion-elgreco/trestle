@@ -6,10 +6,12 @@ use example_common::models::schemas::v1::*;
 use example_common::models::*;
 use crate::error::{PyExampleError, PyExampleResult};
 use crate::runtime::get_runtime;
+
 #[pyclass(name = "SchemaClient")]
 pub struct PySchemaClient {
     pub(crate) client: SchemaClient,
 }
+
 #[pymethods]
 impl PySchemaClient {
     #[pyo3(signature = (view))]
@@ -26,6 +28,7 @@ impl PySchemaClient {
             Ok::<_, PyExampleError>(PySchema::from(result))
         })
     }
+
     #[pyo3(signature = (schema = None))]
     pub fn update(
         &self,
@@ -41,6 +44,7 @@ impl PySchemaClient {
             Ok::<_, PyExampleError>(PySchema::from(result))
         })
     }
+
     pub fn delete(&self, py: Python) -> PyExampleResult<()> {
         let request = self.client.delete();
         let runtime = get_runtime(py)?;
@@ -51,6 +55,7 @@ impl PySchemaClient {
         })
     }
 }
+
 impl PySchemaClient {
     pub fn new(client: SchemaClient) -> Self {
         Self { client }

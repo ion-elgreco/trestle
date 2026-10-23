@@ -8,6 +8,7 @@ pub mod client;
 #[allow(unused_imports)]
 pub use client::*;
 use futures::Future;
+
 pub(super) fn stream_paginated<F, Fut, S, T>(
     state: S,
     op: F,
@@ -45,6 +46,7 @@ where
         },
     )
 }
+
 /// Percent-encode a value for a URL path. `keep_slash` keeps `/`, for a value that
 /// spans several path segments.
 fn encode_path_value(value: &impl ::std::fmt::Display, keep_slash: bool) -> String {
