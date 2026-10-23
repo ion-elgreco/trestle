@@ -357,7 +357,7 @@ fn render_child_builder_args(
     {
         match source {
             BuilderArg::ParentComponent => {
-                let field = format_ident!("{}", param.name());
+                let field = crate::utils::field_ident(param.name());
                 new_args.push(quote! { &self.#field });
             }
             BuilderArg::MethodArg => {

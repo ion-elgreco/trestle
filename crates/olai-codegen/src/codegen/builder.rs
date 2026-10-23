@@ -328,7 +328,7 @@ fn generate_with_methods(
 }
 
 fn builder_with_impl(method: &MethodHandler<'_>, field: &BodyField) -> TokenStream {
-    let field_ident = format_ident!("{}", field.name);
+    let field_ident = crate::utils::field_ident(&field.name);
     let method_name = format_ident!("with_{}", field.name);
     let field_name = &field.name;
 
@@ -425,7 +425,7 @@ fn generate_oneof_variant_methods(
     let Some(variants) = field.oneof_variants.as_ref() else {
         return Ok(Vec::new());
     };
-    let oneof_field_ident = format_ident!("{}", field.name);
+    let oneof_field_ident = crate::utils::field_ident(&field.name);
 
     let enum_type_tokens = method.field_type(&field.field_type, RenderContext::BuilderMethod);
 
@@ -529,7 +529,7 @@ fn generate_into_stream_impl(
             method.plan.handler_function_name
         ))
     })?;
-    let item_field_ident = format_ident!("{}", items_field.name);
+    let item_field_ident = crate::utils::field_ident(&items_field.name);
     let output_type_ident = items_field.unified_type.type_ident();
 
     // The browser stream is `!Send`, so on wasm32 box it with `boxed_local()`

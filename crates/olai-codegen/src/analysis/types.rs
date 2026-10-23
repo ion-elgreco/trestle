@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use convert_case::{Case, Casing};
-use quote::format_ident;
 use syn::Ident;
 
 use crate::error::{Error, Result};
@@ -303,7 +302,7 @@ impl RequestParam {
     }
 
     pub fn field_ident(&self) -> Ident {
-        format_ident!("{}", self.name())
+        crate::utils::field_ident(self.name())
     }
 
     pub fn is_optional(&self) -> bool {

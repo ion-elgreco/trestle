@@ -59,6 +59,7 @@ async fn create_widget(body: String) -> Response {
         "created_at": request["created_at"],
         "attributes": request["attributes"],
         "display_name": body,
+        "type": request["type"],
     }))
     .into_response()
 }
@@ -256,6 +257,8 @@ assert w.rows == {"t": [1, 2]}, w.rows
 created = client.create_widget("w2", attributes={"count": 3, "flag": True, "list": [1, 2.5]})
 assert created.attributes == {"count": 3, "flag": True, "list": [1, 2.5]}, created.attributes
 assert '"count":3' in created.display_name, created.display_name
+# A field named after a Rust keyword keeps its name in Python.
+assert client.create_widget("w4", type="gear").type == "gear"
 try:
     client.create_widget("w3", attributes={"bad": object()})
     raise AssertionError("expected a TypeError")
@@ -328,6 +331,8 @@ fn stubs() {
     for expected in [
         "class Widget:",
         "def color(self) -> typing.Optional[_enums.Color]:",
+        // A field named after a Rust keyword keeps its Python name.
+        "def type(self) -> typing.Optional[builtins.str]:",
         "The color of the widget.",
         "def __new__(cls, key: typing.Optional[builtins.str] = None",
         "def get_async(self) -> asyncio.Future[Widget]:",

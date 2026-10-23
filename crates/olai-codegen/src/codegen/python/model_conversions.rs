@@ -833,10 +833,12 @@ fn message_wrapper(
         .then(|| constructor(&accessors, &oneofs, &inner));
 
     let repr = if ctx.options.python_repr {
+        // The Python names: a raw identifier (`r#type`) is `type` in Python.
         let fields = accessors
             .iter()
-            .map(|a| a.ident.to_string())
-            .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents));
+            .map(|a| a.ident.clone())
+            .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents))
+            .map(|ident| syn::ext::IdentExt::unraw(&ident).to_string());
         quote! {
             fn __repr__(slf: &::pyo3::Bound<'_, Self>) -> ::pyo3::PyResult<::std::string::String> {
                 __python_repr(slf.as_any(), &[#(#fields),*])
@@ -1006,6 +1008,17 @@ struct FieldAccessor {
 }
 
 impl FieldAccessor {
+    /// The name of the getter function. A raw identifier (`r#type`) becomes `get_type`: PyO3 and
+    /// pyo3-stub-gen both drop the `get_` prefix, while pyo3-stub-gen would keep the `r#`.
+    fn getter_ident(&self) -> proc_macro2::Ident {
+        let name = syn::ext::IdentExt::unraw(&self.ident).to_string();
+        if self.ident == name {
+            self.ident.clone()
+        } else {
+            format_ident!("get_{name}")
+        }
+    }
+
     fn new(
         field: &MessageField,
         runtime: Runtime,
@@ -1014,7 +1027,7 @@ impl FieldAccessor {
         is_boxed: bool,
         hidden_zero: bool,
     ) -> Self {
-        let ident = format_ident!("{}", super::sanitize_python_field_name(&field.name));
+        let ident = crate::utils::field_ident(&super::sanitize_python_field_name(&field.name));
         let in_project = match &field.unified_type.base_type {
             BaseType::Message(n) | BaseType::Enum(n) => is_in_project(n, packages),
             _ => false,
@@ -1073,6 +1086,7 @@ impl FieldAccessor {
     /// `float`, `str`, `list` or `dict`).
     fn json_getter(&self, json: JsonType) -> TokenStream {
         let ident = &self.ident;
+        let getter = self.getter_ident();
         let doc = doc_tokens(self.documentation.as_deref());
         let to_py = format_ident!("json_{}_to_py", json.fn_suffix());
         let any = quote! { ::pyo3::Py<::pyo3::PyAny> };
@@ -1114,7 +1128,7 @@ impl FieldAccessor {
             #doc
             #stub_type
             #[getter]
-            fn #ident(&self, py: ::pyo3::Python<'_>) -> ::pyo3::PyResult<#ret> {
+            fn #getter(&self, py: ::pyo3::Python<'_>) -> ::pyo3::PyResult<#ret> {
                 #body
             }
         }
@@ -1235,14 +1249,14 @@ impl FieldAccessor {
         if let Some(json) = self.json {
             return self.json_getter(json);
         }
-        let ident = &self.ident;
+        let getter = self.getter_ident();
         let ret = self.py_type();
         let body = self.read_expr();
         let doc = doc_tokens(self.documentation.as_deref());
         quote! {
             #doc
             #[getter]
-            fn #ident(&self) -> #ret {
+            fn #getter(&self) -> #ret {
                 #body
             }
         }
@@ -1559,7 +1573,8 @@ impl OneofAccessor {
         runtime: Runtime,
         packages: &BTreeSet<String>,
     ) -> Self {
-        let field_ident = format_ident!("{}", super::sanitize_python_field_name(&field.name));
+        let field_ident =
+            crate::utils::field_ident(&super::sanitize_python_field_name(&field.name));
 
         // The oneof enum's name in the IR is already `<msg_snake>::<OneofPascal>`
         // (built in `parsing/message.rs`); it lives in the message's parent module.
@@ -1588,10 +1603,10 @@ impl OneofAccessor {
     }
 
     /// The flattened keyword-arg idents (proto field names), for the `#[pyo3(signature)]`.
-    fn variant_param_idents(&self) -> Vec<String> {
+    fn variant_param_idents(&self) -> Vec<proc_macro2::Ident> {
         self.variants
             .iter()
-            .map(|v| v.param_ident.to_string())
+            .map(|v| v.param_ident.clone())
             .collect()
     }
 
@@ -1699,7 +1714,7 @@ impl OneofAccessor {
 impl OneofVariantAccessor {
     fn new(variant: &OneofVariant, packages: &BTreeSet<String>) -> Self {
         let param_ident =
-            format_ident!("{}", super::sanitize_python_field_name(&variant.field_name));
+            crate::utils::field_ident(&super::sanitize_python_field_name(&variant.field_name));
         let setter_ident = format_ident!("set_{param_ident}");
         let variant_ident = format_ident!("{}", variant.variant_name);
 
@@ -1882,12 +1897,10 @@ fn constructor(
     // `<name> = None` for every plain field then every oneof variant, in order.
     let sig_parts = accessors
         .iter()
-        .map(|a| a.ident.to_string())
+        .map(|a| a.ident.clone())
         .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents))
-        .map(|ident| format!("{ident} = None"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sig: TokenStream = sig_parts.parse().expect("field idents are valid tokens");
+        .map(|ident| quote! { #ident = None });
+    let sig = quote! { #(#sig_parts),* };
 
     let assigns = accessors.iter().map(|a| {
         let ident = &a.ident;

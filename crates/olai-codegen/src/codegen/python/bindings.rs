@@ -834,26 +834,21 @@ fn pyo3_signature(
     // The `*` that goes before the first optional parameter.
     let mut star = keyword_only;
     for p in method.param_plan(mode).iter() {
+        let ident = p.field_ident();
         if p.is_optional() {
             if std::mem::take(&mut star) {
-                signature_parts.push("*".to_string());
+                signature_parts.push(quote! { * });
             }
-            signature_parts.push(format!("{} = None", p.name()));
+            signature_parts.push(quote! { #ident = None });
         } else {
-            signature_parts.push(p.name().to_string());
+            signature_parts.push(quote! { #ident });
         }
     }
     if signature_parts.is_empty() {
         quote! {}
     } else {
-        let signature_string = signature_parts.join(", ");
-        // signature_parts are protobuf field names (always valid identifiers), so parsing
-        // as a TokenStream is infallible.
-        let tokens = signature_string
-            .parse::<proc_macro2::TokenStream>()
-            .unwrap();
         quote! {
-            #[pyo3(signature = (#tokens))]
+            #[pyo3(signature = (#(#signature_parts),*))]
         }
     }
 }

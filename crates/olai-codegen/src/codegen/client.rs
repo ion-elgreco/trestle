@@ -238,7 +238,7 @@ fn read_output(
 /// The statement that sets an output field from its response header, when the header is there and
 /// parses.
 fn header_assignment(method: &MethodHandler<'_>, field: &MessageField) -> Result<TokenStream> {
-    let field_ident = format_ident!("{}", field.name);
+    let field_ident = crate::utils::field_ident(&field.name);
     let header = field.response_header.as_deref().unwrap_or_default();
     let ty = &field.unified_type;
     let is_string = match ty.base_type {
@@ -308,7 +308,7 @@ fn generate_url_formatting(
         let values: Vec<TokenStream> = format_args
             .iter()
             .map(|template_param| {
-                let field_ident = format_ident!("{}", template_param);
+                let field_ident = crate::utils::field_ident(template_param);
                 let keep_slash = method.plan.http_pattern.is_multi_segment(template_param);
                 quote! { encode_path_value(&request.#field_ident, #keep_slash) }
             })
@@ -351,7 +351,7 @@ pub(crate) fn encode_path_value_fn() -> TokenStream {
 fn generate_query_parameters(method: &MethodHandler<'_>) -> proc_macro2::TokenStream {
     let mut param_assignments = Vec::new();
     for param in method.plan.query_parameters() {
-        let field_ident = format_ident!("{}", param.name);
+        let field_ident = crate::utils::field_ident(&param.name);
         let param_name = method.query_key(param);
         let field_type = &param.field_type;
 

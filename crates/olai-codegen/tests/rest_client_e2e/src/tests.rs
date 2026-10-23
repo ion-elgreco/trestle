@@ -91,8 +91,12 @@ async fn create_widget(
     let body = String::from_utf8(body.to_vec()).unwrap();
     seen.push(format!("body {body}"));
     let request: Value = serde_json::from_str(&body).unwrap();
-    axum::Json(json!({"name": request["name"], "created_at": request["created_at"]}))
-        .into_response()
+    axum::Json(json!({
+        "name": request["name"],
+        "created_at": request["created_at"],
+        "type": request["type"],
+    }))
+    .into_response()
 }
 
 async fn list_widgets(State(seen): State<Seen>, uri: OriginalUri, headers: HeaderMap) -> Response {
@@ -233,9 +237,11 @@ async fn requests_write_snake_case_and_int64_numbers() {
         .create_widget("w")
         .with_created_at(1_700_000_000_000_i64)
         .with_display_name("Shown".to_string())
+        .with_type("gear".to_string())
         .await
         .unwrap();
     assert_eq!(created.created_at, Some(1_700_000_000_000));
+    assert_eq!(created.r#type.as_deref(), Some("gear"));
     let body = seen
         .all()
         .into_iter()

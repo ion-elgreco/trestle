@@ -81,7 +81,7 @@ fn is_optional_query(param: &QueryParam, is_list: bool) -> bool {
 }
 
 fn render_one<R: SetterRender>(setter: &OptionalSetter<'_>, render: &R) -> TokenStream {
-    let param_ident = format_ident!("{}", strings::operation_to_method_name(setter.name));
+    let param_ident = crate::utils::field_ident(&strings::operation_to_method_name(setter.name));
     let with_method = format_ident!("with_{}", setter.name);
     render.render_setter(setter, &param_ident, &with_method)
 }
