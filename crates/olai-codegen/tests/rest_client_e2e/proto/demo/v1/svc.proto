@@ -68,6 +68,9 @@ message ListWidgetsRequest {
   optional Color color = 3 [(google.api.field_behavior) = OPTIONAL];
   // Index of the first widget, from 1. Its query key is its explicit JSON name.
   optional int32 first = 4 [json_name = "startIndex"];
+  // The order of the widgets. Its query key is the JSON name that the proto writes out, though
+  // it is the default one.
+  optional string order_by = 5 [json_name = "orderBy"];
 }
 
 // A label of a widget. Only requests take it, so only it gets a Python constructor.
@@ -96,6 +99,10 @@ message CreateWidgetRequest {
   google.protobuf.Struct attributes = 5 [(google.api.field_behavior) = OPTIONAL];
   // The kind of widget.
   optional string type = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Where the widget comes from, sent as the JSON name that the proto writes out.
+  optional string source_url = 7 [json_name = "sourceUrl"];
+  // Tags, sent even when there are none.
+  repeated string tags = 8 [(olai.trestle.v1.emit_unpopulated) = true];
 }
 
 message GetWidgetRequest {

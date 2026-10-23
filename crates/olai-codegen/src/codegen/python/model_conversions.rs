@@ -2119,6 +2119,7 @@ mod tests {
             name: name.to_string(),
             json_name: None,
             response_header: None,
+            emit_unpopulated: false,
             unified_type: ty,
             documentation: None,
             oneof_variants: None,

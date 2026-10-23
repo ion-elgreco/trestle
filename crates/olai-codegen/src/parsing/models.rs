@@ -76,12 +76,14 @@ pub struct MessageInfo {
 #[derive(Debug, Clone)]
 pub struct MessageField {
     pub name: String,
-    /// The `json_name` of the field: the one the proto sets, else protoc's default lowerCamelCase
-    /// name.
+    /// The `json_name` that the proto writes out for the field; `None` for protoc's default
+    /// lowerCamelCase name, even when an explicit name equals it.
     pub json_name: Option<String>,
     /// The HTTP response header that this response field comes from
     /// (`(olai.trestle.v1.response_header)`), instead of the body.
     pub response_header: Option<String>,
+    /// Whether the field is sent even when unpopulated (`(olai.trestle.v1.emit_unpopulated)`).
+    pub emit_unpopulated: bool,
     /// Language-agnostic type; carries `is_optional` and `is_repeated` flags.
     pub unified_type: UnifiedType,
     pub documentation: Option<String>,

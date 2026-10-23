@@ -319,8 +319,8 @@ fn stubs() {
     for expected in [
         "class DemoClient:",
         "def list_widgets(self, *, max_results: typing.Optional[builtins.int] = None, \
-         color: typing.Optional[_enums.Color | str] = None, first: typing.Optional[builtins.int] = None) \
-         -> builtins.list[demo.Widget]:",
+         color: typing.Optional[_enums.Color | str] = None, first: typing.Optional[builtins.int] = None, \
+         order_by: typing.Optional[builtins.str] = None) -> builtins.list[demo.Widget]:",
         "-> asyncio.Future[builtins.list[demo.Widget]]:",
         "def widget(self, widget_name: builtins.str) -> demo.WidgetClient:",
         "class DemoError(builtins.Exception):",

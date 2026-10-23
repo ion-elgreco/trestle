@@ -56,6 +56,7 @@ const GOOGLE_API_RESOURCE_EXTENSION: u32 = 1053; // google.api.resource
 const GOOGLE_API_FIELD_BEHAVIOR_EXTENSION: u32 = 1052; // google.api.field_behavior
 /// `olai.trestle.v1.response_header` (`proto/olai/trestle/v1/annotations.proto`).
 const TRESTLE_RESPONSE_HEADER_EXTENSION: u32 = 51001;
+const TRESTLE_EMIT_UNPOPULATED_EXTENSION: u32 = 51002;
 const GOOGLE_API_RESOURCE_REFERENCE_EXTENSION: u32 = 1055; // google.api.resource_reference
 
 /// Parse a compiled protobuf [`FileDescriptorSet`] into [`CodeGenMetadata`].

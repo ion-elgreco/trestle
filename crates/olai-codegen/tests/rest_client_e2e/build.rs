@@ -42,7 +42,7 @@ fn main() {
     generate_code(&metadata, &config).unwrap();
 
     // 3. The model rewrites.
-    demo_rewrites(&config).rewrite_dir(&gen_dir).unwrap();
+    demo_rewrites(&config, &metadata).rewrite_dir(&gen_dir).unwrap();
 
     // `#[path]` needs a literal path, so mount the generated `mod.rs` through a small file.
     std::fs::write(

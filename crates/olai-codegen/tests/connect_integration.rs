@@ -23,6 +23,7 @@ fn string_field(name: &str, required: bool) -> MessageField {
         name: name.to_string(),
         json_name: None,
         response_header: None,
+        emit_unpopulated: false,
         unified_type: UnifiedType {
             base_type: BaseType::String,
             is_optional: !required,

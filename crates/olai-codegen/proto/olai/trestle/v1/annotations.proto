@@ -11,4 +11,9 @@ extend google.protobuf.FieldOptions {
   // JSON body, such as `Delta-Table-Version`. The generated clients read it from the response;
   // a response without a body gives the message's defaults for its other fields.
   string response_header = 51001;
+
+  // Send this field even when it is unpopulated: an empty string, list or map, zero, `false`, or
+  // (for an `optional` field) `null`. Proto3 JSON leaves such values out, which a server that
+  // requires the key refuses.
+  bool emit_unpopulated = 51002;
 }

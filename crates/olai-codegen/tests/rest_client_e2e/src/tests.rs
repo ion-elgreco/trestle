@@ -250,6 +250,7 @@ async fn requests_write_snake_case_and_int64_numbers() {
         .with_created_at(1_700_000_000_000_i64)
         .with_display_name("Shown".to_string())
         .with_type("gear".to_string())
+        .with_source_url("s3://w".to_string())
         .await
         .unwrap();
     assert_eq!(created.created_at, Some(1_700_000_000_000));
@@ -261,6 +262,9 @@ async fn requests_write_snake_case_and_int64_numbers() {
         .unwrap();
     let body: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(body["created_at"], json!(1_700_000_000_000_i64));
+    // An explicit JSON name stays, and an `emit_unpopulated` field is sent when empty.
+    assert_eq!(body["sourceUrl"], json!("s3://w"));
+    assert_eq!(body["tags"], json!([]));
     assert_eq!(body["display_name"], json!("Shown"));
 
     // Models write the same JSON outside the client.
@@ -431,8 +435,14 @@ async fn query_keys_are_explicit_json_names() {
     let (base, seen) = serve().await;
     let client = DemoClient::new_unauthenticated(base);
     client.list_widgets().with_first(3).await.unwrap();
+    client
+        .list_widgets()
+        .with_order_by("name".to_string())
+        .await
+        .unwrap();
     let seen = seen.all();
     assert!(seen.contains(&"query startIndex=3".to_string()), "{seen:?}");
+    assert!(seen.contains(&"query orderBy=name".to_string()), "{seen:?}");
 }
 
 #[tokio::test]

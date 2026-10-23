@@ -958,6 +958,7 @@ mod tests {
             name: name.to_string(),
             json_name: None,
             response_header: None,
+            emit_unpopulated: false,
             unified_type: UnifiedType {
                 base_type: BaseType::String,
                 is_optional: optional,
@@ -977,6 +978,7 @@ mod tests {
             name: name.to_string(),
             json_name: None,
             response_header: None,
+            emit_unpopulated: false,
             unified_type: UnifiedType {
                 base_type: BaseType::String,
                 is_optional: false,
@@ -1171,6 +1173,7 @@ mod tests {
                     name: "catalog_name".to_string(),
                     json_name: None,
                     response_header: None,
+                    emit_unpopulated: false,
                     unified_type: UnifiedType {
                         base_type: BaseType::String,
                         is_optional: false,
@@ -1200,6 +1203,7 @@ mod tests {
                         name: "catalog_name".to_string(),
                         json_name: None,
                         response_header: None,
+                        emit_unpopulated: false,
                         unified_type: UnifiedType {
                             base_type: BaseType::String,
                             is_optional: false,
@@ -1218,6 +1222,7 @@ mod tests {
                         name: "schema_name".to_string(),
                         json_name: None,
                         response_header: None,
+                        emit_unpopulated: false,
                         unified_type: UnifiedType {
                             base_type: BaseType::String,
                             is_optional: false,

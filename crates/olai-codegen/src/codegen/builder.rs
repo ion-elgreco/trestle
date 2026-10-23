@@ -589,6 +589,7 @@ mod tests {
                 name: "name".to_string(),
                 json_name: None,
                 response_header: None,
+                emit_unpopulated: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: false,
@@ -604,6 +605,7 @@ mod tests {
                 name: "comment".to_string(),
                 json_name: None,
                 response_header: None,
+                emit_unpopulated: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: true,
@@ -619,6 +621,7 @@ mod tests {
                 name: "properties".to_string(),
                 json_name: None,
                 response_header: None,
+                emit_unpopulated: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::Map(
                         Box::new(UnifiedType {

@@ -363,16 +363,14 @@ pub struct QueryParam {
 }
 
 impl QueryParam {
-    /// The key of the parameter in the query string: its JSON name with `json_names` (a
-    /// package whose JSON names are its query keys) or when the proto sets a `json_name` that
-    /// differs from the default lowerCamelCase one; else its proto name. gRPC transcoding
-    /// accepts both.
-    pub fn key(&self, json_names: bool) -> &str {
+    /// The key of the parameter in the query string: the `json_name` that the proto writes
+    /// out; else, with `json_names` (a package whose JSON names are its query keys), the default
+    /// lowerCamelCase JSON name; else the proto name. gRPC transcoding accepts both.
+    pub fn key(&self, json_names: bool) -> std::borrow::Cow<'_, str> {
         match &self.json_name {
-            Some(json) if json_names || *json != crate::utils::strings::lower_camel(&self.name) => {
-                json
-            }
-            _ => &self.name,
+            Some(json) => json.into(),
+            None if json_names => crate::utils::strings::lower_camel(&self.name).into(),
+            None => self.name.as_str().into(),
         }
     }
 
@@ -740,9 +738,9 @@ mod tests {
 
     #[test]
     fn query_key_is_the_proto_name_unless_json_names_are_asked_or_explicit() {
-        let param = |name: &str, json: &str| QueryParam {
+        let param = |name: &str, json: Option<&str>| QueryParam {
             name: name.to_string(),
-            json_name: Some(json.to_string()),
+            json_name: json.map(str::to_string),
             field_type: crate::parsing::types::UnifiedType {
                 base_type: crate::parsing::types::BaseType::Int32,
                 is_optional: true,
@@ -751,11 +749,15 @@ mod tests {
             documentation: None,
             resource_reference: None,
         };
-        // protoc's default JSON name: the proto name, unless the package sends JSON names.
-        assert_eq!(param("start_index", "startIndex").key(false), "start_index");
-        assert_eq!(param("start_index", "startIndex").key(true), "startIndex");
-        // An explicit JSON name that is not the default one.
-        assert_eq!(param("first", "startIndex").key(false), "startIndex");
+        // No `json_name` in the proto: the proto name, unless the package sends JSON names.
+        assert_eq!(param("start_index", None).key(false), "start_index");
+        assert_eq!(param("start_index", None).key(true), "startIndex");
+        // A `json_name` that the proto writes out, even when it is the default one.
+        assert_eq!(param("first", Some("startIndex")).key(false), "startIndex");
+        assert_eq!(
+            param("page_token", Some("pageToken")).key(false),
+            "pageToken"
+        );
     }
 
     use super::*;

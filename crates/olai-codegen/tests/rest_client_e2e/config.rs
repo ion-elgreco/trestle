@@ -6,7 +6,7 @@ use std::process::Command;
 
 use olai_codegen::postprocess::{JsonFieldNames, ModelRewrites};
 use olai_codegen::{
-    BindingsConfig, CodeGenConfig, CodeGenOutput, ErrorModuleConfig, PyConstructors,
+    BindingsConfig, CodeGenConfig, CodeGenMetadata, CodeGenOutput, ErrorModuleConfig, PyConstructors,
     PyErrorModuleConfig, PyPackageConfig, PythonOptions, REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions, Runtime,
 };
 
@@ -123,11 +123,12 @@ fn demo_config(out: &Path) -> CodeGenConfig {
 
 /// The rewrites the `trestle` CLI applies to the buffa output after `buf generate`.
 #[allow(dead_code)]
-fn demo_rewrites(config: &CodeGenConfig) -> ModelRewrites {
+fn demo_rewrites(config: &CodeGenConfig, metadata: &CodeGenMetadata) -> ModelRewrites {
     ModelRewrites {
         field_names: JsonFieldNames::Proto,
         packages: Default::default(),
         int64_module: config.json_int64_module_path(),
         json_value_module: config.json_value_module_path(),
+        fields: olai_codegen::postprocess::field_options(metadata),
     }
 }

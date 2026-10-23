@@ -1429,7 +1429,10 @@ pub(crate) struct MethodHandler<'a> {
 impl MethodHandler<'_> {
     /// The key of the query parameter `param` in the query string: its JSON name in a package of
     /// [`RestClientOptions::json_query_packages`] (see [`QueryParam::key`]).
-    pub(crate) fn query_key<'p>(&self, param: &'p crate::analysis::QueryParam) -> &'p str {
+    pub(crate) fn query_key<'p>(
+        &self,
+        param: &'p crate::analysis::QueryParam,
+    ) -> std::borrow::Cow<'p, str> {
         let input = self.plan.metadata.input_type.trim_start_matches('.');
         let json_names = self
             .config
