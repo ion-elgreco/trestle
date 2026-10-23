@@ -41,6 +41,7 @@ pub(crate) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
 
     let client_ident = service.low_level_client_type(crate::codegen::ClientProtocol::Rest);
     let mod_path = service.models_path();
+    let foreign_models = service.foreign_models_imports();
     let result_path = service.config.client_result_path();
     let (transport_import, transport_ident) = transport_tokens(service.config);
     // `encode_path_value` is in the client `mod.rs`: two levels up, three when each protocol has
@@ -65,6 +66,7 @@ pub(crate) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
         use url::Url;
         use #result_path;
         use #mod_path::*;
+        #(#foreign_models)*
         #encode_import
 
         /// HTTP client for service operations

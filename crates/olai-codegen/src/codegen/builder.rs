@@ -78,6 +78,7 @@ fn generate_builders_module(
         })
         .collect::<crate::error::Result<_>>()?;
     let mod_path: Path = service.models_path();
+    let foreign_models = service.foreign_models_imports();
     let result_path: Path = service.config.client_result_path();
 
     // The streaming machinery (`into_stream`, `stream_paginated`, the futures
@@ -141,6 +142,7 @@ fn generate_builders_module(
         use std::future::IntoFuture;
         use #result_path;
         use #mod_path::*;
+        #(#foreign_models)*
         use super::client::*;
 
         #(#builder_tokens)*

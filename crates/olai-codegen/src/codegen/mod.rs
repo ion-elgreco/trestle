@@ -1330,6 +1330,29 @@ impl ServiceHandler<'_> {
             .resolve(&self.models_segment(), &self.models_version())
     }
 
+    /// The `use` globs of the models of the other packages whose messages the RPCs of this
+    /// service take or return (a response message shared by two packages, say). Well-known
+    /// `google.*` types are not models.
+    pub(crate) fn foreign_models_imports(&self) -> Vec<TokenStream> {
+        let template = ModelsPath::from_template(&self.config.models_path_template);
+        self.methods()
+            .flat_map(|m| {
+                [
+                    m.plan.metadata.input_type.as_str(),
+                    m.plan.metadata.output_type.as_str(),
+                ]
+            })
+            .filter_map(message_package)
+            .filter(|package| *package != self.plan.package && !package.starts_with("google."))
+            .unique()
+            .filter_map(|package| {
+                let segment = package_models_segment(&package)?;
+                let path = template.resolve(segment, package_models_version(&package));
+                Some(quote! { use #path::*; })
+            })
+            .collect()
+    }
+
     pub(crate) fn models_path_crate(&self) -> syn::Path {
         ModelsPath::from_template(&self.config.models_path_crate_template)
             .resolve(&self.models_segment(), &self.models_version())
@@ -1346,6 +1369,18 @@ impl ServiceHandler<'_> {
         let models_path = ModelsPath::from_template(&self.config.models_path_template);
         syn::parse_str(models_path.root()?).ok()
     }
+}
+
+/// The package of a fully qualified message name (`.unitycatalog.shares.v1.ShareInfo` →
+/// `unitycatalog.shares.v1`): its segments up to the first one that starts with an uppercase
+/// letter, as proto packages are lowercase and message names are not.
+fn message_package(type_name: &str) -> Option<String> {
+    let segments: Vec<&str> = type_name
+        .trim_start_matches('.')
+        .split('.')
+        .take_while(|s| s.starts_with(|c: char| c.is_ascii_lowercase()))
+        .collect();
+    (!segments.is_empty()).then(|| segments.join("."))
 }
 
 /// The models module segment of a proto package: the segment before the version
@@ -1627,4 +1662,22 @@ impl MethodHandler<'_> {
 /// parent-prefixes nested types — different behavior.)
 pub(crate) fn extract_type_ident(full_type: &str) -> Ident {
     format_ident!("{}", crate::utils::extract_simple_type_name(full_type))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::message_package;
+
+    #[test]
+    fn message_package_stops_at_the_message_name() {
+        assert_eq!(
+            message_package(".unitycatalog.shares.v1.ShareInfo").as_deref(),
+            Some("unitycatalog.shares.v1")
+        );
+        assert_eq!(
+            message_package("demo.v1.Outer.Inner").as_deref(),
+            Some("demo.v1")
+        );
+        assert_eq!(message_package("Empty"), None);
+    }
 }
