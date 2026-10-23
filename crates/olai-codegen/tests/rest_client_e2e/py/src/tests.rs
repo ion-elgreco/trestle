@@ -260,6 +260,8 @@ try:
     raise AssertionError("expected an error")
 except DemoError as e:
     assert type(e) is DemoError and e.status is None and e.code is None
+    # The message names the cause, as a Python exception has no chain of Rust causes.
+    assert "onnect" in str(e).split("error sending request", 1)[1], str(e)
 
 # Free-form JSON fields are plain Python objects; whole numbers are ints both ways.
 w = client.widget("json").get()

@@ -300,6 +300,12 @@ async fn error_answers_keep_status_code_message_and_details() {
     assert_eq!(e.message, "no widget named missing");
     assert_eq!(e.details, vec![json!({"reason": "gone"})]);
     assert_eq!(e.to_string(), "WIDGET_NOT_FOUND: no widget named missing");
+    // The body as sent stays readable.
+    assert!(
+        e.body.starts_with('{') && e.body.contains("\"reason\":\"gone\""),
+        "{}",
+        e.body
+    );
 
     // A code that the client does not know is kept, from the camelCase key too.
     let err = client.widget("odd").get().await.unwrap_err();
@@ -313,6 +319,8 @@ async fn error_answers_keep_status_code_message_and_details() {
     assert_eq!(err.status(), Some(502));
     assert_eq!(err.code(), None);
     assert_eq!(err.to_string(), "HTTP 502: bad gateway");
+    let Error::Api(e) = err else { unreachable!() };
+    assert_eq!(e.body, "bad gateway\n");
 
     // An error object under `error`, and OAuth's error keys.
     let err = client.widget("nested").get().await.unwrap_err();
