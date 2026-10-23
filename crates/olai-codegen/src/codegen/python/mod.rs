@@ -42,7 +42,8 @@ pub(crate) fn helper_files(config: &crate::codegen::CodeGenConfig) -> Vec<(Strin
     files
 }
 
-/// The pure-Python file of the package, `_enums.py`, by file name, when its option is on.
+/// The pure-Python file of the package, `_enums.py`, by file name, when its option is on and
+/// the project has enums.
 pub(crate) fn package_files(
     config: &crate::codegen::CodeGenConfig,
     plan: &crate::analysis::GenerationPlan,
@@ -54,6 +55,9 @@ pub(crate) fn package_files(
     }
     let services: Vec<_> = plan.services.iter().collect();
     let classes = model_conversions::ModelClasses::new(&services, metadata, python);
+    if classes.enums.is_empty() {
+        return Vec::new();
+    }
     vec![(
         "_enums.py".to_string(),
         package::enums_py(metadata, &classes.enums, python),
