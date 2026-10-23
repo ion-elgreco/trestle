@@ -18,7 +18,7 @@ use crate::codegen::catalog::PyCatalogClient;
 use crate::codegen::schema::PySchemaClient;
 #[pyclass(name = "ExampleClient")]
 pub struct PyExampleClient {
-    client: ExampleClient,
+    pub(crate) client: ExampleClient,
 }
 #[pymethods]
 impl PyExampleClient {

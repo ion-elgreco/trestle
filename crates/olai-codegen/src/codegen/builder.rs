@@ -18,20 +18,20 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::Path;
 
-/// Generate a `#[doc = "..."]` attribute for a field or method.
+/// Generate the `#[doc = "..."]` attributes for a field or method, one per line.
 ///
 /// Uses `doc` if present; otherwise generates a default `"Set <field_name>"` message.
 fn field_doc_attr(doc: Option<&str>, field_name: &str) -> TokenStream {
-    if let Some(doc) = doc {
-        let doc_spaced = format!(" {}", doc.trim_start());
-        quote! { #[doc = #doc_spaced] }
-    } else {
-        let set_msg = format!(" Set {field_name}");
-        quote! { #[doc = #set_msg] }
+    match doc.filter(|d| !d.trim().is_empty()) {
+        Some(doc) => doc_tokens(Some(doc)),
+        None => {
+            let set_msg = format!(" Set {field_name}");
+            quote! { #[doc = #set_msg] }
+        }
     }
 }
 
-use super::format_tokens;
+use super::{doc_tokens, format_tokens};
 use crate::analysis::{BodyField, RequestParam, RequestType};
 use crate::codegen::config::Runtime;
 use crate::codegen::{MethodHandler, ServiceHandler};

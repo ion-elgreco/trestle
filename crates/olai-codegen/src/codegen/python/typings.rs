@@ -332,25 +332,20 @@ fn collect_parameter_documentation(method: &MethodHandler<'_>) -> Vec<(String, S
     param_docs
 }
 
+/// The `Returns:` text of a method's docstring; empty for a method that returns nothing.
 fn get_return_type_documentation(method: &MethodHandler<'_>) -> String {
+    if method.output_type().is_none() {
+        return String::new();
+    }
     match &method.plan.request_type {
-        RequestType::Delete => "None".to_string(),
-        RequestType::List => {
-            if let Some(items_field) = method.list_output_field() {
-                if let Some(doc) = items_field.documentation.as_ref() {
-                    let cleaned_doc = clean_and_format_description(doc);
-                    if cleaned_doc.is_empty() {
-                        "List of items".to_string()
-                    } else {
-                        format!("List of {cleaned_doc}")
-                    }
-                } else {
-                    "List of items".to_string()
-                }
-            } else {
-                "List of items".to_string()
-            }
-        }
+        RequestType::Delete => String::new(),
+        // The list method returns the items themselves; the items field says what they are.
+        RequestType::List => method
+            .list_output_field()
+            .and_then(|field| field.documentation.as_deref())
+            .map(clean_and_format_description)
+            .filter(|doc| !doc.is_empty())
+            .unwrap_or_else(|| "The items.".to_string()),
         _ => {
             if let Some(output_message) = method.output_message() {
                 if let Some(doc) = output_message.info.documentation.as_ref() {

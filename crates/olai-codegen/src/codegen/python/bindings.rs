@@ -340,7 +340,9 @@ impl BindingBackend for PyBackend<'_> {
             #stub_class
             #[pyclass(name = #aggregate_client_name, #root_module_arg)]
             pub struct #py_aggregate_client_ident {
-                client: #aggregate_client_ident
+                // `pub(crate)`: hand-written `#[pymethods]` blocks of the binding crate can add
+                // methods (pyo3's `multiple-pymethods`).
+                pub(crate) client: #aggregate_client_ident
             }
 
             #stub_methods

@@ -139,10 +139,6 @@ class SchemaType(enum.Enum):
 
 class CatalogClient():
     def delete(self) -> None:
-        """
-        Returns:
-            None
-        """
         ...
     def get(self) -> Catalog:
         """
@@ -161,10 +157,6 @@ class CatalogClient():
 
 class SchemaClient():
     def delete(self) -> None:
-        """
-        Returns:
-            None
-        """
         ...
     def get(self, view: GetSchemaRequestView) -> Schema:
         """
@@ -305,7 +297,7 @@ class ExampleClient():
     def list_catalogs(self, max_results: int, page_token: str) -> List[Catalog]:
         """
         Returns:
-            List of items
+            The items.
         """
         ...
     def list_schemas(
@@ -322,7 +314,7 @@ class ExampleClient():
 
 
         Returns:
-            List of items
+            The items.
         """
         ...
     def list_tag_assignments(
@@ -351,10 +343,6 @@ class ExampleClient():
         """
         Custom POST RPC targeting a composite key that returns `Empty` — exercises the `<()>` / void-return
         path for a resource-less, path-param'd method.
-
-
-        Returns:
-            The requested resource
         """
         ...
     def catalog(self, catalog_name: str) -> CatalogClient:

@@ -133,6 +133,13 @@ pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> TokenStream 
     let url_formatting = generate_url_formatting(&method, has_query_params);
     let query_handling = generate_query_parameters(&method);
     let error_module = method.config.client_error_module();
+    // A request with no path value, query parameter or body is not read.
+    let request_ident =
+        if method.plan.formats_path_values() || has_query_params || method.plan.has_request_body {
+            format_ident!("request")
+        } else {
+            format_ident!("_request")
+        };
 
     let body_handling = match (method.plan.has_request_body, form_body) {
         (true, false) => quote! { .json(request) },
@@ -153,7 +160,7 @@ pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> TokenStream 
         };
         quote! {
             #doc_attrs
-            pub async fn #method_name(&self, request: &#input_type_ident) -> Result<#output_type> {
+            pub async fn #method_name(&self, #request_ident: &#input_type_ident) -> Result<#output_type> {
                 #url_formatting
                 #query_handling
                 let response = self.client.#http_method(url)#body_handling.send().await?;
@@ -167,7 +174,7 @@ pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> TokenStream 
     } else {
         quote! {
             #doc_attrs
-            pub async fn #method_name(&self, request: &#input_type_ident) -> Result<()> {
+            pub async fn #method_name(&self, #request_ident: &#input_type_ident) -> Result<()> {
                 #url_formatting
                 #query_handling
                 let response = self.client.#http_method(url)#body_handling.send().await?;
