@@ -548,6 +548,8 @@ fn generate_client_code(
     let mut files = HashMap::new();
     let protocols = config.client_protocols.selected();
     let multi = config.client_protocols.is_multi();
+    // The module path and type of every resource-scoped client, re-exported from the client root.
+    let mut resource_clients = Vec::new();
 
     for service in &plan.services {
         let handler = ServiceHandler {
@@ -589,6 +591,9 @@ fn generate_client_code(
                     })
                     .is_some();
 
+            if has_resource_client && let Some(scoped) = handler.scoped_client_type() {
+                resource_clients.push((prefix.clone(), scoped));
+            }
             files.insert(
                 format!("{prefix}/mod.rs"),
                 generate_client_module(has_resource_client),
@@ -627,7 +632,7 @@ fn generate_client_code(
 
     files.insert(
         "mod.rs".to_string(),
-        generate_client_main_module(&plan.services, config, has_aggregate),
+        generate_client_main_module(&plan.services, config, has_aggregate, &resource_clients),
     );
 
     Ok(GeneratedCode { files })
@@ -749,10 +754,14 @@ pub fn main_module(services: &[ServicePlan]) -> String {
     format_tokens_static(tokens)
 }
 
+/// The client root `mod.rs`. `resource_clients` are the module path (`catalogs`, or
+/// `catalogs/rest` with both protocols) and type of each resource-scoped client, re-exported
+/// here so that a crate can export the whole client with `pub use codegen::*;`.
 fn generate_client_main_module(
     services: &[ServicePlan],
     config: &CodeGenConfig,
     has_aggregate: bool,
+    resource_clients: &[(String, Ident)],
 ) -> String {
     let result_path = config.client_result_path();
     let service_modules: Vec<TokenStream> = services
@@ -760,6 +769,13 @@ fn generate_client_main_module(
         .map(|s| {
             let module_name = format_ident!("{}", s.base_path);
             quote! { pub mod #module_name; }
+        })
+        .collect();
+    let resource_exports: Vec<TokenStream> = resource_clients
+        .iter()
+        .map(|(path, scoped)| {
+            let segments = path.split('/').map(|segment| format_ident!("{}", segment));
+            quote! { pub use #(#segments::)*#scoped; }
         })
         .collect();
 
@@ -852,6 +868,8 @@ fn generate_client_main_module(
 
     let tokens = quote! {
         #(#service_modules)*
+
+        #(#resource_exports)*
 
         #aggregate_module
         #transport_module

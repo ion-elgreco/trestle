@@ -16,8 +16,8 @@ pub mod codegen {
 }
 
 // The binding crate names the clients and the error module from the crate root.
-pub use codegen::widget::WidgetClient;
-pub use codegen::{DemoClient, error, transport};
+// The client root re-exports the root client and every resource client.
+pub use codegen::*;
 
 /// Context type of the (unused) server config.
 pub struct Context;
