@@ -4,6 +4,7 @@ use olai_http::CloudClient;
 use url::Url;
 use crate::Result;
 use example_common::models::tags::v1::*;
+use super::super::encode_path_value;
 /// HTTP client for service operations
 #[derive(Clone)]
 pub struct TagAssignmentClient {
@@ -24,7 +25,8 @@ impl TagAssignmentClient {
         request: &ListTagAssignmentsRequest,
     ) -> Result<ListTagAssignmentsResponse> {
         let formatted_path = format!(
-            "entities/{}/{}/tags", request.entity_type, request.entity_name
+            "entities/{}/{}/tags", encode_path_value(& request.entity_type, false),
+            encode_path_value(& request.entity_name, false)
         );
         let mut url = self.base_url.join(&formatted_path)?;
         url.query_pairs_mut()
@@ -43,7 +45,8 @@ impl TagAssignmentClient {
         request: &CreateTagAssignmentRequest,
     ) -> Result<TagAssignment> {
         let formatted_path = format!(
-            "entities/{}/{}/tags", request.entity_type, request.entity_name
+            "entities/{}/{}/tags", encode_path_value(& request.entity_type, false),
+            encode_path_value(& request.entity_name, false)
         );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.post(url).json(request).send().await?;
@@ -61,8 +64,9 @@ impl TagAssignmentClient {
         request: &GetTagAssignmentRequest,
     ) -> Result<TagAssignment> {
         let formatted_path = format!(
-            "entities/{}/{}/tags/{}", request.entity_type, request.entity_name, request
-            .tag_key
+            "entities/{}/{}/tags/{}", encode_path_value(& request.entity_type, false),
+            encode_path_value(& request.entity_name, false), encode_path_value(& request
+            .tag_key, false)
         );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.get(url).send().await?;
@@ -78,8 +82,9 @@ impl TagAssignmentClient {
         request: &DeleteTagAssignmentRequest,
     ) -> Result<DeleteTagAssignmentResponse> {
         let formatted_path = format!(
-            "entities/{}/{}/tags/{}", request.entity_type, request.entity_name, request
-            .tag_key
+            "entities/{}/{}/tags/{}", encode_path_value(& request.entity_type, false),
+            encode_path_value(& request.entity_name, false), encode_path_value(& request
+            .tag_key, false)
         );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.delete(url).send().await?;
@@ -96,8 +101,9 @@ impl TagAssignmentClient {
         request: &TouchTagAssignmentRequest,
     ) -> Result<()> {
         let formatted_path = format!(
-            "entities/{}/{}/tags/{}:touch", request.entity_type, request.entity_name,
-            request.tag_key
+            "entities/{}/{}/tags/{}:touch", encode_path_value(& request.entity_type,
+            false), encode_path_value(& request.entity_name, false), encode_path_value(&
+            request.tag_key, false)
         );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.post(url).json(request).send().await?;

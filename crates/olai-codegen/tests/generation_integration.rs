@@ -65,6 +65,7 @@ fn rust_config(tmp: &Path) -> CodeGenConfig {
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
+        rest_client: Default::default(),
         output: CodeGenOutput {
             common,
             models: Some(models),
@@ -107,6 +108,7 @@ fn wasm_transport_is_substituted_into_generated_clients() {
         typings_package_filter: None,
         ts_error_base_class: "ExampleError".into(),
         ts_error_code_prefix: "EX".into(),
+        python: Default::default(),
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
 
@@ -184,6 +186,7 @@ fn wasm_bindings_and_dts_are_emitted() {
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
+        rest_client: Default::default(),
         output: CodeGenOutput {
             common,
             models: None,
@@ -210,6 +213,7 @@ fn wasm_bindings_and_dts_are_emitted() {
             typings_package_filter: None,
             ts_error_base_class: "ExampleError".into(),
             ts_error_code_prefix: "EX".into(),
+            python: Default::default(),
         }),
     };
     generate_code(&metadata(), &config).expect("generation succeeds");
@@ -294,6 +298,7 @@ fn wasm_output_emits_dual_cfg_gated_transport() {
         typings_package_filter: None,
         ts_error_base_class: "ExampleError".into(),
         ts_error_code_prefix: "EX".into(),
+        python: Default::default(),
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
 
@@ -416,10 +421,14 @@ fn client_methods_build_urls_query_and_error_handling() {
 
     let client = read_all(&tmp.path().join("client"));
 
-    // GET-by-name builds a templated path from the request field.
+    // GET-by-name builds a templated path from the percent-encoded request field.
     assert!(
-        client.contains("format!(\"catalogs/{}\", request.name)"),
+        client.contains("\"catalogs/{}\", encode_path_value(& request.name, false)"),
         "GET path templating missing:\n{client}"
+    );
+    assert!(
+        client.contains("fn encode_path_value("),
+        "path encoding helper missing"
     );
     // Collection POST hits the bare collection URL.
     assert!(
@@ -616,6 +625,7 @@ fn node_ts_bindings_generated() {
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
+        rest_client: Default::default(),
         output: CodeGenOutput {
             common,
             models: None,
@@ -642,6 +652,7 @@ fn node_ts_bindings_generated() {
             typings_package_filter: Some(".example.".into()),
             ts_error_base_class: "ExampleError".into(),
             ts_error_code_prefix: "EX".into(),
+            python: Default::default(),
         }),
     };
     generate_code(&metadata(), &config).expect("generation succeeds");
@@ -652,4 +663,111 @@ fn node_ts_bindings_generated() {
         "aggregate client name missing"
     );
     assert!(ts.contains("ExampleError"), "error base class missing");
+}
+
+// ── REST client and Python options ───────────────────────────────────────────
+
+/// Every REST client and Python option at once (reqwest transport, error modules, async twins,
+/// frozen models, str enums, stub annotations, …): the Rust files parse, and the Python package
+/// files and the stub annotations are there. The opt-in `tests/rest_client_e2e` fixture compiles
+/// and runs this output against a server.
+#[test]
+fn rest_client_and_python_options_generate_valid_code() {
+    let tmp = TempDir::new().unwrap();
+    let mut config = rust_config(tmp.path());
+    config.runtime = olai_codegen::Runtime::Buffa;
+    config.transport_type_path = olai_codegen::REQWEST_TRANSPORT_TYPE_PATH.into();
+    config.output.generate_resource_clients = true;
+    let python = tmp.path().join("python");
+    let package = tmp.path().join("pkg");
+    config.output.python = Some(python.clone());
+    config.rest_client = olai_codegen::RestClientOptions {
+        json_int64_as_number: true,
+        ignore_unknown_enum_values: true,
+        error_module: Some(Default::default()),
+        form_encoded_methods: vec![],
+    };
+    config.bindings = Some(BindingsConfig {
+        aggregate_client_name: "ExampleClient".into(),
+        client_crate_name: "example_client".into(),
+        py_error_type: "PyExampleError".into(),
+        py_result_type: "PyExampleResult".into(),
+        napi_error_ext_trait: "NapiErrorExt".into(),
+        typings_package_filter: None,
+        ts_error_base_class: "ExampleError".into(),
+        ts_error_code_prefix: "EX".into(),
+        python: olai_codegen::PythonOptions {
+            frozen_models: true,
+            constructors: olai_codegen::PyConstructors::Inputs,
+            python_repr: true,
+            module: Some("example._core".into()),
+            async_methods: true,
+            keyword_only: true,
+            str_enums: true,
+            hide_unspecified: true,
+            stub_gen: true,
+            error_module: true,
+            package: Some(olai_codegen::PyPackageConfig {
+                dir: package.clone(),
+                name: "example".into(),
+                error_base_class: "ExampleError".into(),
+            }),
+        },
+    });
+    generate_code(&metadata(), &config).expect("generation succeeds");
+
+    for dir in ["client", "python", "models"] {
+        for path in walk(&tmp.path().join(dir))
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "rs"))
+        {
+            let src = std::fs::read_to_string(&path).unwrap();
+            syn::parse_file(&src)
+                .unwrap_or_else(|e| panic!("generated {} is invalid Rust: {e}", path.display()));
+        }
+    }
+
+    let client = read_all(&tmp.path().join("client"));
+    assert!(
+        client.contains("pub struct HttpClient"),
+        "reqwest transport missing"
+    );
+    assert!(
+        client.contains("pub struct ApiError"),
+        "error module missing"
+    );
+    assert!(client.contains("ignore_unknown_enum_values(true)"));
+
+    let models = read_all(&tmp.path().join("models"));
+    assert!(
+        models.contains("pub mod json_int64"),
+        "int64 helpers missing"
+    );
+    assert!(models.contains("frozen"), "frozen models missing");
+    assert!(
+        models.contains("gen_stub_pyclass"),
+        "stub annotations missing"
+    );
+    assert!(models.contains("__python_repr"), "Python repr missing");
+
+    let bindings = read_all(&python);
+    assert!(bindings.contains("_async"), "async twins missing");
+    assert!(bindings.contains("pub fn register("), "register missing");
+    assert!(bindings.contains("PyFuture"), "PyFuture helper missing");
+    assert!(
+        !python.join("client.pyi").exists(),
+        "stub_gen replaces the .pyi file"
+    );
+
+    let enums = std::fs::read_to_string(package.join("_enums.py")).unwrap();
+    assert!(enums.contains("(enum.StrEnum):"), "{enums}");
+    assert!(
+        !enums.contains("_UNSPECIFIED ="),
+        "hidden zero values: {enums}"
+    );
+    let errors = std::fs::read_to_string(package.join("_errors.py")).unwrap();
+    assert!(
+        errors.contains("class NotFoundError(ExampleError):"),
+        "{errors}"
+    );
 }

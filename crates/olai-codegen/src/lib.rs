@@ -52,11 +52,14 @@ pub mod error;
 pub mod openapi_enrich;
 pub mod output;
 pub mod parsing;
+pub mod postprocess;
 pub mod utils;
 
 pub use codegen::{
     BindingsConfig, ClientProtocol, ClientProtocols, CodeGenConfig, CodeGenOutput,
-    DEFAULT_TRANSPORT_TYPE_PATH, GeneratedCode, Runtime, generate_code, generate_models_mod,
+    DEFAULT_TRANSPORT_TYPE_PATH, ErrorModuleConfig, GeneratedCode, PyConstructors, PyPackageConfig,
+    PythonOptions, REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions, Runtime, generate_code,
+    generate_models_mod,
 };
 
 pub use analysis::{

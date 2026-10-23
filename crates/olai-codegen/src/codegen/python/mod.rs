@@ -5,15 +5,107 @@
 //! - `typings`: `.pyi` type stub generation for Python IDE support
 
 mod bindings;
+mod errors;
+mod future;
 mod model_conversions;
+mod package;
 mod typings;
 
 pub(crate) use bindings::{generate, main_module};
 pub(crate) use model_conversions::generate_pyo3_impls;
 pub(crate) use typings::generate_typings;
 
+/// The extra files of the Python bindings, by path relative to the binding output: the error
+/// module and the `PyFuture` helper, when their options are on.
+pub(crate) fn helper_files(config: &crate::codegen::CodeGenConfig) -> Vec<(String, String)> {
+    let Some(bindings) = config.bindings.as_ref() else {
+        return Vec::new();
+    };
+    let python = &bindings.python;
+    let mut files = Vec::new();
+    if python.error_module {
+        let package = python
+            .package
+            .as_ref()
+            .expect("validated: the Python `error_module` has a package");
+        files.push(("error.rs".to_string(), errors::generate(bindings, package)));
+    }
+    if python.async_methods {
+        files.push((
+            "py_future.rs".to_string(),
+            future::generate(python.stub_gen),
+        ));
+    }
+    files
+}
+
+/// The pure-Python files of the package (`_enums.py`, `_errors.py`), by file name, when their
+/// options are on.
+pub(crate) fn package_files(
+    config: &crate::codegen::CodeGenConfig,
+    plan: &crate::analysis::GenerationPlan,
+    metadata: &crate::parsing::CodeGenMetadata,
+) -> Vec<(String, String)> {
+    let python = config.python_options();
+    let Some(package) = python.package.as_ref() else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    if python.str_enums {
+        let services: Vec<_> = plan.services.iter().collect();
+        let classes = model_conversions::ModelClasses::new(&services, metadata, python);
+        files.push((
+            "_enums.py".to_string(),
+            package::enums_py(metadata, &classes.enums, python),
+        ));
+    }
+    if python.error_module {
+        files.push((
+            "_errors.py".to_string(),
+            package::errors_py(&package.error_base_class),
+        ));
+    }
+    files
+}
+
+/// The `pyo3-stub-gen` attribute that goes before a `#[pyclass]`, with
+/// [`PythonOptions::stub_gen`].
+fn stub_class_attr(options: &PythonOptions) -> Option<TokenStream> {
+    options
+        .stub_gen
+        .then(|| quote! { #[::pyo3_stub_gen::derive::gen_stub_pyclass] })
+}
+
+/// The `pyo3-stub-gen` attribute that goes before a `#[pymethods]`, with
+/// [`PythonOptions::stub_gen`].
+fn stub_methods_attr(options: &PythonOptions) -> Option<TokenStream> {
+    options
+        .stub_gen
+        .then(|| quote! { #[::pyo3_stub_gen::derive::gen_stub_pymethods] })
+}
+
+/// The `module = "…",` argument of a `#[pyclass]` with [`PythonOptions::module`]: the module
+/// itself, or its submodule of the models segment `segment` of a proto package.
+fn module_arg(options: &PythonOptions, segment: Option<&str>) -> Option<TokenStream> {
+    let root = options.module.as_deref()?;
+    let module = match segment {
+        Some(segment) => format!("{root}.{segment}"),
+        None => root.to_string(),
+    };
+    Some(quote! { module = #module, })
+}
+
+/// The Python submodule segment of a proto package: its models segment
+/// (`a.catalogs.v1` → `catalogs`).
+fn package_segment(package: &str) -> &str {
+    crate::codegen::package_models_segment(package).unwrap_or(package)
+}
+
+use proc_macro2::TokenStream;
+use quote::quote;
+
 use crate::analysis::RequestType;
-use crate::codegen::MethodHandler;
+use crate::codegen::{MethodHandler, PythonOptions};
 use crate::parsing::types::UnifiedType;
 use crate::utils::extract_simple_type_name;
 

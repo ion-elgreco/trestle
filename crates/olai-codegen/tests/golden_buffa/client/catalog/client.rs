@@ -4,6 +4,7 @@ use olai_http::CloudClient;
 use url::Url;
 use crate::Result;
 use example_common::models::catalog::v1::*;
+use super::super::encode_path_value;
 /// HTTP client for service operations
 #[derive(Clone)]
 pub struct CatalogServiceClient {
@@ -31,7 +32,9 @@ impl CatalogServiceClient {
         Ok(serde_json::from_slice(&result)?)
     }
     pub async fn get_catalog(&self, request: &GetCatalogRequest) -> Result<Catalog> {
-        let formatted_path = format!("catalogs/{}", request.name);
+        let formatted_path = format!(
+            "catalogs/{}", encode_path_value(& request.name, false)
+        );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.get(url).send().await?;
         if !response.status().is_success() {
@@ -59,7 +62,9 @@ impl CatalogServiceClient {
         &self,
         request: &UpdateCatalogRequest,
     ) -> Result<Catalog> {
-        let formatted_path = format!("catalogs/{}", request.name);
+        let formatted_path = format!(
+            "catalogs/{}", encode_path_value(& request.name, false)
+        );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.patch(url).json(request).send().await?;
         if !response.status().is_success() {
@@ -72,7 +77,9 @@ impl CatalogServiceClient {
         &self,
         request: &DeleteCatalogRequest,
     ) -> Result<DeleteCatalogResponse> {
-        let formatted_path = format!("catalogs/{}", request.name);
+        let formatted_path = format!(
+            "catalogs/{}", encode_path_value(& request.name, false)
+        );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.delete(url).send().await?;
         if !response.status().is_success() {
@@ -103,7 +110,9 @@ impl CatalogServiceClient {
         &self,
         request: &GetCatalogStatusRequest,
     ) -> Result<CatalogStatus> {
-        let formatted_path = format!("catalogs/{}/status", request.name);
+        let formatted_path = format!(
+            "catalogs/{}/status", encode_path_value(& request.name, false)
+        );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.get(url).send().await?;
         if !response.status().is_success() {

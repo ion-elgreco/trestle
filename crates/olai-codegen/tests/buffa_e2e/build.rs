@@ -55,8 +55,10 @@ fn main() {
         resource_store_crate_name: "olai_store".into(),
         runtime: Runtime::Buffa,
         transport_type_path: olai_codegen::DEFAULT_TRANSPORT_TYPE_PATH.into(),
+        dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
+        rest_client: Default::default(),
         output: CodeGenOutput {
             common: common_dir,
             models: Some(models_dir),
@@ -90,6 +92,7 @@ fn main() {
             typings_package_filter: Some(".demo.".into()),
             ts_error_base_class: "DemoError".into(),
             ts_error_code_prefix: "DEMO".into(),
+            python: Default::default(),
         }),
     };
     generate_code(&metadata, &config).unwrap();

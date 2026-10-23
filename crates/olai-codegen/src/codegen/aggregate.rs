@@ -96,40 +96,50 @@ pub(crate) fn generate(
     } else {
         quote! {}
     };
-    let cloud_ctors = quote! {
-        #native_cfg
-        /// Create a new aggregate client with no authentication.
-        pub fn new_unauthenticated(base_url: Url) -> Self {
-            Self::new(#transport_ident::new_unauthenticated(), base_url)
-        }
-
-        #native_cfg
-        /// Create a new aggregate client authenticating with a bearer token.
-        // `token` stays `impl ToString` to match `CloudClient::new_with_token`'s own signature.
-        pub fn new_with_token(base_url: Url, token: impl ToString) -> Self {
-            Self::new(#transport_ident::new_with_token(token), base_url)
-        }
-    };
-    let wasm_ctor = quote! {
-        #[cfg(target_arch = "wasm32")]
-        /// Create a new aggregate client. The browser supplies the session
-        /// (cookies / forwarded auth) on each request.
-        pub fn new_in_browser(base_url: Url) -> Self {
-            Self::new(#transport_ident::new(), base_url)
-        }
-    };
-
-    let convenience_ctors = if dual {
-        quote! {
-            #cloud_ctors
-            #wasm_ctor
-        }
-    } else if config.uses_default_transport() {
-        // Single cloud transport: emit the cloud ctors bare.
-        cloud_ctors
+    // The no-auth and bearer-token transports: the cloud client's own constructors, or the
+    // generated reqwest transport. A custom transport gets only `new(transport, base_url)`.
+    let token_ctors = if dual || config.uses_default_transport() {
+        Some((
+            quote! { #transport_ident::new_unauthenticated() },
+            quote! { #transport_ident::new_with_token(token) },
+        ))
+    } else if config.uses_reqwest_transport() {
+        Some((
+            quote! { #transport_ident::default() },
+            quote! { #transport_ident::default().with_token(token.to_string()) },
+        ))
     } else {
-        // Single custom transport: only the generic `new(transport, base_url)`.
-        quote! {}
+        None
+    };
+    let token_ctors = token_ctors.map(|(unauthenticated, with_token)| {
+        quote! {
+            #native_cfg
+            /// Create a new aggregate client with no authentication.
+            pub fn new_unauthenticated(base_url: Url) -> Self {
+                Self::new(#unauthenticated, base_url)
+            }
+
+            #native_cfg
+            /// Create a new aggregate client authenticating with a bearer token.
+            // `token` stays `impl ToString` to match `CloudClient::new_with_token`'s own signature.
+            pub fn new_with_token(base_url: Url, token: impl ToString) -> Self {
+                Self::new(#with_token, base_url)
+            }
+        }
+    });
+    let wasm_ctor = dual.then(|| {
+        quote! {
+            #[cfg(target_arch = "wasm32")]
+            /// Create a new aggregate client. The browser supplies the session
+            /// (cookies / forwarded auth) on each request.
+            pub fn new_in_browser(base_url: Url) -> Self {
+                Self::new(#transport_ident::new(), base_url)
+            }
+        }
+    });
+    let convenience_ctors = quote! {
+        #token_ctors
+        #wasm_ctor
     };
 
     let imports = generate_imports(&services, &transport_import);

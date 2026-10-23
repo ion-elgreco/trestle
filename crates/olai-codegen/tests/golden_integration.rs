@@ -84,6 +84,7 @@ fn full_config(tmp: &Path, runtime: Runtime) -> CodeGenConfig {
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
+        rest_client: Default::default(),
         output: CodeGenOutput {
             common,
             models: Some(models),
@@ -110,6 +111,7 @@ fn full_config(tmp: &Path, runtime: Runtime) -> CodeGenConfig {
             typings_package_filter: Some(".example.".into()),
             ts_error_base_class: "ExampleError".into(),
             ts_error_code_prefix: "EX".into(),
+            python: Default::default(),
         }),
     }
 }

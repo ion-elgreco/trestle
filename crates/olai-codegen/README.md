@@ -138,6 +138,44 @@ Generated clients are decoupled from their HTTP transport via
 add `output.wasm` + `runtime: buffa` to also emit `#[wasm_bindgen]` JS bindings
 and a `client.d.ts`. See the `olai-http-wasm` README for details.
 
+## REST client options
+
+`CodeGenConfig::rest_client` (`clients.rust` in `trestle.yaml`) shapes the REST client. Every
+option is off by default.
+
+| Option | `trestle.yaml` | Effect |
+|---|---|---|
+| `transport_type_path = REQWEST_TRANSPORT_TYPE_PATH` | `transport: reqwest` | Emit `transport.rs`: an `HttpClient` over `reqwest::Client` with an optional bearer token. No cloud credential providers, no retries; builds for native and `wasm32`. |
+| `error_module` | `error_module: { code_field, message_field, details_field, code_enum }` | Emit `error.rs`: `Error`, `Result`, `ApiError` (HTTP status, code, message, details of the JSON error body) and `parse_error_response`. The clients return this `Result`; `result_type` stays the server's. A code not in `code_enum` is kept as a string. |
+| `json_int64_as_number` | `json_int64: number` (under `generate`) | 64-bit integers are JSON numbers, not proto3-JSON strings. Reading accepts both. |
+| `ignore_unknown_enum_values` | `ignore_unknown_enum_values: true` | An unknown enum name in a response becomes the zero value instead of failing the response. |
+| `form_encoded_methods` | `form_encoded_methods: [pkg.Service.Method]` | Send the request body of these RPCs form-encoded. |
+
+Path values are always percent-encoded (`/` too, except for multi-segment patterns such as
+`{name=catalogs/*}`). With `json_field_names: proto`, a field with an explicit `json_name`
+keeps it, and `json_field_names_by_package` overrides the style per proto package.
+
+## Python API options
+
+`BindingsConfig::python` (`clients.python.options` in `trestle.yaml`) shapes the PyO3 API.
+Every option is off by default.
+
+| Option | Effect |
+|---|---|
+| `frozen_models` | Model classes are read-only, with no setters. |
+| `constructors: inputs` | Only the models that a request takes get a keyword constructor. |
+| `python_repr` | `repr()` is `Name(field=value, …)`, without `None` fields. |
+| `module` | Classes go in `<module>.<service>`; the root client in `<module>`. The generated `register(module)` adds them and the submodules. With a module, request messages get no class. |
+| `async_methods` | Each method gets a `<name>_async` twin that returns an `asyncio.Future` (needs `pyo3-async-runtimes`). |
+| `keyword_only` | Optional parameters are keyword-only. |
+| `str_enums` | Enums are `enum.StrEnum` classes (Python 3.11+) in `<package>/_enums.py`; parameters take a member or a name. |
+| `hide_unspecified` | The zero `*_UNSPECIFIED` value is not a member; a field that holds it reads as `None`. |
+| `stub_gen` | Annotate for `pyo3-stub-gen`, with the proto comments as docs, instead of writing the `.pyi`. |
+| `error_module` | Emit `codegen/error.rs`: client errors raise the exceptions of `<package>/_errors.py`, one class per kind of HTTP error status. Needs the client `error_module`. |
+| `package` | Where `_enums.py` and `_errors.py` go: `{ dir, name, error_base_class }`. |
+
+`tests/rest_client_e2e` runs a client and Python bindings with all of these against a server.
+
 ## Examples
 
 The `proto/` directory has fully-annotated example definitions and a compiled

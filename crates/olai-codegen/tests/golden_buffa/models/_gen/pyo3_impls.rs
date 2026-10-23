@@ -39,6 +39,9 @@ impl ::core::convert::From<PyCatalogType> for super::catalog::v1::CatalogType {
     }
 }
 #[allow(non_camel_case_types)]
+/// A *nested* enum (declared inside the request message). Exercises nested-enum parsing and the
+/// parent-qualified naming in the Python typings (`GetSchemaRequestView`), which must not collide
+/// with any other nested enum of the same simple name.
 #[::pyo3::pyclass(eq, eq_int, name = "GetSchemaRequestView", from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PyGetSchemaRequestView {
@@ -636,6 +639,7 @@ impl PyListByCatalogTypeRequest {
         }
         Self(inner)
     }
+    /// enum as query param
     #[getter]
     fn catalog_type(&self) -> PyCatalogType {
         PyCatalogType::from(self.0.catalog_type.as_known().unwrap_or_default())
@@ -686,6 +690,7 @@ impl PyListByTagsRequest {
         }
         Self(inner)
     }
+    /// becomes repeated query param
     #[getter]
     fn tags(&self) -> ::std::vec::Vec<::std::string::String> {
         self.0.tags.clone()
@@ -1112,14 +1117,18 @@ impl PyCreateSchemaRequest {
         }
         Self(inner)
     }
+    /// Schema's own name (the new component supplied by the caller).
     #[getter]
     fn name(&self) -> ::std::string::String {
         self.0.name.clone()
     }
+    /// Parent catalog name — filled from the parent `CatalogClient`'s captured component.
     #[getter]
     fn catalog_name(&self) -> ::std::string::String {
         self.0.catalog_name.clone()
     }
+    /// Required enum parameter whose type lives in this (schemas) models module — exercises the
+    /// child-model import on the parent's generated `create_schema` method.
     #[getter]
     fn schema_type(&self) -> PySchemaType {
         PySchemaType::from(self.0.schema_type.as_known().unwrap_or_default())
@@ -1315,6 +1324,7 @@ impl PyListSchemasRequest {
         }
         Self(inner)
     }
+    /// Parent scoping field carrying the child-type reference that makes Schema a child of Catalog.
     #[getter]
     fn catalog_name(&self) -> ::std::string::String {
         self.0.catalog_name.clone()
@@ -1414,6 +1424,9 @@ for super::schemas::v1::ListSchemasResponse {
         value.0
     }
 }
+/// A Schema is a child resource of a Catalog. This fixture exercises the generated nested
+/// resource-scoped client: `catalog.schema(name)` navigation, `catalog.create_schema(...)`, and the
+/// cross-module model import for the create method's enum parameter (`SchemaType`).
 #[::pyo3::pyclass(name = "Schema", from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PySchema(pub super::schemas::v1::Schema);
@@ -1467,6 +1480,10 @@ impl PySchema {
         }
         Self(inner)
     }
+    /// Server-computed dot-joined `catalog.schema` composite. OUTPUT_ONLY: the client sends
+    /// the component fields (`catalog_name`, `name`), not the join. This field exercises the
+    /// generated object-conversion behavior for derived composites — it is stripped before an
+    /// object is persisted and recomputed from the components (via `qualified_name()`) on read.
     #[getter]
     fn full_name(&self) -> ::std::string::String {
         self.0.full_name.clone()
@@ -1483,10 +1500,12 @@ impl PySchema {
     fn created_at(&self) -> i64 {
         self.0.created_at
     }
+    /// Stable server-assigned identifier; drives the generated `Object` <-> resource conversions.
     #[getter]
     fn schema_id(&self) -> ::std::string::String {
         self.0.schema_id.clone()
     }
+    /// Component name fields the derived `full_name` composite is recomposed from.
     #[getter]
     fn catalog_name(&self) -> ::std::string::String {
         self.0.catalog_name.clone()

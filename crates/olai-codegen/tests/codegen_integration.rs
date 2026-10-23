@@ -28,6 +28,7 @@ fn make_test_config(
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
+        rest_client: Default::default(),
         output: CodeGenOutput {
             common,
             models: None,
@@ -54,6 +55,7 @@ fn make_test_config(
             typings_package_filter: Some(".example.".to_string()),
             ts_error_base_class: "ExampleError".to_string(),
             ts_error_code_prefix: "EX".to_string(),
+            python: Default::default(),
         }),
     }
 }

@@ -4,6 +4,7 @@
 //! Re-exported from [`super`] (and `crate`) so the public API path is unchanged.
 
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use crate::error::{Error, Result};
 
@@ -160,6 +161,15 @@ impl ModelsPath {
         })
     }
 
+    /// The models root: the part of the template before `{service}`, without the trailing `::`
+    /// (`crate::models` for `crate::models::{service}::v1`). The models `mod.rs` re-exports the
+    /// generated modules there. `None` when the template has no such prefix.
+    pub(crate) fn root(&self) -> Option<&str> {
+        let (prefix, _) = self.template.split_once("{service}")?;
+        let root = prefix.trim_end_matches(':');
+        (!root.is_empty()).then_some(root)
+    }
+
     /// Validate that `service` substitutes into a parseable path. Used up front, per service.
     ///
     /// Validates against the conventional `v1` version; the actual version segment is a plain
@@ -219,6 +229,72 @@ pub struct BindingsConfig {
     pub ts_error_base_class: String,
     /// Prefix used in native NAPI error messages (e.g. `"UC"`).
     pub ts_error_code_prefix: String,
+    /// Shape of the generated Python API. See [`PythonOptions`].
+    pub python: PythonOptions,
+}
+
+/// Shape of the generated Python (PyO3) API.
+///
+/// Every option is off by default.
+#[derive(Debug, Clone, Default)]
+pub struct PythonOptions {
+    /// Model classes are `frozen`: read-only, with no setters.
+    pub frozen_models: bool,
+    /// Which model classes get a keyword constructor.
+    pub constructors: PyConstructors,
+    /// `repr()` of a model is `Name(field=value, …)` with the `repr` of each value, without the
+    /// fields that are `None`, instead of the Rust `Debug` text.
+    pub python_repr: bool,
+    /// The extension module (e.g. `my_pkg._core`). The classes of a proto package
+    /// `a.<service>.v1` go in the submodule `<module>.<service>`, the root client in `<module>`
+    /// itself, and the generated `register` function creates the submodules. When `None`,
+    /// classes carry no module and `register` adds them all to one module.
+    pub module: Option<String>,
+    /// Every client method also gets a `<name>_async` twin that returns an `asyncio.Future`.
+    /// The binding crate depends on `pyo3-async-runtimes` (with `tokio-runtime`).
+    pub async_methods: bool,
+    /// Optional parameters of client methods are keyword-only (`*` in the signature).
+    pub keyword_only: bool,
+    /// Enums are Python `enum.StrEnum` classes (Python 3.11+): a member equals its name, and
+    /// parameters take a member or a name. See [`PyPackageConfig`].
+    pub str_enums: bool,
+    /// An enum value `<PREFIX>_UNSPECIFIED` with number 0 is not a Python member; a field that
+    /// holds it reads as `None`.
+    pub hide_unspecified: bool,
+    /// Annotate the generated classes and methods for `pyo3-stub-gen` and carry the proto
+    /// comments as their docs, instead of writing the `.pyi` file. The binding and model
+    /// crates depend on `pyo3-stub-gen`.
+    pub stub_gen: bool,
+    /// Generate the Python error module: `codegen/error.rs` with the error type the bindings
+    /// return, raising the exception classes of the generated `_errors.py`. See
+    /// [`PyPackageConfig`].
+    pub error_module: bool,
+    /// The pure-Python package files: `_enums.py` (with [`str_enums`](Self::str_enums)) and
+    /// `_errors.py` (with [`error_module`](Self::error_module)).
+    pub package: Option<PyPackageConfig>,
+}
+
+/// Which generated Python model classes get a keyword constructor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PyConstructors {
+    /// Every model class.
+    #[default]
+    All,
+    /// Only the models that a request takes: the types of request-message fields, and the types
+    /// reachable from them. A model that only comes back in responses has none.
+    Inputs,
+}
+
+/// Where the generated pure-Python files go.
+#[derive(Debug, Clone)]
+pub struct PyPackageConfig {
+    /// Directory of the Python package (e.g. `python/my_pkg`).
+    pub dir: PathBuf,
+    /// Import name of that package (e.g. `my_pkg`). The files are imported as `<name>._enums`
+    /// and `<name>._errors`.
+    pub name: String,
+    /// Name of the base exception class (e.g. `MyServiceError`).
+    pub error_base_class: String,
 }
 
 /// Configuration for code generation, including import paths and output directories.
@@ -232,6 +308,8 @@ pub struct CodeGenConfig {
     pub context_type_path: String,
 
     /// Fully-qualified path to the `Result` alias used in generated handler and client code.
+    /// The clients use the `Result` of the generated error module instead when
+    /// [`RestClientOptions::error_module`] is set.
     ///
     /// Default: `"crate::Result"`
     pub result_type_path: String,
@@ -328,6 +406,69 @@ pub struct CodeGenConfig {
     /// Required (non-`None`) whenever Connect is selected and client output is enabled; ignored for
     /// REST-only output.
     pub connect_client_path: Option<String>,
+
+    /// Wire-format and error options of the REST client. See [`RestClientOptions`].
+    ///
+    /// The default keeps the historical output.
+    pub rest_client: RestClientOptions,
+}
+
+/// Wire-format and error options of the generated REST client.
+#[derive(Debug, Clone, Default)]
+pub struct RestClientOptions {
+    /// Write 64-bit integers as JSON numbers instead of the proto3-JSON quoted strings.
+    ///
+    /// Emits a `json_int64` serde helper module into the models `mod.rs`. The `trestle` CLI
+    /// rewrites buffa's `int64`/`uint64` helper paths to it (see
+    /// [`CodeGenConfig::json_int64_module_path`]). Reading still accepts both forms. Needs a
+    /// [`models_path_crate_template`](CodeGenConfig::models_path_crate_template) with a models
+    /// root. Buffa only.
+    pub json_int64_as_number: bool,
+
+    /// Parse responses with buffa's `ignore_unknown_enum_values`: an enum name that the client
+    /// does not know becomes the zero value (and is dropped from repeated fields and maps)
+    /// instead of failing the whole response. Buffa only.
+    pub ignore_unknown_enum_values: bool,
+
+    /// Generate the client error module (`error.rs`): the `Error` and `Result` types and the
+    /// `parse_error_response` function the client methods call. The clients then return its
+    /// `Result`, not [`CodeGenConfig::result_type_path`]. When `None`, the crate supplies
+    /// `crate::error::parse_error_response` itself.
+    pub error_module: Option<ErrorModuleConfig>,
+
+    /// RPCs, as `package.Service.Method`, whose request body is sent form-encoded
+    /// (`application/x-www-form-urlencoded`) instead of as JSON. The response is still JSON.
+    pub form_encoded_methods: Vec<String>,
+}
+
+/// Shape of the JSON error body that the generated error module reads.
+///
+/// An error answer is a JSON object such as
+/// `{"error_code": "NOT_FOUND", "message": "…", "details": […]}`. The keys are configurable; an
+/// answer that is not such an object keeps its HTTP status and its body text as the message.
+#[derive(Debug, Clone)]
+pub struct ErrorModuleConfig {
+    /// Key of the error code. Its lowerCamelCase form is also read. Default `error_code`.
+    pub code_field: String,
+    /// Key of the human-readable message. Default `message`.
+    pub message_field: String,
+    /// Key of the details array, if the body has one. Default `details`.
+    pub details_field: Option<String>,
+    /// Fully-qualified proto enum (e.g. `.my.errors.v1.ErrorCode`) whose value names are the
+    /// error codes. When set, the error exposes the code as that enum; a code that is not in it
+    /// is still kept as a string.
+    pub code_enum: Option<String>,
+}
+
+impl Default for ErrorModuleConfig {
+    fn default() -> Self {
+        Self {
+            code_field: "error_code".into(),
+            message_field: "message".into(),
+            details_field: Some("details".into()),
+            code_enum: None,
+        }
+    }
 }
 
 /// Default transport type path: the cloud client used by native (non-WASM) generated code.
@@ -341,6 +482,13 @@ impl CodeGenConfig {
     /// WASM/browser one) gets only the generic `new(transport, base_url)`.
     pub fn uses_default_transport(&self) -> bool {
         self.transport_type_path == DEFAULT_TRANSPORT_TYPE_PATH
+    }
+
+    /// Whether generated clients use the generated `reqwest` transport
+    /// ([`REQWEST_TRANSPORT_TYPE_PATH`](super::REQWEST_TRANSPORT_TYPE_PATH)), which the
+    /// generator then emits as `transport.rs`.
+    pub fn uses_reqwest_transport(&self) -> bool {
+        !self.dual_transport() && self.transport_type_path == super::REQWEST_TRANSPORT_TYPE_PATH
     }
 
     /// Whether the generated client should carry **both** transports, selected at
@@ -362,6 +510,78 @@ impl CodeGenConfig {
         self.output.wasm.is_some() || self.dual_transport
     }
 
+    /// The crate-local path of the `json_int64` helper module that
+    /// [`RestClientOptions::json_int64_as_number`] emits into the models `mod.rs`, e.g.
+    /// `crate::models::json_int64`: the module that
+    /// [`ModelRewrites::int64_module`](crate::postprocess::ModelRewrites::int64_module) points
+    /// at. `None` when the option is off.
+    pub fn json_int64_module_path(&self) -> Option<String> {
+        if !self.rest_client.json_int64_as_number {
+            return None;
+        }
+        let models_path = ModelsPath::from_template(&self.models_path_crate_template);
+        Some(format!("{}::json_int64", models_path.root()?))
+    }
+
+    /// The `Result` type of the generated clients: the one of the generated error module with
+    /// [`RestClientOptions::error_module`], else [`result_type_path`](Self::result_type_path).
+    pub(crate) fn client_result_path(&self) -> syn::Path {
+        let path = match self.rest_client.error_module {
+            Some(_) => format!("{}::Result", super::error_module::CLIENT_ERROR_MODULE),
+            None => self.result_type_path.clone(),
+        };
+        syn::parse_str(&path).expect("valid result_type_path")
+    }
+
+    /// The module of the `parse_error_response` function that the client methods call: the
+    /// generated error module with [`RestClientOptions::error_module`], else `crate::error`.
+    pub(crate) fn client_error_module(&self) -> syn::Path {
+        let path = match self.rest_client.error_module {
+            Some(_) => super::error_module::CLIENT_ERROR_MODULE,
+            None => "crate::error",
+        };
+        syn::parse_str(path).expect("valid module path")
+    }
+
+    /// The Python options of the bindings config; all off without one.
+    pub(crate) fn python_options(&self) -> &PythonOptions {
+        static NONE: LazyLock<PythonOptions> = LazyLock::new(PythonOptions::default);
+        self.bindings.as_ref().map_or(&NONE, |b| &b.python)
+    }
+
+    /// Check the options that need other options.
+    pub(crate) fn validate_options(&self) -> Result<()> {
+        let python = self.python_options();
+        if self.output.python.is_some() {
+            if (python.str_enums || python.error_module) && python.package.is_none() {
+                return Err(Error::Build(
+                    "the Python `str_enums` and `error_module` write Python files: they need \
+                     `PythonOptions::package`"
+                        .into(),
+                ));
+            }
+            if python.error_module && self.rest_client.error_module.is_none() {
+                return Err(Error::Build(
+                    "the Python `error_module` raises the errors of the client error module: it \
+                     needs `RestClientOptions::error_module`"
+                        .into(),
+                ));
+            }
+        }
+        if self.rest_client.json_int64_as_number
+            && ModelsPath::from_template(&self.models_path_crate_template)
+                .root()
+                .is_none()
+        {
+            return Err(Error::Build(
+                "`json_int64_as_number` needs a `models_path_crate_template` of the form \
+                 `<models root>::{service}::...`"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Validate this config without running code generation.
     ///
     /// Checks that:
@@ -369,6 +589,7 @@ impl CodeGenConfig {
     ///   `{service}` substitution.
     /// - `bindings` is `Some` whenever `output.python`, `output.node`, `output.node_ts`, or
     ///   `output.wasm` is `Some`.
+    /// - the REST client and Python options that need other options have them.
     ///
     /// Call this at construction time to surface misconfiguration early, before generation runs.
     pub fn validate(&self) -> Result<()> {
@@ -393,7 +614,7 @@ impl CodeGenConfig {
         if wants_bindings && !self.client_protocols.rest {
             return Err(Error::BindingsRequireRest);
         }
-        Ok(())
+        self.validate_options()
     }
 }
 

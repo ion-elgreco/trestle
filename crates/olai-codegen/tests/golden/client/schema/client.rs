@@ -4,6 +4,7 @@ use olai_http::CloudClient;
 use url::Url;
 use crate::Result;
 use example_common::models::schemas::v1::*;
+use super::super::encode_path_value;
 /// HTTP client for service operations
 #[derive(Clone)]
 pub struct SchemaServiceClient {
@@ -28,7 +29,9 @@ impl SchemaServiceClient {
         Ok(serde_json::from_slice(&result)?)
     }
     pub async fn get_schema(&self, request: &GetSchemaRequest) -> Result<Schema> {
-        let formatted_path = format!("schemas/{}", request.full_name);
+        let formatted_path = format!(
+            "schemas/{}", encode_path_value(& request.full_name, false)
+        );
         let mut url = self.base_url.join(&formatted_path)?;
         url.query_pairs_mut().append_pair("view", &request.view.to_string());
         let response = self.client.get(url).send().await?;
@@ -55,7 +58,9 @@ impl SchemaServiceClient {
         Ok(serde_json::from_slice(&result)?)
     }
     pub async fn update_schema(&self, request: &UpdateSchemaRequest) -> Result<Schema> {
-        let formatted_path = format!("schemas/{}", request.full_name);
+        let formatted_path = format!(
+            "schemas/{}", encode_path_value(& request.full_name, false)
+        );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.patch(url).json(request).send().await?;
         if !response.status().is_success() {
@@ -68,7 +73,9 @@ impl SchemaServiceClient {
         &self,
         request: &DeleteSchemaRequest,
     ) -> Result<DeleteSchemaResponse> {
-        let formatted_path = format!("schemas/{}", request.full_name);
+        let formatted_path = format!(
+            "schemas/{}", encode_path_value(& request.full_name, false)
+        );
         let url = self.base_url.join(&formatted_path)?;
         let response = self.client.delete(url).send().await?;
         if !response.status().is_success() {

@@ -4,6 +4,9 @@
 #![allow(clippy::useless_borrows_in_formatting)]
 #![allow(non_camel_case_types)]
 #![allow(clippy::derivable_impls)]
+#![allow(clippy::match_single_binding)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::doc_lazy_continuation)]
 use std::collections::HashMap;
 pub mod labels;
 pub use labels::{ObjectLabel, Resource};

@@ -4,7 +4,7 @@
 //! [`crate::codegen::bindings`]; this module supplies the PyO3-specific scaffold, marshaling, and
 //! method bodies through [`PyBackend`]'s [`BindingBackend`] impl.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use proc_macro2::{Ident, TokenStream};
@@ -13,7 +13,7 @@ use quote::{format_ident, quote};
 use super::super::format_tokens;
 use crate::codegen::bindings::builder::{OptionalSetter, SetterRender, generate_builder_pattern};
 use crate::codegen::bindings::{BindingBackend, ShapeParts, driver};
-use crate::codegen::{BindingMode, MethodHandler, ServiceHandler};
+use crate::codegen::{BindingMode, MethodHandler, PythonOptions, ServiceHandler};
 use crate::parsing::types::{BaseType, RenderContext, UnifiedType};
 
 /// The `Py`-prefixed wrapper ident for a model type ident (e.g. `Catalog` →
@@ -41,17 +41,11 @@ fn qualified_wrapper_ident(ty: &UnifiedType) -> Ident {
 /// Wrap a model output ident as its `Py` wrapper return type, and produce the
 /// expression converting the bare client result `result` into it.
 ///
-/// Returns `(return_type, convert_expr)`. For an `Empty`-returning method
-/// ([`MethodHandler::output_type`] is `None`) the return type is `()` and the
-/// value is passed through unchanged.
-fn wrap_single_output(method: &MethodHandler<'_>) -> (TokenStream, TokenStream) {
-    match method.output_type() {
-        Some(ident) => {
-            let w = wrapper_ident(&ident);
-            (quote! { #w }, quote! { #w::from(result) })
-        }
-        None => (quote! { () }, quote! { result }),
-    }
+/// Returns `(return_type, convert_expr)`, or `None` for an `Empty`-returning method
+/// ([`MethodHandler::output_type`] is `None`).
+fn wrap_single_output(method: &MethodHandler<'_>) -> Option<(TokenStream, TokenStream)> {
+    let w = wrapper_ident(&method.output_type()?);
+    Some((quote! { #w }, quote! { #w::from(result) }))
 }
 
 /// `mut` keyword for the `let request = ...` binding, but only when there are
@@ -67,13 +61,14 @@ fn mut_if_setters(builder_calls: &[TokenStream]) -> TokenStream {
 
 /// PyO3 binding backend. Holds the configured Python error/result type idents so the method bodies
 /// can wrap calls in the right `PyResult`/error conversion.
-pub(crate) struct PyBackend {
+pub(crate) struct PyBackend<'a> {
     py_error_type: Ident,
     py_result_type: Ident,
+    python: &'a PythonOptions,
 }
 
-impl PyBackend {
-    fn from_service(service: &ServiceHandler<'_>) -> Self {
+impl<'a> PyBackend<'a> {
+    fn from_service(service: &ServiceHandler<'a>) -> Self {
         let bindings = service
             .config
             .bindings
@@ -82,17 +77,81 @@ impl PyBackend {
         Self {
             py_error_type: format_ident!("{}", bindings.py_error_type),
             py_result_type: format_ident!("{}", bindings.py_result_type),
+            python: &bindings.python,
         }
     }
 
-    fn from_services(services: &[ServiceHandler<'_>]) -> Self {
-        let bindings = services
-            .first()
-            .and_then(|s| s.config.bindings.as_ref())
-            .expect("bindings config required for python output");
-        Self {
-            py_error_type: format_ident!("{}", bindings.py_error_type),
-            py_result_type: format_ident!("{}", bindings.py_result_type),
+    fn from_services(services: &[ServiceHandler<'a>]) -> Self {
+        Self::from_service(services.first().expect("python output has a service"))
+    }
+
+    /// The module that defines the Python error and result types: the generated
+    /// `crate::codegen::error` with [`PythonOptions::error_module`], else `crate::error`.
+    fn error_module(&self) -> TokenStream {
+        if self.python.error_module {
+            quote! { crate::codegen::error }
+        } else {
+            quote! { crate::error }
+        }
+    }
+
+    /// The `register` function that adds every generated class to the extension module.
+    ///
+    /// With [`PythonOptions::module`], the root client goes in the module itself and the
+    /// classes of each proto package in a submodule named after its service segment, which is
+    /// also put in `sys.modules` so that `import <module>.<service>` finds it. Without it, every
+    /// class goes in the module.
+    fn register_fn(&self, services: &[&ServiceHandler<'_>], aggregate: &Ident) -> TokenStream {
+        let Some(first) = services.first() else {
+            return quote! {};
+        };
+        // Classes per service segment: the model wrappers, then the scoped clients.
+        let mut groups: BTreeMap<&str, Vec<Ident>> = BTreeMap::new();
+        let plans: Vec<_> = services.iter().map(|s| s.plan).collect();
+        let classes =
+            super::model_conversions::ModelClasses::new(&plans, first.metadata, self.python);
+        for (segment, wrapper) in classes.pyclasses(self.python) {
+            groups.entry(segment).or_default().push(wrapper);
+        }
+        for service in services.iter().filter(|s| s.emits_scoped_binding()) {
+            groups
+                .entry(super::package_segment(&service.plan.package))
+                .or_default()
+                .push(format_ident!("Py{}", service.client_type().to_string()));
+        }
+
+        let body = match &self.python.module {
+            Some(root) => {
+                let children = groups.iter().map(|(segment, classes)| {
+                    let full = format!("{root}.{segment}");
+                    quote! {
+                        let child = ::pyo3::types::PyModule::new(py, #segment)?;
+                        #(child.add_class::<#classes>()?;)*
+                        module.add_submodule(&child)?;
+                        modules.set_item(#full, &child)?;
+                    }
+                });
+                quote! {
+                    let py = module.py();
+                    let modules = py.import("sys")?.getattr("modules")?;
+                    module.add_class::<#aggregate>()?;
+                    #(#children)*
+                }
+            }
+            None => {
+                let classes = groups.values().flatten();
+                quote! {
+                    module.add_class::<#aggregate>()?;
+                    #(module.add_class::<#classes>()?;)*
+                }
+            }
+        };
+        quote! {
+            /// Add the generated classes to the extension module `module`.
+            pub fn register(module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>) -> ::pyo3::PyResult<()> {
+                #body
+                Ok(())
+            }
         }
     }
 }
@@ -105,7 +164,7 @@ pub(crate) fn generate(service: &ServiceHandler<'_>) -> crate::error::Result<Str
     PyBackend::from_service(service).generate_service(service)
 }
 
-impl BindingBackend for PyBackend {
+impl BindingBackend for PyBackend<'_> {
     fn generate_service(&self, service: &ServiceHandler<'_>) -> crate::error::Result<String> {
         let bindings = service
             .config
@@ -129,20 +188,44 @@ impl BindingBackend for PyBackend {
             .models_root_path()
             .map(|root| quote! { use #root::*; });
 
+        let error_module = self.error_module();
+        let stub_class = super::stub_class_attr(self.python);
+        let stub_methods = super::stub_methods_attr(self.python);
+        let module_arg = super::module_arg(
+            self.python,
+            Some(super::package_segment(&service.plan.package)),
+        );
+        let futures_import = self
+            .python
+            .async_methods
+            .then(|| quote! { use futures::TryStreamExt; });
+        let class_doc = self.python.stub_gen.then(|| {
+            let resource = service
+                .resource()
+                .map(|r| r.type_name.clone())
+                .unwrap_or_else(|| rust_client_name.clone());
+            let doc = format!(" The requests on one `{resource}`.");
+            quote! { #[doc = #doc] }
+        });
+
         let tokens = quote! {
             use std::collections::HashMap;
             use pyo3::prelude::*;
             use #client_crate::#rust_client_ident;
             use #mod_path::*;
             #wrappers_import
-            use crate::error::{#py_error_type, #py_result_type};
+            use #error_module::{#py_error_type, #py_result_type};
             use crate::runtime::get_runtime;
+            #futures_import
 
-            #[pyclass(name = #rust_client_name)]
+            #class_doc
+            #stub_class
+            #[pyclass(name = #rust_client_name, #module_arg)]
             pub struct #client_ident {
                 pub(crate) client: #rust_client_ident,
             }
 
+            #stub_methods
             #[pymethods]
             impl #client_ident {
                 #(#methods)*
@@ -190,23 +273,12 @@ impl BindingBackend for PyBackend {
         let mut sorted_services = services.iter().collect_vec();
         sorted_services.sort_by(|a, b| a.plan.service_name.cmp(&b.plan.service_name));
 
-        let mod_paths = sorted_services.iter().map(|s| {
-            let mod_path = s.models_path();
-            quote! { use #mod_path::*; }
-        });
+        // Services can share a package, so dedupe the model imports.
+        let mod_paths = glob_imports(sorted_services.iter().map(|s| s.models_path()));
         // Import the `Py*` model wrappers (re-exported at the models root). All
         // services share one root, so dedupe to a single glob import.
-        let wrapper_imports: Vec<TokenStream> = sorted_services
-            .iter()
-            .filter_map(|s| s.models_root_path())
-            .map(|root| quote! { #root }.to_string())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .map(|root| {
-                let path: syn::Path = syn::parse_str(&root).expect("models root path re-parses");
-                quote! { use #path::*; }
-            })
-            .collect();
+        let wrapper_imports =
+            glob_imports(sorted_services.iter().filter_map(|s| s.models_root_path()));
 
         // Only services with a scoped binding expose a per-service scoped client to import.
         let codegen_imports = sorted_services
@@ -221,46 +293,77 @@ impl BindingBackend for PyBackend {
         let methods = driver::root_client_methods(self, &sorted_services);
         let resource_accessor_methods = driver::resource_accessor_methods(self, &sorted_services);
 
+        let error_module = self.error_module();
+        let stub_class = super::stub_class_attr(self.python);
+        let stub_methods = super::stub_methods_attr(self.python);
+        let root_module_arg = super::module_arg(self.python, None);
+        let helper_modules = {
+            let error = self.python.error_module.then(|| quote! { pub mod error; });
+            let future = self
+                .python
+                .async_methods
+                .then(|| quote! { pub mod py_future; });
+            quote! { #error #future }
+        };
+        let class_doc = self.python.stub_gen.then(|| {
+            quote! {
+                /// A client of the API at one base URL.
+            }
+        });
+        let new_doc = self.python.stub_gen.then(|| {
+            quote! {
+                /// A client of the API at `base_url`. `token`, when set, goes in every
+                /// request as the bearer token.
+            }
+        });
+        let register = self.register_fn(&sorted_services, &py_aggregate_client_ident);
+
         let tokens = quote! {
             // The aggregate module file carries the root `#[pyclass]` (flat methods →
             // too_many_arguments) and a use-prelude that not every build consumes.
             #![allow(dead_code, unused_imports, clippy::too_many_arguments)]
 
             #(#service_modules)*
+            #helper_modules
 
             use std::collections::HashMap;
             use futures::stream::TryStreamExt;
             use pyo3::prelude::*;
             use #client_crate::{#aggregate_client_ident};
-            use crate::error::{#py_error_type, #py_result_type};
+            use #error_module::{#py_error_type, #py_result_type};
             use crate::runtime::get_runtime;
             #(#mod_paths)*
             #(#wrapper_imports)*
             #(#codegen_imports)*
 
-            #[pyclass(name = #aggregate_client_name)]
+            #class_doc
+            #stub_class
+            #[pyclass(name = #aggregate_client_name, #root_module_arg)]
             pub struct #py_aggregate_client_ident {
                 client: #aggregate_client_ident
             }
 
+            #stub_methods
             #[pymethods]
             impl #py_aggregate_client_ident {
+                #new_doc
                 #[new]
                 #[pyo3(signature = (base_url, token = None))]
                 pub fn new(base_url: String, token: Option<String>) -> PyResult<Self> {
-                    let client = if let Some(token) = token {
-                        olai_http::CloudClient::new_with_token(token)
-                    } else {
-                        olai_http::CloudClient::new_unauthenticated()
-                    };
                     let base_url = base_url.parse().map_err(#py_error_type::from)?;
-                    Ok(Self { client: #aggregate_client_ident::new(client, base_url) })
+                    let client = match token {
+                        Some(token) => #aggregate_client_ident::new_with_token(base_url, token),
+                        None => #aggregate_client_ident::new_unauthenticated(base_url),
+                    };
+                    Ok(Self { client })
                 }
 
                 #(#methods)*
 
                 #(#resource_accessor_methods)*
             }
+
+            #register
         };
 
         format_tokens(tokens)
@@ -291,15 +394,6 @@ impl BindingBackend for PyBackend {
 
     fn emit_list(&self, parts: &ShapeParts<'_>) -> TokenStream {
         let method = parts.method;
-        let py_error_type = &self.py_error_type;
-        let py_result_type = &self.py_result_type;
-        let method_name = method.binding_method_name();
-        let param_defs = &parts.param_defs;
-        let signature = pyo3_signature(method, parts.mode);
-        let client_call = &parts.client_call;
-        let builder_calls = generate_builder_pattern(method, true, self);
-        let mut_kw = mut_if_setters(&builder_calls);
-
         let items_field = method
             .list_output_field()
             .expect("List-shaped method must have a list output field");
@@ -307,129 +401,54 @@ impl BindingBackend for PyBackend {
         // items are always message types, so `type_ident()` is the model name.
         let item_ident = items_field.unified_type.type_ident();
         let item_wrapper = wrapper_ident(&item_ident);
-
-        quote! {
-            #signature
-            pub fn #method_name(
-                &self,
-                py: Python,
-                #(#param_defs,)*
-            ) -> #py_result_type<::std::vec::Vec<#item_wrapper>> {
-                let #mut_kw request = #client_call;
-                #(#builder_calls)*
-                let runtime = get_runtime(py)?;
-                py.detach(|| {
-                    let result: ::std::vec::Vec<_> = runtime.block_on(async move { request.into_stream().try_collect().await })?;
-                    Ok::<_, #py_error_type>(result.into_iter().map(#item_wrapper::from).collect())
-                })
-            }
-        }
+        self.methods(
+            parts,
+            method.binding_method_name(),
+            true,
+            MethodOutput {
+                future: quote! {
+                    async move { request.into_stream().try_collect::<::std::vec::Vec<_>>().await }
+                },
+                value: Some((
+                    quote! { ::std::vec::Vec<#item_wrapper> },
+                    quote! {
+                        result.into_iter().map(#item_wrapper::from).collect::<::std::vec::Vec<_>>()
+                    },
+                )),
+            },
+        )
     }
 
     fn emit_create(&self, parts: &ShapeParts<'_>) -> TokenStream {
         let method = parts.method;
-        let py_error_type = &self.py_error_type;
-        let py_result_type = &self.py_result_type;
-        let method_name = method.binding_method_name();
-        let (response_type, convert) = wrap_single_output(method);
-        let param_defs = &parts.param_defs;
-        let signature = pyo3_signature(method, parts.mode);
-        let client_call = &parts.client_call;
-        let builder_calls = generate_builder_pattern(method, false, self);
-        let mut_kw = mut_if_setters(&builder_calls);
-
-        quote! {
-            #signature
-            pub fn #method_name(
-                &self,
-                py: Python,
-                #(#param_defs,)*
-            ) -> #py_result_type<#response_type> {
-                let #mut_kw request = #client_call;
-                #(#builder_calls)*
-                let runtime = get_runtime(py)?;
-                py.detach(|| {
-                    #[allow(clippy::let_unit_value)]
-                    let result = runtime.block_on(request.into_future())?;
-                    Ok::<_, #py_error_type>(#convert)
-                })
-            }
-        }
+        self.single(
+            parts,
+            method.binding_method_name(),
+            wrap_single_output(method),
+        )
     }
 
     fn emit_get_update(&self, parts: &ShapeParts<'_>) -> TokenStream {
         let method = parts.method;
-        let py_error_type = &self.py_error_type;
-        let py_result_type = &self.py_result_type;
-        let method_name = match parts.mode {
-            BindingMode::Scoped => method.plan.resource_client_method(),
-            BindingMode::Flat => method.binding_method_name(),
-        };
-        let (response_type, convert) = wrap_single_output(method);
-        let param_defs = &parts.param_defs;
-        let signature = pyo3_signature(method, parts.mode);
-        let client_call = &parts.client_call;
-        let builder_calls = generate_builder_pattern(method, false, self);
-        let mut_kw = mut_if_setters(&builder_calls);
-
-        quote! {
-            #signature
-            pub fn #method_name(
-                &self,
-                py: Python,
-                #(#param_defs,)*
-            ) -> #py_result_type<#response_type> {
-                let #mut_kw request = #client_call;
-                #(#builder_calls)*
-                let runtime = get_runtime(py)?;
-                py.detach(|| {
-                    // `let result = ...` then convert: `result` is the bare model the
-                    // Rust client returns; `#convert` lifts it into the `Py` wrapper
-                    // (or passes a unit through unchanged).
-                    #[allow(clippy::let_unit_value)]
-                    let result = runtime.block_on(request.into_future())?;
-                    Ok::<_, #py_error_type>(#convert)
-                })
-            }
-        }
+        self.single(parts, scoped_method_name(parts), wrap_single_output(method))
     }
 
     fn emit_delete(&self, parts: &ShapeParts<'_>) -> TokenStream {
-        let method = parts.method;
-        let py_error_type = &self.py_error_type;
-        let py_result_type = &self.py_result_type;
-        let method_name = match parts.mode {
-            BindingMode::Scoped => method.plan.resource_client_method(),
-            BindingMode::Flat => method.binding_method_name(),
-        };
-        let param_defs = &parts.param_defs;
-        let signature = pyo3_signature(method, parts.mode);
-        let client_call = &parts.client_call;
-        let builder_calls = generate_builder_pattern(method, false, self);
-        let mut_kw = mut_if_setters(&builder_calls);
-
-        quote! {
-            #signature
-            pub fn #method_name(
-                &self,
-                py: Python,
-                #(#param_defs,)*
-            ) -> #py_result_type<()> {
-                let #mut_kw request = #client_call;
-                #(#builder_calls)*
-                let runtime = get_runtime(py)?;
-                py.detach(|| {
-                    runtime.block_on(request.into_future())?;
-                    Ok::<_, #py_error_type>(())
-                })
-            }
-        }
+        self.single(parts, scoped_method_name(parts), None)
     }
 
     fn emit_resource_accessor(&self, service: &ServiceHandler<'_>) -> Option<TokenStream> {
         let spec = service.accessor_spec()?;
         let method_name = format_ident!("{}", spec.singular);
         let client_name = format_ident!("Py{}", service.client_type().to_string());
+        let doc = self.python.stub_gen.then(|| {
+            let resource = service
+                .resource()
+                .map(|r| r.type_name.clone())
+                .unwrap_or_else(|| spec.singular.clone());
+            let text = format!(" The requests on one `{resource}`. It sends no request itself.");
+            quote! { #[doc = #text] }
+        });
 
         let param_idents: Vec<_> = spec.params.iter().map(|p| format_ident!("{}", p)).collect();
         let param_list = param_idents
@@ -443,6 +462,7 @@ impl BindingBackend for PyBackend {
             let from_full_name_method = format_ident!("{}_from_full_name", spec.singular);
             let format_str = spec.join_format();
             quote! {
+                #doc
                 pub fn #method_name(&self, #(#param_list),*) -> #client_name {
                     let full_name = format!(#format_str, #(#param_idents),*);
                     #client_name {
@@ -456,6 +476,7 @@ impl BindingBackend for PyBackend {
                 .map(|id| quote! { #id })
                 .collect::<Vec<_>>();
             quote! {
+                #doc
                 pub fn #method_name(&self, #(#param_list),*) -> #client_name {
                     #client_name {
                         client: self.client.#method_name(#(#param_refs),*),
@@ -468,7 +489,145 @@ impl BindingBackend for PyBackend {
     }
 }
 
-impl SetterRender for PyBackend {
+/// The name of a get, update or delete binding method: the resource client method on a scoped
+/// client.
+fn scoped_method_name(parts: &ShapeParts<'_>) -> Ident {
+    match parts.mode {
+        BindingMode::Scoped => parts.method.plan.resource_client_method(),
+        BindingMode::Flat => parts.method.binding_method_name(),
+    }
+}
+
+/// `use <path>::*;` for each of `paths`, once each, in path order.
+fn glob_imports(paths: impl Iterator<Item = syn::Path>) -> Vec<TokenStream> {
+    paths
+        .map(|path| (quote! { #path }.to_string(), path))
+        .collect::<BTreeMap<_, _>>()
+        .into_values()
+        .map(|path| quote! { use #path::*; })
+        .collect()
+}
+
+/// What a binding method gives back: the future of the bare client result (an expression over
+/// the `request` builder), and its Python-visible type and the conversion of that `result`.
+/// `value` is `None` for a method that gives back nothing: Python `None`.
+struct MethodOutput {
+    future: TokenStream,
+    value: Option<(TokenStream, TokenStream)>,
+}
+
+impl PyBackend<'_> {
+    /// A method that gives back one model, or nothing.
+    fn single(
+        &self,
+        parts: &ShapeParts<'_>,
+        method_name: Ident,
+        value: Option<(TokenStream, TokenStream)>,
+    ) -> TokenStream {
+        let output = MethodOutput {
+            future: quote! { request.into_future() },
+            value,
+        };
+        self.methods(parts, method_name, false, output)
+    }
+
+    /// The sync binding method and, with [`PythonOptions::async_methods`], its `_async` twin.
+    ///
+    /// [`PythonOptions::async_methods`]: crate::codegen::PythonOptions::async_methods
+    fn methods(
+        &self,
+        parts: &ShapeParts<'_>,
+        method_name: Ident,
+        is_list: bool,
+        output: MethodOutput,
+    ) -> TokenStream {
+        let method = parts.method;
+        let python = self.python;
+        let py_error_type = &self.py_error_type;
+        let py_result_type = &self.py_result_type;
+        let param_defs = &parts.param_defs;
+        let signature = pyo3_signature(method, parts.mode, python.keyword_only);
+        let client_call = &parts.client_call;
+        let builder_calls = generate_builder_pattern(method, is_list, self);
+        let mut_kw = mut_if_setters(&builder_calls);
+        let MethodOutput { future, value } = output;
+        let (py_type, convert) = match &value {
+            Some((py_type, convert)) => (py_type.clone(), convert.clone()),
+            None => (quote! { () }, quote! { result }),
+        };
+        let docs = python.stub_gen.then(|| method_doc_attrs(method));
+
+        let sync = quote! {
+            #docs
+            #signature
+            pub fn #method_name(
+                &self,
+                py: Python,
+                #(#param_defs,)*
+            ) -> #py_result_type<#py_type> {
+                let #mut_kw request = #client_call;
+                #(#builder_calls)*
+                let runtime = get_runtime(py)?;
+                py.detach(|| {
+                    // `result` is the bare client value; `#convert` lifts it into the `Py`
+                    // wrapper (or passes a unit through unchanged).
+                    #[allow(clippy::let_unit_value)]
+                    let result = runtime.block_on(#future)?;
+                    Ok::<_, #py_error_type>(#convert)
+                })
+            }
+        };
+        if !python.async_methods {
+            return sync;
+        }
+
+        let async_name = format_ident!("{}_async", method_name);
+        let async_doc = format!(
+            " Like `{method_name}`, but returns an `asyncio.Future` of the result. Call it in a \
+             running event loop."
+        );
+        let (async_type, async_convert) = value.unwrap_or_else(|| {
+            (
+                quote! { crate::codegen::py_future::NoResult },
+                quote! { crate::codegen::py_future::NoResult },
+            )
+        });
+        quote! {
+            #sync
+
+            #[doc = #async_doc]
+            #signature
+            pub fn #async_name<'py>(
+                &self,
+                py: Python<'py>,
+                #(#param_defs,)*
+            ) -> ::pyo3::PyResult<crate::codegen::py_future::PyFuture<'py, #async_type>> {
+                let #mut_kw request = #client_call;
+                #(#builder_calls)*
+                crate::codegen::py_future::PyFuture::new(py, async move {
+                    #[allow(clippy::let_unit_value, unused_variables)]
+                    let result = #future
+                        .await
+                        .map_err(|e| ::pyo3::PyErr::from(#py_error_type::from(e)))?;
+                    Ok(#async_convert)
+                })
+            }
+        }
+    }
+}
+
+/// `#[doc]` attributes for a binding method: the proto comment, then `Args:` and `Returns:`
+/// sections, as in the `.pyi` typings.
+fn method_doc_attrs(method: &MethodHandler<'_>) -> TokenStream {
+    let doc = super::typings::format_method_docstring_with_params(method);
+    if doc.trim().is_empty() {
+        return quote! {};
+    }
+    let lines = doc.lines().map(|l| format!(" {l}"));
+    quote! { #(#[doc = #lines])* }
+}
+
+impl SetterRender for PyBackend<'_> {
     fn supports(&self, _setter: &OptionalSetter<'_>) -> bool {
         // PyO3 accepts every parameter type; no capability filter.
         true
@@ -577,18 +736,25 @@ fn convert_param_value(ty: &UnifiedType, expr: TokenStream) -> TokenStream {
 }
 
 /// The `#[pyo3(signature = (...))]` attribute for a method, derived from its param plan.
-fn pyo3_signature(method: &MethodHandler<'_>, mode: BindingMode) -> TokenStream {
-    let signature_parts = method
-        .param_plan(mode)
-        .iter()
-        .map(|p| {
-            if p.is_optional() {
-                format!("{} = None", p.name())
-            } else {
-                p.name().to_string()
+/// With `keyword_only`, a `*` goes before the first optional parameter.
+fn pyo3_signature(
+    method: &MethodHandler<'_>,
+    mode: BindingMode,
+    keyword_only: bool,
+) -> TokenStream {
+    let mut signature_parts = Vec::new();
+    // The `*` that goes before the first optional parameter.
+    let mut star = keyword_only;
+    for p in method.param_plan(mode).iter() {
+        if p.is_optional() {
+            if std::mem::take(&mut star) {
+                signature_parts.push("*".to_string());
             }
-        })
-        .collect_vec();
+            signature_parts.push(format!("{} = None", p.name()));
+        } else {
+            signature_parts.push(p.name().to_string());
+        }
+    }
     if signature_parts.is_empty() {
         quote! {}
     } else {

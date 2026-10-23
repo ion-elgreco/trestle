@@ -195,7 +195,7 @@ fn generate_method_parameters_for_typings_inner(
     parameters
 }
 
-fn format_method_docstring_with_params(method: &MethodHandler<'_>) -> String {
+pub(super) fn format_method_docstring_with_params(method: &MethodHandler<'_>) -> String {
     let mut docstring_parts = Vec::new();
 
     if let Some(doc) = method.plan.metadata.documentation.as_ref() {
@@ -711,12 +711,7 @@ fn collect_reachable_types(
 fn collect_field_types(ut: &UnifiedType, queue: &mut std::collections::VecDeque<String>) {
     match &ut.base_type {
         BaseType::Message(n) | BaseType::Enum(n) | BaseType::OneOf(n) => {
-            let key = if n.starts_with('.') {
-                n.clone()
-            } else {
-                format!(".{n}")
-            };
-            queue.push_back(key);
+            queue.push_back(crate::utils::metadata_key(n));
         }
         BaseType::Map(k, v) => {
             collect_field_types(k, queue);

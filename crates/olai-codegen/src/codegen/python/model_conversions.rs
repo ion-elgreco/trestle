@@ -41,12 +41,14 @@ use convert_case::{Case, Casing};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::super::format_tokens;
-use crate::analysis::GenerationPlan;
-use crate::codegen::Runtime;
+use super::super::{doc_tokens, format_tokens};
+use crate::analysis::{GenerationPlan, ServicePlan};
+use crate::codegen::{CodeGenConfig, PyConstructors, PythonOptions, Runtime};
 use crate::parsing::types::{BaseType, UnifiedType};
-use crate::parsing::{CodeGenMetadata, EnumInfo, MessageField, MessageInfo, OneofVariant};
-use crate::utils::{extract_qualified_type_name, extract_simple_type_name};
+use crate::parsing::{
+    CodeGenMetadata, EnumInfo, EnumValue, MessageField, MessageInfo, OneofVariant,
+};
+use crate::utils::{extract_qualified_type_name, extract_simple_type_name, metadata_key};
 
 /// Generate the `pyo3_impls.rs` content: a `#[pyclass]` wrapper for every message
 /// and enum defined in the project's own packages, plus their `From`/`Into`
@@ -57,47 +59,51 @@ use crate::utils::{extract_qualified_type_name, extract_simple_type_name};
 pub(crate) fn generate_pyo3_impls(
     plan: &GenerationPlan,
     metadata: &CodeGenMetadata,
-    runtime: Runtime,
+    config: &CodeGenConfig,
 ) -> crate::error::Result<String> {
-    // The project's own packages, taken straight from the plan's services — the
-    // same set whose model modules `generate_models_mod` emits. Types in any other
-    // package (google/gnostic/etc.) are not in our crate and must be skipped
-    // (orphan rule + they have no in-crate path).
-    let project_packages: BTreeSet<&str> =
-        plan.services.iter().map(|s| s.package.as_str()).collect();
+    let runtime = config.runtime;
+    let options = config.python_options();
+    let services: Vec<&ServicePlan> = plan.services.iter().collect();
+    let classes = ModelClasses::new(&services, metadata, options);
+    let ctx = Ctx {
+        options,
+        classes: &classes,
+        enums_module: options
+            .package
+            .as_ref()
+            .map(|p| format!("{}._enums", p.name)),
+    };
 
     let mut items: Vec<TokenStream> = Vec::new();
 
     // Enums first so message getters can reference the enum wrappers.
-    let mut enum_names: Vec<&String> = metadata.enums.keys().collect();
-    enum_names.sort();
-    for name in enum_names {
-        let Some(rust_path) = type_rust_path(name, &project_packages) else {
+    for name in &classes.enums {
+        let Some(rust_path) = type_rust_path(name, &classes.packages) else {
             continue;
         };
-        let info = &metadata.enums[name];
-        // An enum with no values has no representable wrapper; skip it.
-        if info.values.is_empty() {
-            continue;
-        }
-        items.push(enum_wrapper(name, info, &rust_path, runtime)?);
+        let info = &metadata.enums[*name];
+        items.push(if options.str_enums {
+            str_enum_wrapper(name, info, &rust_path, runtime, &ctx)?
+        } else {
+            enum_wrapper(name, info, &rust_path, runtime, &ctx)?
+        });
     }
 
-    // Emit a wrapper for *every* message in the project's own packages, not just
-    // resource-annotated ones: request/response and other non-resource messages
-    // also cross the FFI boundary. Sort by name for deterministic output.
-    let mut msg_names: Vec<&String> = metadata.messages.keys().collect();
-    msg_names.sort();
-    for name in msg_names {
-        let Some(rust_path) = type_rust_path(name, &project_packages) else {
+    for name in &classes.messages {
+        let Some(rust_path) = type_rust_path(name, &classes.packages) else {
             continue;
         };
-        let info = &metadata.messages[name];
-        items.push(message_wrapper(name, info, &rust_path, runtime, metadata)?);
+        let info = &metadata.messages[*name];
+        items.push(message_wrapper(
+            name, info, &rust_path, runtime, metadata, &ctx,
+        )?);
     }
 
     if items.is_empty() {
         return Ok(String::new());
+    }
+    if options.python_repr {
+        items.push(python_repr_fn());
     }
 
     // No file-level inner attributes (`#![..]`) or inner doc comments (`//!`):
@@ -126,8 +132,218 @@ fn wrapper_ident(fq_name: &str) -> proc_macro2::Ident {
 }
 
 /// The Python-visible class name (no `Py` prefix) for a fully-qualified proto name.
-fn python_class_name(fq_name: &str) -> String {
+pub(crate) fn python_class_name(fq_name: &str) -> String {
     extract_qualified_type_name(fq_name)
+}
+
+/// The models that the bindings wrap: one list for the wrappers of `pyo3_impls.rs`, the classes
+/// that `register` adds, and the enums of `_enums.py`.
+pub(crate) struct ModelClasses<'a> {
+    /// The project's own packages, taken straight from the plan's services: the same set whose
+    /// model modules `generate_models_mod` emits. Types in any other package (google, gnostic,
+    /// ...) are not in our crate and get no wrapper (orphan rule, and no in-crate path).
+    packages: BTreeSet<&'a str>,
+    /// The project enums that have values, sorted by name.
+    pub(crate) enums: Vec<&'a String>,
+    /// The project messages, sorted by name. Request and response messages cross the FFI
+    /// boundary too, so every message is here, not just resource-annotated ones. With
+    /// [`PythonOptions::module`], only the messages that Python sees (see
+    /// [`surfaced_messages`]).
+    messages: Vec<&'a String>,
+    /// Messages that a request takes; see [`input_messages`].
+    inputs: BTreeSet<String>,
+}
+
+impl<'a> ModelClasses<'a> {
+    pub(crate) fn new(
+        services: &[&'a ServicePlan],
+        metadata: &'a CodeGenMetadata,
+        options: &PythonOptions,
+    ) -> Self {
+        let packages: BTreeSet<&str> = services.iter().map(|s| s.package.as_str()).collect();
+        let mut enums: Vec<&String> = metadata
+            .enums
+            .iter()
+            .filter(|(name, info)| {
+                !info.values.is_empty() && type_rust_path(name, &packages).is_some()
+            })
+            .map(|(name, _)| name)
+            .collect();
+        enums.sort();
+        let inputs = input_messages(services, metadata);
+        let surfaced = options
+            .module
+            .is_some()
+            .then(|| surfaced_messages(services, metadata, &inputs));
+        let mut messages: Vec<&String> = metadata
+            .messages
+            .keys()
+            .filter(|name| {
+                type_rust_path(name, &packages).is_some()
+                    && surfaced.as_ref().is_none_or(|s| s.contains(*name))
+            })
+            .collect();
+        messages.sort();
+        Self {
+            packages,
+            enums,
+            messages,
+            inputs,
+        }
+    }
+
+    /// The `#[pyclass]` wrapper types, with the Python submodule segment of their package: every
+    /// message, and every enum unless enums are `str` classes.
+    pub(crate) fn pyclasses(
+        &self,
+        options: &PythonOptions,
+    ) -> impl Iterator<Item = (&'a str, proc_macro2::Ident)> {
+        let str_enums = options.str_enums;
+        let enums = self.enums.iter().filter(move |_| !str_enums);
+        enums.chain(&self.messages).filter_map(|name| {
+            let package = package_of(name, &self.packages)?;
+            Some((super::package_segment(package), wrapper_ident(name)))
+        })
+    }
+}
+
+/// Whether an enum value has no Python member: with
+/// [`PythonOptions::hide_unspecified`], the zero value named `*_UNSPECIFIED`.
+pub(crate) fn hidden_value(value: &EnumValue, options: &PythonOptions) -> bool {
+    options.hide_unspecified && value.number == 0 && value.name.ends_with("_UNSPECIFIED")
+}
+
+/// Whether the enum `info` has a hidden zero value (see [`hidden_value`]).
+fn has_hidden_zero(info: &EnumInfo, options: &PythonOptions) -> bool {
+    info.values.iter().any(|v| hidden_value(v, options))
+}
+
+/// The proto package of a project type, the longest project package that prefixes it.
+fn package_of<'a>(fq_name: &str, project_packages: &BTreeSet<&'a str>) -> Option<&'a str> {
+    let stripped = fq_name.strip_prefix('.').unwrap_or(fq_name);
+    project_packages
+        .iter()
+        .filter(|pkg| {
+            stripped
+                .strip_prefix(**pkg)
+                .is_some_and(|rest| rest.starts_with('.'))
+        })
+        .max_by_key(|pkg| pkg.len())
+        .copied()
+}
+
+/// The messages that a request takes: the message types of the fields of every RPC input
+/// message, and every message reachable from them (fields, map values, oneof variants). The
+/// input messages themselves are not included; their fields become method parameters.
+fn input_messages(services: &[&ServicePlan], metadata: &CodeGenMetadata) -> BTreeSet<String> {
+    let mut queue = Vec::new();
+    for method in services.iter().flat_map(|s| &s.methods) {
+        if let Some(info) = metadata
+            .messages
+            .get(&metadata_key(&method.metadata.input_type))
+        {
+            push_field_messages(info, &mut queue);
+        }
+    }
+    reachable(queue, metadata)
+}
+
+/// The messages that Python sees: the `inputs` (see [`input_messages`]), the RPC output
+/// messages, and every message reachable from those outputs. Request messages are not among
+/// them.
+fn surfaced_messages(
+    services: &[&ServicePlan],
+    metadata: &CodeGenMetadata,
+    inputs: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let outputs = services
+        .iter()
+        .flat_map(|s| &s.methods)
+        .map(|m| metadata_key(&m.metadata.output_type))
+        .filter(|name| !name.ends_with(".Empty"))
+        .collect();
+    let mut surfaced = reachable(outputs, metadata);
+    surfaced.extend(inputs.iter().cloned());
+    surfaced
+}
+
+/// `start` and every message reachable from it through fields, map values and oneof variants.
+fn reachable(start: Vec<String>, metadata: &CodeGenMetadata) -> BTreeSet<String> {
+    let mut queue = start;
+    let mut seen = BTreeSet::new();
+    while let Some(name) = queue.pop() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        if let Some(info) = metadata.messages.get(&name) {
+            push_field_messages(info, &mut queue);
+        }
+    }
+    seen
+}
+
+/// Push the message types of the fields of `info`: field types, map values and oneof variants.
+fn push_field_messages(info: &MessageInfo, queue: &mut Vec<String>) {
+    for field in &info.fields {
+        let types = std::iter::once(&field.unified_type)
+            .chain(field.oneof_variants.iter().flatten().map(|v| &v.field_type));
+        for ty in types {
+            let ty = match &ty.base_type {
+                BaseType::Map(_, value) => value,
+                _ => ty,
+            };
+            if let BaseType::Message(name) = &ty.base_type {
+                queue.push(metadata_key(name));
+            }
+        }
+    }
+}
+
+/// What the wrappers of one generation run share.
+struct Ctx<'a> {
+    options: &'a PythonOptions,
+    classes: &'a ModelClasses<'a>,
+    /// Import name of the `_enums` module, when a package is configured.
+    enums_module: Option<String>,
+}
+
+impl Ctx<'_> {
+    /// The `module = "…",` argument of `#[pyclass]` for a type, with its trailing comma.
+    fn module_arg(&self, fq_name: &str) -> Option<TokenStream> {
+        let package = package_of(fq_name, &self.classes.packages)?;
+        super::module_arg(self.options, Some(super::package_segment(package)))
+    }
+
+    /// Whether the class of message `fq_name` gets a keyword constructor.
+    fn has_constructor(&self, fq_name: &str) -> bool {
+        match self.options.constructors {
+            PyConstructors::All => true,
+            PyConstructors::Inputs => self.classes.inputs.contains(&metadata_key(fq_name)),
+        }
+    }
+}
+
+/// The shared `repr` helper of the Python-style `__repr__`
+/// ([`PythonOptions::python_repr`]).
+fn python_repr_fn() -> TokenStream {
+    quote! {
+        /// `Name(field=value, …)` with the `repr` of each attribute in `fields`, without the
+        /// ones that are `None`.
+        fn __python_repr(
+            obj: &::pyo3::Bound<'_, ::pyo3::PyAny>,
+            fields: &[&str],
+        ) -> ::pyo3::PyResult<::std::string::String> {
+            use ::pyo3::types::{PyAnyMethods, PyTypeMethods};
+            let mut shown = ::std::vec::Vec::with_capacity(fields.len());
+            for field in fields {
+                let value = obj.getattr(*field)?;
+                if !value.is_none() {
+                    shown.push(::std::format!("{field}={}", value.repr()?));
+                }
+            }
+            Ok(::std::format!("{}({})", obj.get_type().name()?, shown.join(", ")))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +361,14 @@ fn enum_wrapper(
     info: &EnumInfo,
     rust_path: &str,
     runtime: Runtime,
+    ctx: &Ctx<'_>,
 ) -> crate::error::Result<TokenStream> {
+    let module_arg = ctx.module_arg(fq_name);
+    let stub_attr = ctx
+        .options
+        .stub_gen
+        .then(|| quote! { #[::pyo3_stub_gen::derive::gen_stub_pyclass_enum] });
+    let doc = doc_tokens(info.documentation.as_deref());
     let wrapper = wrapper_ident(fq_name);
     let class_name = python_class_name(fq_name);
     let inner: syn::Path = parse_path(rust_path, fq_name)?;
@@ -198,9 +421,11 @@ fn enum_wrapper(
         // Variant idents mirror the proto value names (UPPER_SNAKE), which trip the
         // camel-case lint; the conversions are intentionally exhaustive.
         #[allow(non_camel_case_types)]
+        #doc
+        #stub_attr
         // `from_py_object`: `Clone` + pyo3 0.28's opt-in `FromPyObject` (see the message
         // wrapper emitter). Keep the derive explicit to preserve pre-0.28 behavior.
-        #[::pyo3::pyclass(eq, eq_int, name = #class_name, from_py_object)]
+        #[::pyo3::pyclass(eq, eq_int, name = #class_name, #module_arg from_py_object)]
         #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
         pub enum #wrapper {
             #(#variants = #numbers,)*
@@ -236,6 +461,144 @@ fn enum_wrapper(
     })
 }
 
+/// Emit the bridge of a proto enum to its `enum.StrEnum` class in `_enums.py`
+/// ([`PythonOptions::str_enums`]): a newtype over the bare Rust enum that Python takes as a
+/// member or a name, and gives back as a member.
+fn str_enum_wrapper(
+    fq_name: &str,
+    info: &EnumInfo,
+    rust_path: &str,
+    runtime: Runtime,
+    ctx: &Ctx<'_>,
+) -> crate::error::Result<TokenStream> {
+    let wrapper = wrapper_ident(fq_name);
+    let class_name = python_class_name(fq_name);
+    let inner: syn::Path = parse_path(rust_path, fq_name)?;
+    let enums_module = ctx
+        .enums_module
+        .as_deref()
+        .expect("validated: `str_enums` has a package");
+
+    let shown: Vec<&EnumValue> = info
+        .values
+        .iter()
+        .filter(|v| !hidden_value(v, ctx.options))
+        .collect();
+    let names: Vec<&str> = shown.iter().map(|v| v.name.as_str()).collect();
+    let numbers: Vec<proc_macro2::Literal> = shown
+        .iter()
+        .map(|v| proc_macro2::Literal::i32_suffixed(v.number))
+        .collect();
+    let invalid = format!(
+        "invalid {class_name}: {{:?}}; expected one of: {}",
+        names.join(", ")
+    );
+    let no_member = format!("{class_name} value {{}} has no Python member");
+
+    let (inner_to_i32, i32_to_inner): (TokenStream, TokenStream) = match runtime {
+        Runtime::Buffa => (
+            quote! { <#inner as ::buffa::Enumeration>::to_i32(&self.0) },
+            quote! { <#inner as ::buffa::Enumeration>::from_i32(n).unwrap_or_default() },
+        ),
+        Runtime::Prost => (
+            quote! { self.0 as i32 },
+            quote! { <#inner as ::core::convert::TryFrom<i32>>::try_from(n).unwrap_or_default() },
+        ),
+    };
+
+    let stub_impl = ctx.options.stub_gen.then(|| {
+        let output = format!("_enums.{class_name}");
+        let input = format!("{output} | str");
+        quote! {
+            impl ::pyo3_stub_gen::PyStubType for #wrapper {
+                fn type_output() -> ::pyo3_stub_gen::TypeInfo {
+                    ::pyo3_stub_gen::TypeInfo {
+                        name: #output.to_string(),
+                        source_module: None,
+                        import: ::std::collections::HashSet::from([#enums_module.into()]),
+                        type_refs: ::std::collections::HashMap::new(),
+                    }
+                }
+
+                fn type_input() -> ::pyo3_stub_gen::TypeInfo {
+                    ::pyo3_stub_gen::TypeInfo {
+                        name: #input.to_string(),
+                        source_module: None,
+                        import: ::std::collections::HashSet::from([#enums_module.into()]),
+                        type_refs: ::std::collections::HashMap::new(),
+                    }
+                }
+            }
+        }
+    });
+
+    let doc = format!(
+        " `{class_name}` of Python: a member of `{enums_module}.{class_name}`, or its name."
+    );
+    Ok(quote! {
+        #[doc = #doc]
+        #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+        pub struct #wrapper(pub #inner);
+
+        impl #wrapper {
+            /// The name of the value, or `None` for a value without a Python member.
+            fn __name(&self) -> ::core::option::Option<&'static str> {
+                match #inner_to_i32 {
+                    #(#numbers => ::core::option::Option::Some(#names),)*
+                    _ => ::core::option::Option::None,
+                }
+            }
+        }
+
+        impl ::core::convert::From<#inner> for #wrapper {
+            fn from(value: #inner) -> Self {
+                Self(value)
+            }
+        }
+
+        impl ::core::convert::From<#wrapper> for #inner {
+            fn from(value: #wrapper) -> Self {
+                value.0
+            }
+        }
+
+        impl<'a, 'py> ::pyo3::FromPyObject<'a, 'py> for #wrapper {
+            type Error = ::pyo3::PyErr;
+
+            fn extract(obj: ::pyo3::Borrowed<'a, 'py, ::pyo3::PyAny>) -> ::pyo3::PyResult<Self> {
+                let name: ::pyo3::pybacked::PyBackedStr = ::pyo3::types::PyAnyMethods::extract(&*obj)?;
+                let n: i32 = match &*name {
+                    #(#names => #numbers,)*
+                    other => {
+                        return ::core::result::Result::Err(
+                            ::pyo3::exceptions::PyValueError::new_err(::std::format!(#invalid, other)),
+                        );
+                    }
+                };
+                ::core::result::Result::Ok(Self(#i32_to_inner))
+            }
+        }
+
+        impl<'py> ::pyo3::IntoPyObject<'py> for #wrapper {
+            type Target = ::pyo3::PyAny;
+            type Output = ::pyo3::Bound<'py, ::pyo3::PyAny>;
+            type Error = ::pyo3::PyErr;
+
+            fn into_pyobject(self, py: ::pyo3::Python<'py>) -> ::pyo3::PyResult<Self::Output> {
+                static CLASS: ::pyo3::sync::PyOnceLock<::pyo3::Py<::pyo3::types::PyType>> =
+                    ::pyo3::sync::PyOnceLock::new();
+                let class = CLASS.import(py, #enums_module, #class_name)?;
+                let name = self.__name().ok_or_else(|| {
+                    ::pyo3::exceptions::PyValueError::new_err(::std::format!(#no_member, #inner_to_i32))
+                })?;
+                ::pyo3::types::PyAnyMethods::getattr(class.as_any(), name)
+            }
+        }
+
+        #stub_impl
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Message wrappers
 // ---------------------------------------------------------------------------
@@ -249,6 +612,7 @@ fn message_wrapper(
     rust_path: &str,
     runtime: Runtime,
     metadata: &CodeGenMetadata,
+    ctx: &Ctx<'_>,
 ) -> crate::error::Result<TokenStream> {
     let wrapper = wrapper_ident(fq_name);
     let class_name = python_class_name(fq_name);
@@ -275,7 +639,22 @@ fn message_wrapper(
         .iter()
         .map(|f| {
             let is_boxed = boxed.contains(&(fq_name.to_string(), f.name.clone()));
-            FieldAccessor::new(f, runtime, &packages, &project_pkg_refs, is_boxed)
+            let hidden_zero = ctx.options.hide_unspecified
+                && match &f.unified_type.base_type {
+                    BaseType::Enum(n) => metadata
+                        .enums
+                        .get(&metadata_key(n))
+                        .is_some_and(|e| has_hidden_zero(e, ctx.options)),
+                    _ => false,
+                };
+            FieldAccessor::new(
+                f,
+                runtime,
+                &packages,
+                &project_pkg_refs,
+                is_boxed,
+                hidden_zero,
+            )
         })
         .collect();
 
@@ -288,22 +667,58 @@ fn message_wrapper(
         .map(|f| OneofAccessor::new(f, &inner, runtime, &packages))
         .collect();
 
+    let frozen = ctx.options.frozen_models;
     let getters = accessors.iter().map(FieldAccessor::getter);
-    let setters = accessors.iter().map(FieldAccessor::setter);
+    let setters = accessors
+        .iter()
+        .filter(|_| !frozen)
+        .map(FieldAccessor::setter);
     let oneof_getters = oneofs.iter().flat_map(OneofAccessor::variant_getters);
-    let oneof_setters = oneofs.iter().flat_map(OneofAccessor::variant_setters);
-    let ctor = constructor(&accessors, &oneofs, &inner);
+    let oneof_setters = oneofs
+        .iter()
+        .filter(|_| !frozen)
+        .flat_map(OneofAccessor::variant_setters);
+    let ctor = ctx
+        .has_constructor(fq_name)
+        .then(|| constructor(&accessors, &oneofs, &inner));
+
+    let repr = if ctx.options.python_repr {
+        let fields = accessors
+            .iter()
+            .map(|a| a.ident.to_string())
+            .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents));
+        quote! {
+            fn __repr__(slf: &::pyo3::Bound<'_, Self>) -> ::pyo3::PyResult<::std::string::String> {
+                __python_repr(slf.as_any(), &[#(#fields),*])
+            }
+        }
+    } else {
+        quote! {
+            fn __repr__(&self) -> ::std::string::String {
+                ::std::format!("{:?}", self.0)
+            }
+        }
+    };
+
+    let frozen_arg = frozen.then(|| quote! { frozen, });
+    let module_arg = ctx.module_arg(fq_name);
+    let stub_class = super::stub_class_attr(ctx.options);
+    let stub_methods = super::stub_methods_attr(ctx.options);
+    let doc = doc_tokens(info.documentation.as_deref());
 
     Ok(quote! {
+        #doc
+        #stub_class
         // `from_py_object`: these wrappers are `Clone`, and pyo3 0.28 made the auto
         // `FromPyObject` derive for `Clone` `#[pyclass]` types opt-in. Keep the pre-0.28
         // behavior (derive it) explicitly so Python callers can still pass a wrapper into
         // Rust-side functions and to silence the deprecation under `-D warnings`.
-        #[::pyo3::pyclass(name = #class_name, from_py_object)]
+        #[::pyo3::pyclass(name = #class_name, #frozen_arg #module_arg from_py_object)]
         #[derive(Clone, Debug)]
         pub struct #wrapper(pub #inner);
 
         #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
+        #stub_methods
         #[::pyo3::pymethods]
         impl #wrapper {
             #ctor
@@ -313,9 +728,7 @@ fn message_wrapper(
             #(#oneof_getters)*
             #(#oneof_setters)*
 
-            fn __repr__(&self) -> ::std::string::String {
-                ::std::format!("{:?}", self.0)
-            }
+            #repr
 
             fn __eq__(&self, other: &Self) -> bool {
                 self.0 == other.0
@@ -431,6 +844,11 @@ struct FieldAccessor {
     /// `Option<Box<T>>` (it sits on a recursion cycle). Drives whether the read
     /// path derefs the box and the write path re-boxes. Always `false` for buffa.
     is_boxed: bool,
+    /// Whether the field is an enum whose zero value has no Python member
+    /// ([`PythonOptions::hide_unspecified`]): that value reads as `None`.
+    hidden_zero: bool,
+    /// Documentation carried from the proto field, for the getter.
+    documentation: Option<String>,
 }
 
 impl FieldAccessor {
@@ -440,6 +858,7 @@ impl FieldAccessor {
         packages: &BTreeSet<String>,
         project_pkg_refs: &BTreeSet<&str>,
         is_boxed: bool,
+        hidden_zero: bool,
     ) -> Self {
         let ident = format_ident!("{}", super::sanitize_python_field_name(&field.name));
         let in_project = match &field.unified_type.base_type {
@@ -461,6 +880,8 @@ impl FieldAccessor {
             in_project,
             inner_rust_path,
             is_boxed,
+            hidden_zero,
+            documentation: field.documentation.clone(),
         }
     }
 
@@ -486,10 +907,28 @@ impl FieldAccessor {
         // Explicit-presence scalars/enums (proto3 `optional`) are stored as
         // `Option<T>` by both the buffa and prost model plugins, so the wrapper
         // surfaces them as `Optional[...]` too.
-        if self.is_optional_scalar() {
+        if self.is_optional_scalar() || self.is_hidden_zero_enum() {
             return quote! { ::core::option::Option<#base> };
         }
         base
+    }
+
+    /// A singular, non-`optional` enum field with a hidden zero value: Python-visible as
+    /// `Optional[...]`, `None` for the zero value.
+    fn is_hidden_zero_enum(&self) -> bool {
+        self.hidden_zero && !self.ty.is_repeated && !self.ty.is_optional
+    }
+
+    /// With a hidden zero value, the filter that drops it from the known values of the enum:
+    /// for an `Option` or an iterator of the bare Rust enum.
+    fn hidden_zero_filter(&self) -> Option<TokenStream> {
+        let inner = self.inner_rust_path.as_ref();
+        self.hidden_zero.then(|| match self.runtime {
+            Runtime::Buffa => {
+                quote! { .filter(|e| <#inner as ::buffa::Enumeration>::to_i32(e) != 0) }
+            }
+            Runtime::Prost => quote! { .filter(|e| *e as i32 != 0) },
+        })
     }
 
     fn base_py_type(&self) -> TokenStream {
@@ -505,7 +944,7 @@ impl FieldAccessor {
     /// singular message or an explicit-presence scalar/enum. Such fields must not be
     /// re-wrapped in the keyword constructor (would yield ambiguous `Option<Option<T>>`).
     fn py_type_is_optional(&self) -> bool {
-        self.is_singular_message() || self.is_optional_scalar()
+        self.is_singular_message() || self.is_optional_scalar() || self.is_hidden_zero_enum()
     }
 
     /// An explicit-presence scalar or enum (proto3 `optional`): stored as
@@ -525,7 +964,9 @@ impl FieldAccessor {
         let ident = &self.ident;
         let ret = self.py_type();
         let body = self.read_expr();
+        let doc = doc_tokens(self.documentation.as_deref());
         quote! {
+            #doc
             #[getter]
             fn #ident(&self) -> #ret {
                 #body
@@ -580,16 +1021,23 @@ impl FieldAccessor {
         let base = self.base_py_type();
         let inner = self.inner_rust_path.as_ref();
         match &self.ty.base_type {
-            BaseType::Enum(_) => match self.runtime {
-                // buffa repeated enum: Vec<EnumValue<E>>; keep known values only.
-                Runtime::Buffa => quote! {
-                    #access.iter().filter_map(|e| e.as_known().map(#base::from)).collect()
-                },
-                // prost repeated enum: Vec<i32>; map through the bare Rust enum.
-                Runtime::Prost => quote! {
-                    #access.iter().filter_map(|&v| <#inner as ::core::convert::TryFrom<i32>>::try_from(v).ok().map(#base::from)).collect()
-                },
-            },
+            BaseType::Enum(_) => {
+                let hidden = self.hidden_zero_filter();
+                match self.runtime {
+                    // buffa repeated enum: Vec<EnumValue<E>>; keep known values only.
+                    Runtime::Buffa => quote! {
+                        #access.iter().filter_map(|e| e.as_known()) #hidden .map(#base::from).collect()
+                    },
+                    // prost repeated enum: Vec<i32>; map through the bare Rust enum.
+                    Runtime::Prost => quote! {
+                        #access.iter()
+                            .filter_map(|&v| <#inner as ::core::convert::TryFrom<i32>>::try_from(v).ok())
+                            #hidden
+                            .map(#base::from)
+                            .collect()
+                    },
+                }
+            }
             BaseType::Message(_) => quote! {
                 #access.iter().cloned().map(#base::from).collect()
             },
@@ -601,6 +1049,15 @@ impl FieldAccessor {
     fn read_enum(&self, access: &TokenStream) -> TokenStream {
         let base = self.base_py_type();
         let inner = self.inner_rust_path.as_ref();
+        if self.is_hidden_zero_enum() {
+            let hidden = self.hidden_zero_filter();
+            return match self.runtime {
+                Runtime::Buffa => quote! { #access.as_known() #hidden .map(#base::from) },
+                Runtime::Prost => quote! {
+                    <#inner as ::core::convert::TryFrom<i32>>::try_from(#access).ok() #hidden .map(#base::from)
+                },
+            };
+        }
         match self.runtime {
             // buffa: EnumValue<E> -> Option<E> via as_known(); fall back to the inner
             // enum's Default (the zero/unspecified variant), then to the wrapper.
@@ -642,15 +1099,19 @@ impl FieldAccessor {
         let inner = self.inner_rust_path.as_ref();
         match &self.ty.base_type {
             // buffa: Option<EnumValue<E>>; prost: Option<i32>.
-            BaseType::Enum(_) => match self.runtime {
-                Runtime::Buffa => quote! {
-                    #access.as_ref().and_then(|e| e.as_known()).map(#base::from)
-                },
-                Runtime::Prost => quote! {
-                    #access.and_then(|v| <#inner as ::core::convert::TryFrom<i32>>::try_from(v).ok())
-                        .map(#base::from)
-                },
-            },
+            BaseType::Enum(_) => {
+                let hidden = self.hidden_zero_filter();
+                match self.runtime {
+                    Runtime::Buffa => quote! {
+                        #access.as_ref().and_then(|e| e.as_known()) #hidden .map(#base::from)
+                    },
+                    Runtime::Prost => quote! {
+                        #access.and_then(|v| <#inner as ::core::convert::TryFrom<i32>>::try_from(v).ok())
+                            #hidden
+                            .map(#base::from)
+                    },
+                }
+            }
             // Option<{int,bool,float}>: the inner scalar is `Copy`, so the `Option`
             // copies by value — `.clone()` here would trip `clippy::clone_on_copy`.
             BaseType::Int32
@@ -724,6 +1185,19 @@ impl FieldAccessor {
 
     fn write_enum(&self) -> TokenStream {
         let inner = self.inner_rust_path.as_ref();
+        // A hidden-zero field takes `Option<base>`; `None` stores the zero value.
+        if self.is_hidden_zero_enum() {
+            return match self.runtime {
+                Runtime::Buffa => quote! {
+                    value
+                        .map(|e| ::buffa::EnumValue::Known(<#inner as ::core::convert::From<_>>::from(e)))
+                        .unwrap_or_default()
+                },
+                Runtime::Prost => quote! {
+                    value.map(|e| <#inner as ::core::convert::From<_>>::from(e) as i32).unwrap_or(0)
+                },
+            };
+        }
         match self.runtime {
             Runtime::Buffa => quote! {
                 ::buffa::EnumValue::Known(<#inner as ::core::convert::From<_>>::from(value))
@@ -1205,17 +1679,7 @@ fn is_in_project(fq_name: &str, packages: &BTreeSet<String>) -> bool {
 /// google/gnostic types), which have no in-crate path and must be skipped.
 fn type_rust_path(fq_name: &str, project_packages: &BTreeSet<&str>) -> Option<String> {
     let stripped = fq_name.strip_prefix('.').unwrap_or(fq_name);
-
-    let package = project_packages
-        .iter()
-        .filter(|pkg| {
-            stripped == **pkg
-                || stripped
-                    .strip_prefix(**pkg)
-                    .is_some_and(|rest| rest.starts_with('.'))
-        })
-        .max_by_key(|pkg| pkg.len())?;
-
+    let package = package_of(fq_name, project_packages)?;
     let remainder = stripped.strip_prefix(package)?.trim_start_matches('.');
     if remainder.is_empty() {
         return None;

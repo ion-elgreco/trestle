@@ -1135,6 +1135,7 @@ mod tests {
             dual_transport: false,
             client_protocols: crate::ClientProtocols::default(),
             connect_client_path: None,
+            rest_client: Default::default(),
             output: crate::codegen::CodeGenOutput {
                 common: "/tmp/common".into(),
                 models: Some("/tmp/models".into()),

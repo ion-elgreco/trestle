@@ -11,7 +11,6 @@ use example_client::ExampleClient;
 use crate::error::{PyExampleError, PyExampleResult};
 use crate::runtime::get_runtime;
 use example_common::models::catalog::v1::*;
-use example_common::models::catalog::v1::*;
 use example_common::models::schemas::v1::*;
 use example_common::models::tags::v1::*;
 use example_common::models::*;
@@ -26,15 +25,12 @@ impl PyExampleClient {
     #[new]
     #[pyo3(signature = (base_url, token = None))]
     pub fn new(base_url: String, token: Option<String>) -> PyResult<Self> {
-        let client = if let Some(token) = token {
-            olai_http::CloudClient::new_with_token(token)
-        } else {
-            olai_http::CloudClient::new_unauthenticated()
-        };
         let base_url = base_url.parse().map_err(PyExampleError::from)?;
-        Ok(Self {
-            client: ExampleClient::new(client, base_url),
-        })
+        let client = match token {
+            Some(token) => ExampleClient::new_with_token(base_url, token),
+            None => ExampleClient::new_unauthenticated(base_url),
+        };
+        Ok(Self { client })
     }
     #[pyo3(signature = (catalog = None))]
     pub fn create_catalog(
@@ -60,9 +56,15 @@ impl PyExampleClient {
         let request = self.client.list_catalogs(max_results, page_token);
         let runtime = get_runtime(py)?;
         py.detach(|| {
-            let result: ::std::vec::Vec<_> = runtime
-                .block_on(async move { request.into_stream().try_collect().await })?;
-            Ok::<_, PyExampleError>(result.into_iter().map(PyCatalog::from).collect())
+            #[allow(clippy::let_unit_value)]
+            let result = runtime
+                .block_on(async move {
+                    request.into_stream().try_collect::<::std::vec::Vec<_>>().await
+                })?;
+            Ok::<
+                _,
+                PyExampleError,
+            >(result.into_iter().map(PyCatalog::from).collect::<::std::vec::Vec<_>>())
         })
     }
     #[pyo3(signature = (catalog_id))]
@@ -134,9 +136,15 @@ impl PyExampleClient {
         let request = self.client.list_schemas(catalog_name, max_results, page_token);
         let runtime = get_runtime(py)?;
         py.detach(|| {
-            let result: ::std::vec::Vec<_> = runtime
-                .block_on(async move { request.into_stream().try_collect().await })?;
-            Ok::<_, PyExampleError>(result.into_iter().map(PySchema::from).collect())
+            #[allow(clippy::let_unit_value)]
+            let result = runtime
+                .block_on(async move {
+                    request.into_stream().try_collect::<::std::vec::Vec<_>>().await
+                })?;
+            Ok::<
+                _,
+                PyExampleError,
+            >(result.into_iter().map(PySchema::from).collect::<::std::vec::Vec<_>>())
         })
     }
     #[pyo3(signature = (entity_type, entity_name, max_results, page_token))]
@@ -238,4 +246,50 @@ impl PyExampleClient {
             client: self.client.schema_from_full_name(full_name),
         }
     }
+}
+/// Add the generated classes to the extension module `module`.
+pub fn register(
+    module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>,
+) -> ::pyo3::PyResult<()> {
+    module.add_class::<PyExampleClient>()?;
+    module.add_class::<PyCatalogType>()?;
+    module.add_class::<PyAzureConfig>()?;
+    module.add_class::<PyCatalog>()?;
+    module.add_class::<PyCatalogStatus>()?;
+    module.add_class::<PyCatalogToken>()?;
+    module.add_class::<PyCreateCatalogRequest>()?;
+    module.add_class::<PyDeleteCatalogRequest>()?;
+    module.add_class::<PyDeleteCatalogResponse>()?;
+    module.add_class::<PyGenerateCatalogTokenRequest>()?;
+    module.add_class::<PyGetCatalogRequest>()?;
+    module.add_class::<PyGetCatalogStatusRequest>()?;
+    module.add_class::<PyListByCatalogTypeRequest>()?;
+    module.add_class::<PyListByTagsRequest>()?;
+    module.add_class::<PyListByTagsResponse>()?;
+    module.add_class::<PyListCatalogsRequest>()?;
+    module.add_class::<PyListCatalogsResponse>()?;
+    module.add_class::<PyS3Config>()?;
+    module.add_class::<PyStorageConfig>()?;
+    module.add_class::<PyUpdateCatalogRequest>()?;
+    module.add_class::<PyCatalogClient>()?;
+    module.add_class::<PyGetSchemaRequestView>()?;
+    module.add_class::<PySchemaType>()?;
+    module.add_class::<PyCreateSchemaRequest>()?;
+    module.add_class::<PyDeleteSchemaRequest>()?;
+    module.add_class::<PyDeleteSchemaResponse>()?;
+    module.add_class::<PyGetSchemaRequest>()?;
+    module.add_class::<PyListSchemasRequest>()?;
+    module.add_class::<PyListSchemasResponse>()?;
+    module.add_class::<PySchema>()?;
+    module.add_class::<PyUpdateSchemaRequest>()?;
+    module.add_class::<PySchemaClient>()?;
+    module.add_class::<PyCreateTagAssignmentRequest>()?;
+    module.add_class::<PyDeleteTagAssignmentRequest>()?;
+    module.add_class::<PyDeleteTagAssignmentResponse>()?;
+    module.add_class::<PyGetTagAssignmentRequest>()?;
+    module.add_class::<PyListTagAssignmentsRequest>()?;
+    module.add_class::<PyListTagAssignmentsResponse>()?;
+    module.add_class::<PyTagAssignment>()?;
+    module.add_class::<PyTouchTagAssignmentRequest>()?;
+    Ok(())
 }

@@ -45,8 +45,9 @@ impl PySchemaClient {
         let request = self.client.delete();
         let runtime = get_runtime(py)?;
         py.detach(|| {
-            runtime.block_on(request.into_future())?;
-            Ok::<_, PyExampleError>(())
+            #[allow(clippy::let_unit_value)]
+            let result = runtime.block_on(request.into_future())?;
+            Ok::<_, PyExampleError>(result)
         })
     }
 }

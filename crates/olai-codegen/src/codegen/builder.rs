@@ -78,8 +78,7 @@ fn generate_builders_module(
         })
         .collect::<crate::error::Result<_>>()?;
     let mod_path: Path = service.models_path();
-    let result_path: Path =
-        syn::parse_str(&service.config.result_type_path).expect("valid result_type_path");
+    let result_path: Path = service.config.client_result_path();
 
     // The streaming machinery (`into_stream`, `stream_paginated`, the futures
     // `Stream` traits) is emitted only for `List` methods. Pull its imports in
