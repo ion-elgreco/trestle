@@ -9,6 +9,9 @@
 //! - **64-bit integers.** buffa writes `int64`/`uint64` as quoted strings. With
 //!   `int64_module = Some(path)` the models write numbers through the `json_int64` helper module
 //!   (see [`RestClientOptions::json_int64_as_number`](crate::RestClientOptions)).
+//! - **Free-form JSON.** buffa writes every number of a `google.protobuf.Value`, `Struct` or
+//!   `ListValue` as an `f64` (`1.0`). With `json_value_module = Some(path)` those fields write
+//!   whole numbers as integers through the `json_value` helper module.
 //!
 //! The rewrites are idempotent: rewritten output does not match again. They leave alone the
 //! files that trestle writes into the models directory itself.
@@ -51,6 +54,9 @@ pub struct ModelRewrites {
     /// Path of the `json_int64` helper module (e.g. `crate::models::json_int64`); when set,
     /// buffa's 64-bit integer helpers are pointed at it.
     pub int64_module: Option<String>,
+    /// Path of the `json_value` helper module (e.g. `crate::models::json_value`); when set, the
+    /// free-form JSON fields serialize through it.
+    pub json_value_module: Option<String>,
 }
 
 impl ModelRewrites {
@@ -59,6 +65,7 @@ impl ModelRewrites {
         self.field_names == JsonFieldNames::Json
             && self.packages.values().all(|n| *n == JsonFieldNames::Json)
             && self.int64_module.is_none()
+            && self.json_value_module.is_none()
     }
 
     /// The field-name style of the model file `file_name` (`<package>.rs`).
@@ -79,6 +86,9 @@ impl ModelRewrites {
         }
         if let Some(module) = &self.int64_module {
             out = int64_helpers_to(&out, module);
+        }
+        if let Some(module) = &self.json_value_module {
+            out = json_value_serializers(&out, module);
         }
         out
     }
@@ -197,6 +207,115 @@ fn int64_helpers_to(src: &str, module: &str) -> String {
             format!("{module}::{}", &caps["name"])
         })
         .into_owned()
+}
+
+/// Give each free-form JSON field (`google.protobuf.Value`, `Struct`, `ListValue`; singular,
+/// repeated or a map value) a `serialize_with` of `module`, which writes whole numbers as
+/// integers. A field declaration can span lines, so the field types are read with their
+/// whitespace collapsed. Fields that already have a `serialize_with` are left alone.
+fn json_value_serializers(src: &str, module: &str) -> String {
+    const JSON: &str = "::buffa_types::google::protobuf::";
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = String::with_capacity(src.len() + 256);
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("pub ") && trimmed.contains(": ") && line.contains(JSON) || {
+            // A type that starts on the next lines, as rustfmt breaks a long `HashMap<..>`.
+            trimmed.starts_with("pub ") && trimmed.ends_with('<')
+        } {
+            // The whole declaration, up to the `,` that ends it.
+            let mut end = i;
+            let mut decl = String::new();
+            loop {
+                decl.push_str(lines[end].trim());
+                decl.push(' ');
+                // The `,` that ends the declaration is outside the type's `<..>`.
+                let depth = decl.matches('<').count() as isize - decl.matches('>').count() as isize;
+                if (depth <= 0 && lines[end].trim_end().ends_with(',')) || end + 1 == lines.len() {
+                    break;
+                }
+                end += 1;
+            }
+            let decl = decl
+                .replace("< ", "<")
+                .replace(" >", ">")
+                .replace(", >", ">");
+            let kind = if !decl.contains(JSON) {
+                None
+            } else if decl.contains(": ::buffa::MessageField<") {
+                Some("message_field")
+            } else if decl.contains(": ::buffa::alloc::vec::Vec<") {
+                Some("repeated")
+            } else if decl.contains("HashMap<") {
+                Some("map")
+            } else {
+                None
+            };
+            let attrs = field_attributes(&lines, i);
+            if let Some(kind) = kind
+                && !has_serde_key(&attrs, "serialize_with")
+                && !has_serde_key(&attrs, "with")
+            {
+                let indent = &line[..line.len() - trimmed.len()];
+                out.push_str(&format!(
+                    "{indent}#[serde(serialize_with = \"{module}::{kind}\")]\n"
+                ));
+            }
+            for l in &lines[i..=end] {
+                out.push_str(l);
+                out.push('\n');
+            }
+            i = end + 1;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+        i += 1;
+    }
+    if !src.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
+/// Whether the serde attributes `attrs` set `key` (`with`, `serialize_with`): the key as a
+/// whole word, so `deserialize_with` sets neither.
+fn has_serde_key(attrs: &str, key: &str) -> bool {
+    attrs.match_indices(key).any(|(at, _)| {
+        let before = attrs[..at].chars().next_back();
+        let after = attrs[at + key.len()..].trim_start();
+        !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') && after.starts_with('=')
+    })
+}
+
+/// The attributes above the field declaration at line `field`: doc comments are skipped, and an
+/// attribute that spans lines is read whole.
+fn field_attributes(lines: &[&str], field: usize) -> String {
+    let mut attrs = String::new();
+    let mut j = field;
+    while j > 0 {
+        let prev = lines[j - 1].trim();
+        if prev.starts_with("//") {
+            j -= 1;
+        } else if prev.starts_with("#[") && prev.ends_with(']') {
+            attrs.push_str(prev);
+            j -= 1;
+        } else if prev.ends_with(")]") {
+            // The end of an attribute that spans lines: read up to its `#[`.
+            let mut k = j - 1;
+            while k > 0 && !lines[k].trim_start().starts_with("#[") {
+                attrs.push_str(lines[k].trim());
+                k -= 1;
+            }
+            attrs.push_str(lines[k].trim());
+            j = k;
+        } else {
+            break;
+        }
+    }
+    attrs
 }
 
 /// Invert the proto3 JSON mapping: each uppercase letter becomes `_` + its lowercase.
@@ -498,5 +617,40 @@ impl S {
 "
         );
         assert_eq!(space_items(&spaced), spaced);
+    }
+
+    #[test]
+    fn json_value_fields_serialize_through_the_module() {
+        let rewrites = ModelRewrites {
+            json_value_module: Some("crate::models::json_value".into()),
+            ..Default::default()
+        };
+        let src = r#"    #[serde(rename = "attributes")]
+    pub attributes: ::buffa::MessageField<::buffa_types::google::protobuf::Struct>,
+    #[serde(rename = "notes", deserialize_with = "::buffa::json_helpers::null_as_default")]
+    pub notes: ::buffa::alloc::vec::Vec<::buffa_types::google::protobuf::Value>,
+    #[serde(rename = "rows")]
+    pub rows: ::buffa::__private::HashMap<
+        ::buffa::alloc::string::String,
+        ::buffa_types::google::protobuf::ListValue,
+    >,
+    #[serde(rename = "name")]
+    pub name: ::buffa::alloc::string::String,
+"#;
+        let out = rewrites.rewrite("demo.v1.rs", src);
+        for kind in ["message_field", "repeated", "map"] {
+            assert!(
+                out.contains(&format!(
+                    "#[serde(serialize_with = \"crate::models::json_value::{kind}\")]"
+                )),
+                "{out}"
+            );
+        }
+        assert_eq!(
+            out.matches("serialize_with = \"crate::models").count(),
+            3,
+            "{out}"
+        );
+        assert!(out.contains("    pub rows: ::buffa::__private::HashMap<\n"));
     }
 }

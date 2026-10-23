@@ -14,7 +14,7 @@ use super::super::format_tokens;
 use crate::codegen::bindings::builder::{OptionalSetter, SetterRender, generate_builder_pattern};
 use crate::codegen::bindings::{BindingBackend, ShapeParts, driver};
 use crate::codegen::{BindingMode, MethodHandler, PythonOptions, ServiceHandler};
-use crate::parsing::types::{BaseType, RenderContext, UnifiedType};
+use crate::parsing::types::{BaseType, JsonType, RenderContext, UnifiedType};
 
 /// The `Py`-prefixed wrapper ident for a model type ident (e.g. `Catalog` →
 /// `PyCatalog`). Wrapper names use the parent-qualified emitted type name, which
@@ -677,6 +677,28 @@ impl SetterRender for PyBackend<'_> {
         param_ident: &Ident,
         with_method: &Ident,
     ) -> TokenStream {
+        // A free-form JSON argument is any Python object: convert it to the field's value.
+        if let Some(json) = json_param(setter.field_type) {
+            let value = super::model_conversions::json_from_py(
+                json,
+                setter.field_type,
+                quote! { #param_ident },
+            );
+            let value = if setter.field_type.is_repeated
+                || matches!(setter.field_type.base_type, BaseType::Map(..))
+            {
+                value
+            } else {
+                // The builder takes the bare value, not the `MessageField`.
+                let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
+                quote! { #from_py(&#param_ident)? }
+            };
+            return quote! {
+                if let Some(#param_ident) = #param_ident {
+                    request = request.#with_method(#value);
+                }
+            };
+        }
         // Maps and repeated fields are `Option`-wrapped at the binding boundary; guard before
         // forwarding. Repeated message/enum elements are also converted from their `Py`
         // wrapper to the bare model.
@@ -720,11 +742,25 @@ fn python_param_defs(method: &MethodHandler<'_>, mode: BindingMode) -> Vec<Token
         .into_iter()
         .map(|p| {
             let param_name = p.field_ident();
+            if json_param(p.field_type()).is_some() {
+                // Any Python object; `None` for an optional argument left out.
+                return if p.is_optional() {
+                    quote! { #param_name: ::core::option::Option<::pyo3::Bound<'_, ::pyo3::PyAny>> }
+                } else {
+                    quote! { #param_name: ::pyo3::Bound<'_, ::pyo3::PyAny> }
+                };
+            }
             let rust_type = method.field_type(p.field_type(), RenderContext::PythonParameter);
             let py_type = wrap_param_type(p.field_type(), &rust_type);
             quote! { #param_name: #py_type }
         })
         .collect()
+}
+
+/// The free-form JSON type of a param (`google.protobuf.Value`, `Struct`, `ListValue`), which
+/// Python passes as a plain object.
+fn json_param(ty: &UnifiedType) -> Option<JsonType> {
+    JsonType::of_field(ty)
 }
 
 /// Whether a param's base type is a model (message/enum) that has a `Py` wrapper,
@@ -761,6 +797,13 @@ fn wrap_param_type(ty: &UnifiedType, rendered: &syn::Type) -> TokenStream {
 /// produced by [`wrap_param_type`]) back into the bare model the Rust client
 /// expects. Handles the `Option`/`Vec` cardinality wrapping. Scalars pass through.
 fn convert_param_value(ty: &UnifiedType, expr: TokenStream) -> TokenStream {
+    if let Some(json) = json_param(ty) {
+        if ty.is_repeated || matches!(ty.base_type, BaseType::Map(..)) {
+            return super::model_conversions::json_from_py(json, ty, expr);
+        }
+        let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
+        return quote! { #from_py(&#expr)? };
+    }
     if !param_needs_conversion(ty) {
         return expr;
     }

@@ -21,6 +21,14 @@ async fn get_widget(Path(name): Path<String>) -> Response {
         )
             .into_response(),
         "green" => axum::Json(json!({"name": name, "color": "GREEN"})).into_response(),
+        "json" => axum::Json(json!({
+            "name": name,
+            "attributes": {"count": 3, "ratio": 0.5, "nested": {"id": 7}},
+            "extra": [1, "two", null, true],
+            "notes": [{"a": 1}, 2.5],
+            "rows": {"t": [1, 2]},
+        }))
+        .into_response(),
         _ => axum::Json(json!({
             "name": name,
             "color": "PURPLE",
@@ -43,8 +51,16 @@ async fn list_widgets(uri: OriginalUri) -> Response {
     axum::Json(page).into_response()
 }
 
-async fn create_widget(axum::Json(body): axum::Json<serde_json::Value>) -> Response {
-    axum::Json(json!({"name": body["name"], "created_at": body["created_at"]})).into_response()
+async fn create_widget(body: String) -> Response {
+    let request: serde_json::Value = serde_json::from_str(&body).unwrap();
+    // The raw body comes back as the display name, so the test sees its numbers.
+    axum::Json(json!({
+        "name": request["name"],
+        "created_at": request["created_at"],
+        "attributes": request["attributes"],
+        "display_name": body,
+    }))
+    .into_response()
 }
 
 async fn widget_exists(Path(name): Path<String>) -> StatusCode {
@@ -141,7 +157,7 @@ assert w.created_at == 1700000000000
 assert w.properties == {"a": "1"}
 assert repr(w) == (
     "Widget(name='a/b c', created_at=1700000000000, size_bytes=0, "
-    "properties={'a': '1'}, display_name='', metadata_location='')"
+    "properties={'a': '1'}, display_name='', metadata_location='', notes=[], rows={})"
 ), repr(w)
 try:
     w.name = "x"
@@ -209,6 +225,22 @@ try:
 except DemoError as e:
     assert type(e) is DemoError and e.status is None and e.code is None
 
+# Free-form JSON fields are plain Python objects; whole numbers are ints both ways.
+w = client.widget("json").get()
+assert w.attributes == {"count": 3, "ratio": 0.5, "nested": {"id": 7}}, w.attributes
+assert type(w.attributes["count"]) is int
+assert w.extra == [1, "two", None, True], w.extra
+assert w.notes == [{"a": 1}, 2.5], w.notes
+assert w.rows == {"t": [1, 2]}, w.rows
+created = client.create_widget("w2", attributes={"count": 3, "flag": True, "list": [1, 2.5]})
+assert created.attributes == {"count": 3, "flag": True, "list": [1, 2.5]}, created.attributes
+assert '"count":3' in created.display_name, created.display_name
+try:
+    client.create_widget("w3", attributes={"bad": object()})
+    raise AssertionError("expected a TypeError")
+except TypeError:
+    pass
+
 # A HEAD request gives None, or raises for a missing widget; a GET can carry a JSON body.
 assert client.widget_exists("w") is None
 try:
@@ -274,6 +306,10 @@ fn stubs() {
         "def __new__(cls, key: typing.Optional[builtins.str] = None",
         "def get_async(self) -> asyncio.Future[Widget]:",
         "def delete_async(self) -> asyncio.Future[None]:",
+        "def attributes(self) -> typing.Optional[dict[str, typing.Any]]:",
+        "def extra(self) -> typing.Any:",
+        "def notes(self) -> list[typing.Any]:",
+        "def rows(self) -> dict[str, list[typing.Any]]:",
     ] {
         assert!(
             models.contains(expected),

@@ -124,5 +124,6 @@ fn demo_rewrites(config: &CodeGenConfig) -> ModelRewrites {
         field_names: JsonFieldNames::Proto,
         packages: Default::default(),
         int64_module: config.json_int64_module_path(),
+        json_value_module: config.json_value_module_path(),
     }
 }

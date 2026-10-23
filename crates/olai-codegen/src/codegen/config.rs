@@ -429,7 +429,9 @@ pub struct CodeGenConfig {
 /// Wire-format and error options of the generated REST client.
 #[derive(Debug, Clone, Default)]
 pub struct RestClientOptions {
-    /// Write 64-bit integers as JSON numbers instead of the proto3-JSON quoted strings.
+    /// Write 64-bit integers as JSON numbers instead of the proto3-JSON quoted strings, and the
+    /// whole numbers of free-form JSON fields (`google.protobuf.Value`, `Struct`, `ListValue`)
+    /// as integers (`1`, not buffa's `1.0`).
     ///
     /// Emits a `json_int64` serde helper module into the models `mod.rs`. The `trestle` CLI
     /// rewrites buffa's `int64`/`uint64` helper paths to it (see
@@ -548,6 +550,19 @@ impl CodeGenConfig {
         }
         let models_path = ModelsPath::from_template(&self.models_path_crate_template);
         Some(format!("{}::json_int64", models_path.root()?))
+    }
+
+    /// The crate-local path of the `json_value` helper module that
+    /// [`RestClientOptions::json_int64_as_number`] emits into the models `mod.rs` when a message
+    /// has free-form JSON fields: the module that
+    /// [`ModelRewrites::json_value_module`](crate::postprocess::ModelRewrites::json_value_module)
+    /// points at. `None` when the option is off.
+    pub fn json_value_module_path(&self) -> Option<String> {
+        if !self.rest_client.json_int64_as_number {
+            return None;
+        }
+        let models_path = ModelsPath::from_template(&self.models_path_crate_template);
+        Some(format!("{}::json_value", models_path.root()?))
     }
 
     /// The `Result` type of the generated clients: the one of the generated error module with

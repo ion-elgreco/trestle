@@ -23,7 +23,7 @@ python = ["dep:pyo3", "dep:pyo3-stub-gen"]
 
 [dependencies]
 buffa = { version = "0.7", features = ["json"] }
-buffa-types = "0.7"
+buffa-types = { version = "0.7", features = ["json"] }
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 serde = { version = "1", features = ["derive"] }

@@ -60,6 +60,14 @@ async fn get_widget(
         )
             .into_response(),
         "text" => (StatusCode::BAD_GATEWAY, "bad gateway\n").into_response(),
+        "json" => axum::Json(json!({
+            "name": name,
+            "attributes": {"count": 3, "ratio": 0.5, "nested": {"id": 7}},
+            "extra": [1, "two", null, true],
+            "notes": [{"a": 1}, 2.5],
+            "rows": {"t": [1, 2]},
+        }))
+        .into_response(),
         _ => axum::Json(json!({
             "name": name,
             "color": "PURPLE",
@@ -275,6 +283,41 @@ async fn list_stream_reads_all_pages() {
         .unwrap();
     let names: Vec<_> = all.iter().map(|w| w.name.as_str()).collect();
     assert_eq!(names, ["w1", "w2", "w3"]);
+}
+
+#[tokio::test]
+async fn free_form_json_keeps_whole_numbers() {
+    use buffa_types::google::protobuf::{Struct, Value};
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    let mut nested = Struct::default();
+    nested.fields.insert("id".into(), Value::from(7_i64));
+    let mut attributes = Struct::default();
+    attributes.fields.insert("count".into(), Value::from(3_i64));
+    attributes.fields.insert("ratio".into(), Value::from(0.5));
+    attributes.fields.insert("nested".into(), Value::from(nested));
+    client
+        .create_widget("w")
+        .with_attributes(attributes)
+        .await
+        .unwrap();
+    let body = seen
+        .all()
+        .into_iter()
+        .find_map(|e| e.strip_prefix("body ").map(str::to_string))
+        .unwrap();
+    for part in [r#""count":3"#, r#""id":7"#, r#""ratio":0.5"#] {
+        assert!(body.contains(part), "{part} in {body}");
+    }
+
+    let widget = client.widget("json").get().await.unwrap();
+    let attributes = widget.attributes.as_option().unwrap();
+    assert_eq!(attributes.fields["count"], Value::from(3_i64));
+    assert_eq!(widget.notes.len(), 2);
+    assert_eq!(widget.rows["t"].values, [Value::from(1_i64), Value::from(2_i64)]);
+    // The models write the whole numbers back as integers too.
+    let json = serde_json::to_string(&widget).unwrap();
+    assert!(json.contains(r#""rows":{"t":[1,2]}"#), "{json}");
 }
 
 #[tokio::test]

@@ -339,14 +339,16 @@ fn builder_with_impl(method: &MethodHandler<'_>, field: &BodyField) -> TokenStre
 
     let doc_attr = field_doc_attr(field.documentation.as_deref(), field_name);
 
-    if matches!(field.field_type.base_type, BaseType::Map(_, _)) {
+    if let BaseType::Map(_, value) = &field.field_type.base_type {
+        // The values convert into the map's value type (`String` for a `map<string, string>`).
+        let value_type = method.field_type(value, RenderContext::BuilderMethod);
         quote! {
             #doc_attr
             pub fn #method_name<I, K, V>(mut self, #field_ident: I) -> Self
             where
                 I: IntoIterator<Item = (K, V)>,
                 K: Into<String>,
-                V: Into<String>,
+                V: Into<#value_type>,
             {
                 self.request.#field_ident = #field_ident
                     .into_iter()

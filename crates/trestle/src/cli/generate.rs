@@ -252,6 +252,7 @@ fn rewrite_models(cfg: &TrestleConfig, config: &CodeGenConfig) -> Result<()> {
             .map(|(package, names)| (package.clone(), names.lower()))
             .collect(),
         int64_module: config.json_int64_module_path(),
+        json_value_module: config.json_value_module_path(),
     };
     let files_changed = rewrites
         .rewrite_dir(&gen_dir)

@@ -4,6 +4,7 @@ package demo.v1;
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
+import "google/protobuf/struct.proto";
 
 enum Color {
   COLOR_UNSPECIFIED = 0;
@@ -41,6 +42,14 @@ message Widget {
   string display_name = 6;
   // A field with an explicit JSON name, kept as is.
   string metadata_location = 7 [json_name = "metadata-location"];
+  // Free-form attributes: any JSON object.
+  google.protobuf.Struct attributes = 8;
+  // A free-form value: any JSON value.
+  google.protobuf.Value extra = 9;
+  // Free-form values.
+  repeated google.protobuf.Value notes = 10;
+  // Rows of free-form values, by table.
+  map<string, google.protobuf.ListValue> rows = 11;
 }
 
 message ListWidgetsRequest {
@@ -76,6 +85,8 @@ message CreateWidgetRequest {
   optional string display_name = 3 [(google.api.field_behavior) = OPTIONAL];
   // Labels to set.
   repeated Label labels = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Free-form attributes: any JSON object.
+  google.protobuf.Struct attributes = 5 [(google.api.field_behavior) = OPTIONAL];
 }
 
 message GetWidgetRequest {

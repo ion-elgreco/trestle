@@ -269,6 +269,9 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
         );
         if config.rest_client.json_int64_as_number {
             mod_content.push_str(&json_int64::module());
+            if metadata_has_json_fields(metadata) {
+                mod_content.push_str(&json_int64::value_module());
+            }
         }
         // Route through write_generated_code so the `// @generated` header is prepended like
         // every other emitted file, rather than writing it raw.
@@ -320,6 +323,24 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
     }
 
     Ok(())
+}
+
+/// Whether a message has a free-form JSON field (`google.protobuf.Value`, `Struct`,
+/// `ListValue`), directly, in a map or in a oneof.
+pub(crate) fn metadata_has_json_fields(metadata: &CodeGenMetadata) -> bool {
+    metadata
+        .messages
+        .iter()
+        .filter(|(name, _)| !name.starts_with(".google."))
+        .flat_map(|(_, info)| &info.fields)
+        .any(|field| {
+            types::JsonType::of_field(&field.unified_type).is_some()
+                || field
+                    .oneof_variants
+                    .iter()
+                    .flatten()
+                    .any(|v| types::JsonType::of_field(&v.field_type).is_some())
+        })
 }
 
 fn generate_common_code(
