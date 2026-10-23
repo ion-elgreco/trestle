@@ -66,6 +66,7 @@ fn demo_config(out: &Path) -> CodeGenConfig {
                 ..Default::default()
             }),
             form_encoded_methods: vec!["demo.v1.TokenService.ExchangeToken".into()],
+            json_query_packages: vec![],
         },
         output: CodeGenOutput {
             common: gen_dir.clone(),

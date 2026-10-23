@@ -150,6 +150,13 @@ impl GenerateConfig {
             form_encoded_methods: rust
                 .map(|r| r.form_encoded_methods.clone())
                 .unwrap_or_default(),
+            // A package whose JSON names are lowerCamelCase sends its query keys so too.
+            json_query_packages: self
+                .json_field_names_by_package
+                .iter()
+                .filter(|(_, names)| **names == super::JsonFieldNames::Json)
+                .map(|(package, _)| package.clone())
+                .collect(),
         }
     }
 

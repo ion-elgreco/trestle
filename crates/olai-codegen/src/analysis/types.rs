@@ -349,6 +349,8 @@ impl From<PathParam> for RequestParam {
 pub struct QueryParam {
     /// Parameter name
     pub name: String,
+    /// The `json_name` of the field (see [`QueryParam::key`]).
+    pub json_name: Option<String>,
     /// Parsed type of the query parameter
     pub field_type: UnifiedType,
     /// Documentation from protobuf field comments
@@ -362,6 +364,19 @@ pub struct QueryParam {
 }
 
 impl QueryParam {
+    /// The key of the parameter in the query string: its JSON name with `json_names` (a
+    /// package whose JSON names are its query keys) or when the proto sets a `json_name` that
+    /// differs from the default lowerCamelCase one; else its proto name. gRPC transcoding
+    /// accepts both.
+    pub fn key(&self, json_names: bool) -> &str {
+        match &self.json_name {
+            Some(json) if json_names || *json != crate::utils::strings::lower_camel(&self.name) => {
+                json
+            }
+            _ => &self.name,
+        }
+    }
+
     /// Denotes if the parameter is optional
     pub fn is_optional(&self) -> bool {
         self.field_type.is_optional
@@ -723,6 +738,27 @@ pub fn extract_managed_resources(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn query_key_is_the_proto_name_unless_json_names_are_asked_or_explicit() {
+        let param = |name: &str, json: &str| QueryParam {
+            name: name.to_string(),
+            json_name: Some(json.to_string()),
+            field_type: crate::parsing::types::UnifiedType {
+                base_type: crate::parsing::types::BaseType::Int32,
+                is_optional: true,
+                is_repeated: false,
+            },
+            documentation: None,
+            resource_reference: None,
+        };
+        // protoc's default JSON name: the proto name, unless the package sends JSON names.
+        assert_eq!(param("start_index", "startIndex").key(false), "start_index");
+        assert_eq!(param("start_index", "startIndex").key(true), "startIndex");
+        // An explicit JSON name that is not the default one.
+        assert_eq!(param("first", "startIndex").key(false), "startIndex");
+    }
+
     use super::*;
 
     fn custom(p: Pattern) -> RequestType {

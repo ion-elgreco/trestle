@@ -259,7 +259,7 @@ fn generate_query_parameters(method: &MethodHandler<'_>) -> proc_macro2::TokenSt
     let mut param_assignments = Vec::new();
     for param in method.plan.query_parameters() {
         let field_ident = format_ident!("{}", param.name);
-        let param_name = &param.name;
+        let param_name = method.query_key(param);
         let field_type = &param.field_type;
 
         if field_type.is_repeated {

@@ -1807,6 +1807,7 @@ mod tests {
     fn msg_field(name: &str, ty: UnifiedType) -> MessageField {
         MessageField {
             name: name.to_string(),
+            json_name: None,
             unified_type: ty,
             documentation: None,
             oneof_variants: None,

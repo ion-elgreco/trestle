@@ -1353,6 +1353,23 @@ pub(crate) struct MethodHandler<'a> {
 }
 
 impl MethodHandler<'_> {
+    /// The key of the query parameter `param` in the query string: its JSON name in a package of
+    /// [`RestClientOptions::json_query_packages`] (see [`QueryParam::key`]).
+    pub(crate) fn query_key<'p>(&self, param: &'p crate::analysis::QueryParam) -> &'p str {
+        let input = self.plan.metadata.input_type.trim_start_matches('.');
+        let json_names = self
+            .config
+            .rest_client
+            .json_query_packages
+            .iter()
+            .any(|package| {
+                input
+                    .strip_prefix(package.as_str())
+                    .is_some_and(|rest| rest.starts_with('.'))
+            });
+        param.key(json_names)
+    }
+
     pub(crate) fn is_collection_method(&self) -> bool {
         crate::analysis::is_collection_method(
             &self.plan.request_type,

@@ -676,6 +676,7 @@ mod tests {
     fn query_param_is_not_a_path_param() {
         let q = RequestParam::Query(QueryParam {
             name: "page_token".to_string(),
+            json_name: None,
             field_type: string_type(),
             documentation: None,
             resource_reference: None,

@@ -104,8 +104,13 @@ pub(super) fn process_message(
         // Extract resource_reference annotation (ext 1055)
         let resource_reference = extract_resource_reference(field)?;
 
+        let json_name = Some(field.json_name())
+            .filter(|json| !json.is_empty())
+            .map(str::to_string);
+
         let field_info = MessageField {
             name: field.name().to_string(),
+            json_name,
             unified_type,
             documentation,
             field_behavior,
@@ -129,6 +134,7 @@ pub(super) fn process_message(
 
         let oneof_field = MessageField {
             name: oneof_field_name.clone(),
+            json_name: None,
             unified_type: UnifiedType {
                 base_type: BaseType::OneOf(enum_type_name.clone()),
                 is_optional: true, // oneof fields are always Option<enum>

@@ -452,6 +452,12 @@ pub struct RestClientOptions {
     /// RPCs, as `package.Service.Method`, whose request body is sent form-encoded
     /// (`application/x-www-form-urlencoded`) instead of as JSON. The response is still JSON.
     pub form_encoded_methods: Vec<String>,
+
+    /// Proto packages whose query parameters are sent by their JSON (lowerCamelCase) name, as
+    /// their bodies are (`startIndex`, not `start_index`). Elsewhere a query parameter is sent
+    /// by its proto name, or by its `json_name` when the proto sets one that differs from the
+    /// default. The generated server extractors read the same keys.
+    pub json_query_packages: Vec<String>,
 }
 
 /// Shape of the JSON error body that the generated error module reads.

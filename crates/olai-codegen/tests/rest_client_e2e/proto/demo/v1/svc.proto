@@ -50,6 +50,8 @@ message ListWidgetsRequest {
   optional string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
   // Only the widgets of this color.
   optional Color color = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Index of the first widget, from 1. Its query key is its explicit JSON name.
+  optional int32 first = 4 [json_name = "startIndex"];
 }
 
 // A label of a widget. Only requests take it, so only it gets a Python constructor.

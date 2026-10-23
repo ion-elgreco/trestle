@@ -150,6 +150,7 @@ option is off by default.
 | `json_int64_as_number` | `json_int64: number` (under `generate`) | 64-bit integers are JSON numbers, not proto3-JSON strings. Reading accepts both. |
 | `ignore_unknown_enum_values` | `ignore_unknown_enum_values: true` | An unknown enum name in a response becomes the zero value instead of failing the response. |
 | `form_encoded_methods` | `form_encoded_methods: [pkg.Service.Method]` | Send the request body of these RPCs form-encoded. |
+| `json_query_packages` | `json_field_names_by_package: {pkg: json}` | Send the query parameters of these packages by their JSON name (`startIndex`), as their bodies. Elsewhere a query key is the proto name, or a `json_name` that differs from the default. |
 
 Path values are always percent-encoded (`/` too, except for multi-segment patterns such as
 `{name=catalogs/*}`). With `json_field_names: proto`, a field with an explicit `json_name`

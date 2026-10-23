@@ -89,6 +89,9 @@ async fn create_widget(
 
 async fn list_widgets(State(seen): State<Seen>, uri: OriginalUri, headers: HeaderMap) -> Response {
     record(&seen, &uri, &headers);
+    if let Some(query) = uri.query() {
+        seen.push(format!("query {query}"));
+    }
     let page = if uri.query().is_some_and(|q| q.contains("page_token=p2")) {
         json!({"widgets": [{"name": "w3"}]})
     } else {
@@ -247,6 +250,15 @@ async fn list_stream_reads_all_pages() {
         .unwrap();
     let names: Vec<_> = all.iter().map(|w| w.name.as_str()).collect();
     assert_eq!(names, ["w1", "w2", "w3"]);
+}
+
+#[tokio::test]
+async fn query_keys_are_explicit_json_names() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    client.list_widgets().with_first(3).await.unwrap();
+    let seen = seen.all();
+    assert!(seen.contains(&"query startIndex=3".to_string()), "{seen:?}");
 }
 
 #[tokio::test]

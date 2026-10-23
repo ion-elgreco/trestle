@@ -21,6 +21,7 @@ use tempfile::TempDir;
 fn string_field(name: &str, required: bool) -> MessageField {
     MessageField {
         name: name.to_string(),
+        json_name: None,
         unified_type: UnifiedType {
             base_type: BaseType::String,
             is_optional: !required,
