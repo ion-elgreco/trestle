@@ -57,6 +57,8 @@ message Widget {
   repeated int64 sizes = 13;
   // Counts by name, as 64-bit integers.
   map<string, int64> counts = 14;
+  // Labels by key: a map of messages.
+  map<string, Label> labels_by_key = 15;
 }
 
 message ListWidgetsRequest {
@@ -103,6 +105,8 @@ message CreateWidgetRequest {
   optional string source_url = 7 [json_name = "sourceUrl"];
   // Tags, sent even when there are none.
   repeated string tags = 8 [(olai.trestle.v1.emit_unpopulated) = true];
+  // Labels by key.
+  map<string, Label> labels_by_key = 9;
 }
 
 message GetWidgetRequest {

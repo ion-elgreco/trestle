@@ -712,7 +712,9 @@ impl SetterRender for PyBackend<'_> {
         if matches!(setter.field_type.base_type, BaseType::Map(_, _))
             || setter.field_type.is_repeated
         {
-            let inner = if param_needs_conversion(setter.field_type) {
+            let inner = if message_map_value(setter.field_type).is_some() {
+                convert_map_values(quote! { #param_ident })
+            } else if param_needs_conversion(setter.field_type) {
                 quote! { #param_ident.into_iter().map(::core::convert::Into::into).collect::<::std::vec::Vec<_>>() }
             } else {
                 quote! { #param_ident }
@@ -778,6 +780,25 @@ fn json_param(ty: &UnifiedType) -> Option<JsonType> {
 
 /// Whether a param's base type is a model (message/enum) that has a `Py` wrapper,
 /// so its value must be converted (`.into()`) when forwarded to the Rust client.
+/// The value type of a `map<K, Message>` param, whose values cross the boundary as wrappers.
+fn message_map_value(ty: &UnifiedType) -> Option<&UnifiedType> {
+    match &ty.base_type {
+        BaseType::Map(_, value) if matches!(value.base_type, BaseType::Message(_)) => Some(value),
+        _ => None,
+    }
+}
+
+/// The expression that converts the wrapper values of a map param `expr` to the models: each
+/// wrapper holds its model in `.0`.
+fn convert_map_values(expr: TokenStream) -> TokenStream {
+    quote! {
+        #expr
+            .into_iter()
+            .map(|(k, v)| (k, v.0))
+            .collect::<::std::collections::HashMap<_, _>>()
+    }
+}
+
 fn param_needs_conversion(ty: &UnifiedType) -> bool {
     matches!(
         ty.base_type,
@@ -789,6 +810,12 @@ fn param_needs_conversion(ty: &UnifiedType) -> bool {
 /// `Py` wrapper, preserving the `Option`/`Vec` cardinality wrapping. Scalars,
 /// maps, and `()` are returned unchanged.
 fn wrap_param_type(ty: &UnifiedType, rendered: &syn::Type) -> TokenStream {
+    if let Some(value) = message_map_value(ty) {
+        let wrapper = qualified_wrapper_ident(value);
+        return quote! {
+            ::core::option::Option<::std::collections::HashMap<::std::string::String, #wrapper>>
+        };
+    }
     if !param_needs_conversion(ty) {
         return quote! { #rendered };
     }
@@ -840,6 +867,9 @@ fn convert_param_value(ty: &UnifiedType, expr: TokenStream) -> TokenStream {
         }
         let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
         return quote! { #from_py(&#expr)? };
+    }
+    if message_map_value(ty).is_some() {
+        return convert_map_values(expr);
     }
     if !param_needs_conversion(ty) {
         return expr;

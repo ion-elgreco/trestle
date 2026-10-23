@@ -1028,7 +1028,12 @@ impl FieldAccessor {
         hidden_zero: bool,
     ) -> Self {
         let ident = crate::utils::field_ident(&super::sanitize_python_field_name(&field.name));
-        let in_project = match &field.unified_type.base_type {
+        // A map is in the project when its values are.
+        let element = match &field.unified_type.base_type {
+            BaseType::Map(_, value) => &value.base_type,
+            base => base,
+        };
+        let in_project = match element {
             BaseType::Message(n) | BaseType::Enum(n) => is_in_project(n, packages),
             _ => false,
         };
@@ -1421,8 +1426,13 @@ impl FieldAccessor {
         if self.ty.is_repeated {
             return self.write_repeated();
         }
-        if let BaseType::Map(_, _) = &self.ty.base_type {
-            return quote! { value };
+        if let BaseType::Map(_, value) = &self.ty.base_type {
+            // Message values arrive as their wrappers.
+            return if self.in_project && matches!(value.base_type, BaseType::Message(_)) {
+                quote! { value.into_iter().map(|(k, v)| (k, ::core::convert::Into::into(v))).collect() }
+            } else {
+                quote! { value }
+            };
         }
         if self.is_optional_scalar() {
             return self.write_optional_scalar();

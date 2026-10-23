@@ -60,6 +60,7 @@ async fn create_widget(body: String) -> Response {
         "attributes": request["attributes"],
         "display_name": body,
         "type": request["type"],
+        "labels_by_key": request["labels_by_key"],
     }))
     .into_response()
 }
@@ -180,7 +181,7 @@ assert w.properties == {"a": "1"}
 assert repr(w) == (
     "Widget(name='a/b c', created_at=1700000000000, size_bytes=0, "
     "properties={'a': '1'}, display_name='', metadata_location='', notes=[], rows={}, "
-    "sizes=[], counts={})"
+    "sizes=[], counts={}, labels_by_key={})"
 ), repr(w)
 try:
     w.name = "x"
@@ -260,6 +261,9 @@ assert created.attributes == {"count": 3, "flag": True, "list": [1, 2.5]}, creat
 assert '"count":3' in created.display_name, created.display_name
 # A field named after a Rust keyword keeps its name in Python.
 assert client.create_widget("w4", type="gear").type == "gear"
+# A map of messages, both ways.
+by_key = client.create_widget("w5", labels_by_key={"k": label}).labels_by_key
+assert list(by_key) == ["k"] and by_key["k"].value == "v", by_key
 try:
     client.create_widget("w3", attributes={"bad": object()})
     raise AssertionError("expected a TypeError")
