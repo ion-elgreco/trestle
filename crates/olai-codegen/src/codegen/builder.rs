@@ -88,11 +88,11 @@ fn generate_builders_module(
         .any(|m| matches!(m.plan.request_type, RequestType::List));
 
     // Boxed future/stream aliases the `IntoFuture` / `into_stream` impls return.
-    // Natively they're `Send` (`BoxFuture`/`BoxStream`). In dual-transport (WASM)
-    // mode the browser transport's futures are `!Send`, so on wasm32 we alias to
+    // Natively they're `Send` (`BoxFuture`/`BoxStream`). When the client also builds
+    // for wasm32 the browser transport's futures are `!Send`, so on wasm32 we alias to
     // the `Local*` (non-Send) variants — keeping one set of impls that compile
     // for both targets.
-    let box_aliases = if service.config.dual_transport() {
+    let box_aliases = if service.config.builds_for_wasm() {
         let stream_alias = if has_list {
             quote! {
                 #[cfg(not(target_arch = "wasm32"))]
@@ -553,7 +553,7 @@ fn generate_into_stream_impl(
 
     // The browser stream is `!Send`, so on wasm32 box it with `boxed_local()`
     // (→ `LocalBoxStream`, the `BoxStr` alias resolves to). Natively, `boxed()`.
-    let boxer = if method.config.dual_transport() {
+    let boxer = if method.config.builds_for_wasm() {
         quote! {
             #[cfg(not(target_arch = "wasm32"))]
             let stream = stream.boxed();

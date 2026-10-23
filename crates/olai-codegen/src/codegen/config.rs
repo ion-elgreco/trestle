@@ -491,6 +491,14 @@ impl CodeGenConfig {
         !self.dual_transport() && self.transport_type_path == super::REQWEST_TRANSPORT_TYPE_PATH
     }
 
+    /// Whether the generated client also builds for `wasm32`, where the transport's futures are
+    /// not `Send`: with [`dual_transport`](Self::dual_transport), or with the generated reqwest
+    /// transport, which uses the browser's `fetch` there. The builders then box their futures
+    /// and streams as `Local*` on `wasm32`.
+    pub fn builds_for_wasm(&self) -> bool {
+        self.dual_transport() || self.uses_reqwest_transport()
+    }
+
     /// Whether the generated client should carry **both** transports, selected at
     /// compile time by `cfg(target_arch = "wasm32")` — `CloudClient` for native
     /// targets, `olai_http_wasm::WasmClient` for the browser.
