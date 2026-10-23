@@ -104,8 +104,12 @@ impl ListCatalogsBuilder {
                 (self, remaining),
                 move |(mut builder, mut remaining), page_token| async move {
                     builder.request.page_token = page_token;
-                    let res = builder.client.list_catalogs(&builder.request).await?;
+                    if remaining.is_some() {
+                        builder.request.max_results = remaining;
+                    }
+                    let mut res = builder.client.list_catalogs(&builder.request).await?;
                     if let Some(ref mut rem) = remaining {
+                        res.catalogs.truncate((*rem).max(0) as usize);
                         *rem -= res.catalogs.len() as i32;
                     }
                     let next_page_token = if remaining.is_some_and(|r| r <= 0) {

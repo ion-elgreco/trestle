@@ -340,6 +340,43 @@ async fn list_stream_reads_all_pages() {
 }
 
 #[tokio::test]
+async fn list_stream_holds_its_cap_when_pages_are_larger() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    // The server sends 2 widgets on its first page whatever the request asks for.
+    let one: Vec<Widget> = client
+        .list_widgets()
+        .with_max_results(1)
+        .into_stream()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(one.len(), 1);
+    // Each page asks for the widgets still wanted.
+    let three: Vec<Widget> = client
+        .list_widgets()
+        .with_max_results(3)
+        .into_stream()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(three.len(), 3);
+    let queries: Vec<_> = seen
+        .all()
+        .into_iter()
+        .filter(|e| e.starts_with("query "))
+        .collect();
+    assert_eq!(
+        queries,
+        [
+            "query max_results=1",
+            "query max_results=3",
+            "query max_results=1&page_token=p2"
+        ]
+    );
+}
+
+#[tokio::test]
 async fn free_form_json_keeps_whole_numbers() {
     use buffa_types::google::protobuf::{Struct, Value};
     let (base, seen) = serve().await;
