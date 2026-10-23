@@ -399,7 +399,17 @@ async fn head_requests_and_get_bodies() {
     let err = client.widget_exists("missing").await.unwrap_err();
     assert_eq!(err.status(), Some(404));
     let found = client
-        .search_widgets("w", vec!["a".to_string()])
+        .search_widgets(
+            "w",
+            vec!["a".to_string()],
+            [(
+                "t".to_string(),
+                buffa_types::google::protobuf::ListValue {
+                    values: vec![1_i64.into(), 2_i64.into()],
+                    ..Default::default()
+                },
+            )],
+        )
         .await
         .unwrap();
     let names: Vec<_> = found.widgets.iter().map(|w| w.name.as_str()).collect();
@@ -407,7 +417,7 @@ async fn head_requests_and_get_bodies() {
     let seen = seen.all();
     assert!(seen.contains(&"HEAD w".to_string()), "{seen:?}");
     assert!(
-        seen.contains(&r#"GET body {"prefix":"w","tags":["a"]}"#.to_string()),
+        seen.contains(&r#"GET body {"prefix":"w","tags":["a"],"filters":{"t":[1,2]}}"#.to_string()),
         "{seen:?}"
     );
 }

@@ -130,23 +130,40 @@ pub(crate) fn generate_pyo3_impls(
 
 /// The expression that converts the Python object `value` (a `Bound<PyAny>`) into the Rust
 /// value of a free-form JSON field of type `ty`: a single value, a `Vec` from a list, or a map
-/// from a dict.
-pub(crate) fn json_from_py(json: JsonType, ty: &UnifiedType, value: TokenStream) -> TokenStream {
+/// from a dict. For a method argument (`arg`), a list or map is collected into a `Vec` (of
+/// pairs, for a map): the client methods and builders take an `impl IntoIterator`, which leaves
+/// nothing to infer the collection from.
+pub(crate) fn json_from_py(
+    json: JsonType,
+    ty: &UnifiedType,
+    value: TokenStream,
+    arg: bool,
+) -> TokenStream {
     let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
     if ty.is_repeated {
+        let collection = if arg {
+            quote! { ::std::vec::Vec<_> }
+        } else {
+            quote! { _ }
+        };
         quote! {{
             let items: ::std::vec::Vec<::pyo3::Bound<'_, ::pyo3::PyAny>> =
                 ::pyo3::types::PyAnyMethods::extract(&#value)?;
-            items.iter().map(#from_py).collect::<::pyo3::PyResult<_>>()?
+            items.iter().map(#from_py).collect::<::pyo3::PyResult<#collection>>()?
         }}
     } else if matches!(ty.base_type, BaseType::Map(..)) {
+        let collection = if arg {
+            quote! { ::std::vec::Vec<_> }
+        } else {
+            quote! { _ }
+        };
         quote! {{
             let items: ::std::collections::HashMap<::std::string::String, ::pyo3::Bound<'_, ::pyo3::PyAny>> =
                 ::pyo3::types::PyAnyMethods::extract(&#value)?;
             items
                 .iter()
                 .map(|(key, item)| ::core::result::Result::Ok((key.clone(), #from_py(item)?)))
-                .collect::<::pyo3::PyResult<_>>()?
+                .collect::<::pyo3::PyResult<#collection>>()?
         }}
     } else {
         quote! { ::buffa::MessageField::some(#from_py(&#value)?) }
@@ -1142,7 +1159,7 @@ impl FieldAccessor {
     /// The expression that converts the Python object `value` (a `Bound<PyAny>`) into the
     /// Rust value of a free-form JSON field.
     fn json_store(&self, json: JsonType) -> TokenStream {
-        json_from_py(json, &self.ty, quote! { value })
+        json_from_py(json, &self.ty, quote! { value }, false)
     }
 
     /// The `#[setter]` of a free-form JSON field.

@@ -690,6 +690,7 @@ impl SetterRender for PyBackend<'_> {
                 json,
                 setter.field_type,
                 quote! { #param_ident },
+                true,
             );
             let value = if setter.field_type.is_repeated
                 || matches!(setter.field_type.base_type, BaseType::Map(..))
@@ -863,7 +864,7 @@ fn strip_option(ty: TokenStream) -> TokenStream {
 fn convert_param_value(ty: &UnifiedType, expr: TokenStream) -> TokenStream {
     if let Some(json) = json_param(ty) {
         if ty.is_repeated || matches!(ty.base_type, BaseType::Map(..)) {
-            return super::model_conversions::json_from_py(json, ty, expr);
+            return super::model_conversions::json_from_py(json, ty, expr, true);
         }
         let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
         return quote! { #from_py(&#expr)? };

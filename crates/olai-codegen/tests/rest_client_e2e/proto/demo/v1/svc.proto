@@ -107,6 +107,8 @@ message CreateWidgetRequest {
   repeated string tags = 8 [(olai.trestle.v1.emit_unpopulated) = true];
   // Labels by key.
   map<string, Label> labels_by_key = 9;
+  // Free-form notes.
+  repeated google.protobuf.Value notes = 10;
 }
 
 message GetWidgetRequest {
@@ -167,6 +169,8 @@ message SearchWidgetsRequest {
   string prefix = 1 [(google.api.field_behavior) = REQUIRED];
   // The tags of the widgets to find: a required list.
   repeated string tags = 2 [(google.api.field_behavior) = REQUIRED];
+  // Free-form filters by field: a required map of free-form JSON.
+  map<string, google.protobuf.ListValue> filters = 3 [(google.api.field_behavior) = REQUIRED];
 }
 
 message StreamWidgetsRequest {

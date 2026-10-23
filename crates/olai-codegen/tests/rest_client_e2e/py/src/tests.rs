@@ -61,6 +61,7 @@ async fn create_widget(body: String) -> Response {
         "display_name": body,
         "type": request["type"],
         "labels_by_key": request["labels_by_key"],
+        "notes": request["notes"],
     }))
     .into_response()
 }
@@ -264,6 +265,8 @@ assert client.create_widget("w4", type="gear").type == "gear"
 # A map of messages, both ways.
 by_key = client.create_widget("w5", labels_by_key={"k": label}).labels_by_key
 assert list(by_key) == ["k"] and by_key["k"].value == "v", by_key
+# A list of free-form JSON as an argument.
+assert client.create_widget("w6", notes=[1, "two"]).notes == [1, "two"]
 try:
     client.create_widget("w3", attributes={"bad": object()})
     raise AssertionError("expected a TypeError")
@@ -277,7 +280,7 @@ try:
     raise AssertionError("expected an error")
 except NotFoundError:
     pass
-assert [w.name for w in client.search_widgets("w", ["a"]).widgets] == ["w1", "w2"]
+assert [w.name for w in client.search_widgets("w", ["a"], {"t": [1, 2]}).widgets] == ["w1", "w2"]
 
 # A streaming method gives a list, one item per NDJSON line; fields can come from headers.
 assert [w.name for w in client.stream_widgets()] == ["w1", "w2"]
