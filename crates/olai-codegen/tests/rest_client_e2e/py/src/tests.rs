@@ -273,7 +273,7 @@ try:
     raise AssertionError("expected an error")
 except NotFoundError:
     pass
-assert [w.name for w in client.search_widgets("w").widgets] == ["w1", "w2"]
+assert [w.name for w in client.search_widgets("w", ["a"]).widgets] == ["w1", "w2"]
 
 # A streaming method gives a list, one item per NDJSON line; fields can come from headers.
 assert [w.name for w in client.stream_widgets()] == ["w1", "w2"]

@@ -161,6 +161,8 @@ message WidgetExistsRequest {
 message SearchWidgetsRequest {
   // The start of the names to find.
   string prefix = 1 [(google.api.field_behavior) = REQUIRED];
+  // The tags of the widgets to find: a required list.
+  repeated string tags = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message StreamWidgetsRequest {

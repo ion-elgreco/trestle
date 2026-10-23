@@ -398,13 +398,16 @@ async fn head_requests_and_get_bodies() {
     client.widget_exists("w").await.unwrap();
     let err = client.widget_exists("missing").await.unwrap_err();
     assert_eq!(err.status(), Some(404));
-    let found = client.search_widgets("w").await.unwrap();
+    let found = client
+        .search_widgets("w", vec!["a".to_string()])
+        .await
+        .unwrap();
     let names: Vec<_> = found.widgets.iter().map(|w| w.name.as_str()).collect();
     assert_eq!(names, ["w1", "w2"]);
     let seen = seen.all();
     assert!(seen.contains(&"HEAD w".to_string()), "{seen:?}");
     assert!(
-        seen.contains(&r#"GET body {"prefix":"w"}"#.to_string()),
+        seen.contains(&r#"GET body {"prefix":"w","tags":["a"]}"#.to_string()),
         "{seen:?}"
     );
 }

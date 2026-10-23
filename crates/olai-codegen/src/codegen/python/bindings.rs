@@ -759,6 +759,12 @@ fn python_param_defs(method: &MethodHandler<'_>, mode: BindingMode) -> Vec<Token
             }
             let rust_type = method.field_type(p.field_type(), RenderContext::PythonParameter);
             let py_type = wrap_param_type(p.field_type(), &rust_type);
+            // Every list and map is an `Option` at the boundary; a required one is not.
+            let py_type = if p.is_optional() || !is_collection(p.field_type()) {
+                py_type
+            } else {
+                strip_option(py_type)
+            };
             quote! { #param_name: #py_type }
         })
         .collect()
@@ -800,9 +806,33 @@ fn wrap_param_type(ty: &UnifiedType, rendered: &syn::Type) -> TokenStream {
     inner
 }
 
-/// The expression that converts a Python-wrapper param value `expr` (of the type
-/// produced by [`wrap_param_type`]) back into the bare model the Rust client
-/// expects. Handles the `Option`/`Vec` cardinality wrapping. Scalars pass through.
+/// Whether a param is a list or a map.
+fn is_collection(ty: &UnifiedType) -> bool {
+    ty.is_repeated || matches!(ty.base_type, BaseType::Map(..))
+}
+
+/// `T` for a rendered `Option<T>`; any other type unchanged.
+fn strip_option(ty: TokenStream) -> TokenStream {
+    let Ok(syn::Type::Path(path)) = syn::parse2::<syn::Type>(ty.clone()) else {
+        return ty;
+    };
+    let Some(last) = path.path.segments.last() else {
+        return ty;
+    };
+    match &last.arguments {
+        syn::PathArguments::AngleBracketed(args) if last.ident == "Option" => {
+            match args.args.first() {
+                Some(syn::GenericArgument::Type(inner)) => quote! { #inner },
+                _ => ty,
+            }
+        }
+        _ => ty,
+    }
+}
+
+/// The expression that converts the Python-wrapper value `expr` of a required param back into
+/// the bare model the Rust client expects. A required list is a plain `Vec` (see
+/// [`python_param_defs`]). Scalars pass through.
 fn convert_param_value(ty: &UnifiedType, expr: TokenStream) -> TokenStream {
     if let Some(json) = json_param(ty) {
         if ty.is_repeated || matches!(ty.base_type, BaseType::Map(..)) {
@@ -816,7 +846,7 @@ fn convert_param_value(ty: &UnifiedType, expr: TokenStream) -> TokenStream {
     }
     match (ty.is_repeated, ty.is_optional) {
         (true, _) => quote! {
-            #expr.map(|v| v.into_iter().map(::core::convert::Into::into).collect())
+            #expr.into_iter().map(::core::convert::Into::into).collect()
         },
         (false, true) => quote! { #expr.map(::core::convert::Into::into) },
         (false, false) => quote! { #expr.into() },
