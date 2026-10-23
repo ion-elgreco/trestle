@@ -1893,6 +1893,12 @@ fn read_map(access: &TokenStream, value: &UnifiedType, in_project: bool) -> Toke
 /// adopters used, see issue #99). Provided values are stored; omitted ones fall
 /// back to the inner type's `Default`. If more than one variant of the same oneof
 /// is supplied, the last one in proto declaration order wins.
+/// `let value = <argument>;`, which the store expressions read; nothing for an argument that is
+/// itself named `value`.
+fn bind_value(ident: &proc_macro2::Ident) -> Option<TokenStream> {
+    (ident != "value").then(|| quote! { let value = #ident; })
+}
+
 /// The `#[new]` constructor of an input model. Every argument is optional (`None`), except, with
 /// `keyword_only`, the `REQUIRED` fields: they come first, as required arguments, and the others
 /// are keyword-only.
@@ -1985,9 +1991,10 @@ fn constructor(
                 }
             }
         } else {
+            let bind = bind_value(ident);
             quote! {
                 {
-                    let value = #ident;
+                    #bind
                     inner.#ident = #store;
                 }
             }
@@ -2008,9 +2015,10 @@ fn constructor(
         if a.py_type_is_optional() {
             // `value` is the whole (already-`Option`) argument; store unconditionally
             // (an omitted kwarg arrives as `None`, the field's natural absent value).
+            let bind = bind_value(ident);
             quote! {
                 {
-                    let value = #ident;
+                    #bind
                     inner.#ident = #store;
                 }
             }
