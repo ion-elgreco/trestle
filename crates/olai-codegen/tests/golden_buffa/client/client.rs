@@ -131,7 +131,7 @@ impl ExampleClient {
     /// * `tags` - becomes repeated query param
     pub fn list_by_tags(
         &self,
-        tags: Vec<impl Into<String>>,
+        tags: Vec<String>,
         max_results: i32,
     ) -> ListByTagsBuilder {
         ListByTagsBuilder::new(

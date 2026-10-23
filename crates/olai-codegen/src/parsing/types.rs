@@ -91,7 +91,12 @@ impl TypeRenderer for TypeScriptRenderer {
 pub fn unified_to_rust(unified_type: &UnifiedType, context: RenderContext) -> String {
     let base_type_str = match &unified_type.base_type {
         BaseType::String => {
-            if matches!(context, RenderContext::Constructor) && !unified_type.is_optional {
+            // `impl Into<String>` only for a single string: a repeated one is a plain
+            // `Vec<String>`, which the constructor stores with `.into()`.
+            if matches!(context, RenderContext::Constructor)
+                && !unified_type.is_optional
+                && !unified_type.is_repeated
+            {
                 "impl Into<String>".to_string()
             } else {
                 "String".to_string()

@@ -17,11 +17,7 @@ pub struct ListByTagsBuilder {
 impl ListByTagsBuilder {
     /// Create a new builder instance.
     /// Obtain via the corresponding method on `QueryClient`.
-    pub(crate) fn new(
-        client: QueryClient,
-        tags: Vec<impl Into<String>>,
-        max_results: i32,
-    ) -> Self {
+    pub(crate) fn new(client: QueryClient, tags: Vec<String>, max_results: i32) -> Self {
         let request = ListByTagsRequest {
             tags: tags.into(),
             max_results,
