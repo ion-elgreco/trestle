@@ -70,7 +70,6 @@ fn serve() -> (String, tokio::runtime::Runtime) {
 /// the package directory, `demo._core` from the generated `register`.
 fn run_python(code: &str) {
     let (base, _server) = serve();
-    crate::runtime::init_async_runtime();
     Python::initialize();
     Python::attach(|py| {
         let result = (|| -> PyResult<()> {

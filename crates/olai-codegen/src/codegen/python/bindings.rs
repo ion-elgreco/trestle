@@ -95,12 +95,30 @@ impl<'a> PyBackend<'a> {
         }
     }
 
+    /// The import of the binding crate's runtime hook, `crate::runtime::get_runtime`; none with
+    /// the generated runtime ([`PythonOptions::runtime`]).
+    fn runtime_import(&self) -> Option<TokenStream> {
+        (!self.python.runtime).then(|| quote! { use crate::runtime::get_runtime; })
+    }
+
+    /// The expression of the Tokio runtime that a sync method blocks on: the generated
+    /// `crate::codegen::runtime::rt()` with [`PythonOptions::runtime`], else the crate's
+    /// `get_runtime(py)`.
+    fn runtime_call(&self) -> TokenStream {
+        if self.python.runtime {
+            quote! { crate::codegen::runtime::rt() }
+        } else {
+            quote! { get_runtime(py)? }
+        }
+    }
+
     /// The `register` function that adds every generated class to the extension module.
     ///
     /// With [`PythonOptions::module`], the root client goes in the module itself and the
     /// classes of each proto package in a submodule named after its service segment, which is
     /// also put in `sys.modules` so that `import <module>.<service>` finds it. Without it, every
-    /// class goes in the module.
+    /// class goes in the module. With the generated runtime ([`PythonOptions::runtime`]) and
+    /// `_async` methods, it first installs that runtime in `pyo3-async-runtimes`.
     fn register_fn(&self, services: &[&ServiceHandler<'_>], aggregate: &Ident) -> TokenStream {
         let Some(first) = services.first() else {
             return quote! {};
@@ -146,9 +164,13 @@ impl<'a> PyBackend<'a> {
                 }
             }
         };
+        // With the generated runtime, the `_async` methods run on it too.
+        let init_async = (self.python.runtime && self.python.async_methods)
+            .then(|| quote! { crate::codegen::runtime::init_async_runtime(); });
         quote! {
             /// Add the generated classes to the extension module `module`.
             pub fn register(module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>) -> ::pyo3::PyResult<()> {
+                #init_async
                 #body
                 Ok(())
             }
@@ -199,6 +221,7 @@ impl BindingBackend for PyBackend<'_> {
             .python
             .async_methods
             .then(|| quote! { use futures::TryStreamExt; });
+        let runtime_import = self.runtime_import();
         let class_doc = self.python.stub_gen.then(|| {
             let resource = service
                 .resource()
@@ -215,7 +238,7 @@ impl BindingBackend for PyBackend<'_> {
             use #mod_path::*;
             #wrappers_import
             use #error_module::{#py_error_type, #py_result_type};
-            use crate::runtime::get_runtime;
+            #runtime_import
             #futures_import
 
             #class_doc
@@ -297,13 +320,15 @@ impl BindingBackend for PyBackend<'_> {
         let stub_class = super::stub_class_attr(self.python);
         let stub_methods = super::stub_methods_attr(self.python);
         let root_module_arg = super::module_arg(self.python, None);
+        let runtime_import = self.runtime_import();
         let helper_modules = {
             let error = self.python.error_module.then(|| quote! { pub mod error; });
             let future = self
                 .python
                 .async_methods
                 .then(|| quote! { pub mod py_future; });
-            quote! { #error #future }
+            let runtime = self.python.runtime.then(|| quote! { pub mod runtime; });
+            quote! { #error #future #runtime }
         };
         let class_doc = self.python.stub_gen.then(|| {
             quote! {
@@ -331,7 +356,7 @@ impl BindingBackend for PyBackend<'_> {
             use pyo3::prelude::*;
             use #client_crate::{#aggregate_client_ident};
             use #error_module::{#py_error_type, #py_result_type};
-            use crate::runtime::get_runtime;
+            #runtime_import
             #(#mod_paths)*
             #(#wrapper_imports)*
             #(#codegen_imports)*
@@ -558,6 +583,7 @@ impl PyBackend<'_> {
             None => (quote! { () }, quote! { result }),
         };
         let docs = python.stub_gen.then(|| method_doc_attrs(method));
+        let runtime_call = self.runtime_call();
 
         let sync = quote! {
             #docs
@@ -569,7 +595,7 @@ impl PyBackend<'_> {
             ) -> #py_result_type<#py_type> {
                 let #mut_kw request = #client_call;
                 #(#builder_calls)*
-                let runtime = get_runtime(py)?;
+                let runtime = #runtime_call;
                 py.detach(|| {
                     // `result` is the bare client value; `#convert` lifts it into the `Py`
                     // wrapper (or passes a unit through unchanged).

@@ -8,8 +8,41 @@ use quote::quote;
 use crate::codegen::format_tokens_static;
 
 /// The `py_future.rs` file. With `stub_gen`, `PyFuture<T>` shows in the stubs as
-/// `asyncio.Future[T]`.
-pub(crate) fn generate(stub_gen: bool) -> String {
+/// `asyncio.Future[T]`. With `runtime`, the bindings' own runtime is `crate::codegen::runtime`.
+pub(crate) fn generate(stub_gen: bool, runtime: bool) -> String {
+    let runtime_check = if runtime {
+        quote! {
+            /// It first calls `crate::codegen::runtime::rt`, so that a call in a forked child fails
+            /// as a sync call does: `future_into_py` spawns on the installed runtime without that
+            /// check.
+            pub fn new(
+                py: Python<'py>,
+                future: impl Future<Output = PyResult<T>> + Send + 'static,
+            ) -> PyResult<Self> {
+                crate::codegen::runtime::rt();
+                Ok(Self {
+                    future: ::pyo3_async_runtimes::tokio::future_into_py(py, future)?,
+                    result: PhantomData,
+                })
+            }
+        }
+    } else {
+        quote! {
+            /// It first calls `crate::runtime::get_runtime`, so that its checks (such as the one
+            /// for a forked process) also run for the async methods: `future_into_py` spawns on
+            /// the installed runtime without them.
+            pub fn new(
+                py: Python<'py>,
+                future: impl Future<Output = PyResult<T>> + Send + 'static,
+            ) -> PyResult<Self> {
+                crate::runtime::get_runtime(py)?;
+                Ok(Self {
+                    future: ::pyo3_async_runtimes::tokio::future_into_py(py, future)?,
+                    result: PhantomData,
+                })
+            }
+        }
+    };
     let stub_impls = stub_gen.then(|| {
         quote! {
             impl ::pyo3_stub_gen::PyStubType for NoResult {
@@ -55,19 +88,7 @@ pub(crate) fn generate(stub_gen: bool) -> String {
             /// Run `future` on the Tokio runtime of `pyo3-async-runtimes`; its result completes
             /// the `asyncio.Future`. It needs a running event loop.
             ///
-            /// It first calls `crate::runtime::get_runtime`, so that its checks (such as the one
-            /// for a forked process) also run for the async methods: `future_into_py` spawns on
-            /// the installed runtime without them.
-            pub fn new(
-                py: Python<'py>,
-                future: impl Future<Output = PyResult<T>> + Send + 'static,
-            ) -> PyResult<Self> {
-                crate::runtime::get_runtime(py)?;
-                Ok(Self {
-                    future: ::pyo3_async_runtimes::tokio::future_into_py(py, future)?,
-                    result: PhantomData,
-                })
-            }
+            #runtime_check
         }
 
         impl<'py, T> IntoPyObject<'py> for PyFuture<'py, T> {

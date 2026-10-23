@@ -9,6 +9,7 @@ mod errors;
 mod future;
 mod model_conversions;
 mod package;
+mod runtime;
 mod typings;
 
 pub(crate) use bindings::{generate, main_module};
@@ -16,7 +17,7 @@ pub(crate) use model_conversions::generate_pyo3_impls;
 pub(crate) use typings::generate_typings;
 
 /// The extra files of the Python bindings, by path relative to the binding output: the error
-/// module and the `PyFuture` helper, when their options are on.
+/// module, the `PyFuture` helper and the runtime, when their options are on.
 pub(crate) fn helper_files(config: &crate::codegen::CodeGenConfig) -> Vec<(String, String)> {
     let Some(bindings) = config.bindings.as_ref() else {
         return Vec::new();
@@ -33,7 +34,13 @@ pub(crate) fn helper_files(config: &crate::codegen::CodeGenConfig) -> Vec<(Strin
     if python.async_methods {
         files.push((
             "py_future.rs".to_string(),
-            future::generate(python.stub_gen),
+            future::generate(python.stub_gen, python.runtime),
+        ));
+    }
+    if python.runtime {
+        files.push((
+            "runtime.rs".to_string(),
+            runtime::generate(python.async_methods),
         ));
     }
     files

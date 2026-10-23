@@ -702,6 +702,7 @@ fn rest_client_and_python_options_generate_valid_code() {
             python_repr: true,
             module: Some("example._core".into()),
             async_methods: true,
+            runtime: true,
             keyword_only: true,
             str_enums: true,
             hide_unspecified: true,
@@ -754,6 +755,10 @@ fn rest_client_and_python_options_generate_valid_code() {
     assert!(bindings.contains("_async"), "async twins missing");
     assert!(bindings.contains("pub fn register("), "register missing");
     assert!(bindings.contains("PyFuture"), "PyFuture helper missing");
+    assert!(
+        bindings.contains("pub fn rt()") && !bindings.contains("get_runtime"),
+        "the bindings use the generated runtime"
+    );
     assert!(
         !python.join("client.pyi").exists(),
         "stub_gen replaces the .pyi file"

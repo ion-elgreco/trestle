@@ -99,6 +99,7 @@ fn demo_config(out: &Path) -> CodeGenConfig {
                 python_repr: true,
                 module: Some("demo._core".into()),
                 async_methods: true,
+                runtime: true,
                 keyword_only: true,
                 str_enums: true,
                 hide_unspecified: true,

@@ -167,6 +167,7 @@ Every option is off by default.
 | `python_repr` | `repr()` is `Name(field=value, …)`, without `None` fields. |
 | `module` | Classes go in `<module>.<service>`; the root client in `<module>`. The generated `register(module)` adds them and the submodules. With a module, request messages get no class. |
 | `async_methods` | Each method gets a `<name>_async` twin that returns an `asyncio.Future` (needs `pyo3-async-runtimes`). |
+| `runtime` | Emit `codegen/runtime.rs`: the Tokio runtime (`rt()`, made on first use; it panics in a forked child), which `register` installs in `pyo3-async-runtimes`. Without it, the crate supplies `crate::runtime::get_runtime(py)`. |
 | `keyword_only` | Optional parameters are keyword-only. |
 | `str_enums` | Enums are `enum.StrEnum` classes (Python 3.11+) in `<package>/_enums.py`; parameters take a member or a name. |
 | `hide_unspecified` | The zero `*_UNSPECIFIED` value is not a member; a field that holds it reads as `None`. |

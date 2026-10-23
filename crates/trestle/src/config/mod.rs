@@ -362,6 +362,10 @@ pub struct PythonOptions {
     /// Every client method also gets an `_async` twin that returns an `asyncio.Future`.
     #[serde(default)]
     pub async_methods: bool,
+    /// Generate the Tokio runtime of the bindings (`codegen/runtime.rs`), instead of the
+    /// crate's `crate::runtime::get_runtime`.
+    #[serde(default)]
+    pub runtime: bool,
     /// Optional parameters are keyword-only.
     #[serde(default)]
     pub keyword_only: bool,
@@ -644,6 +648,7 @@ mod tests {
              \x20       frozen_models: true\n\
              \x20       constructors: inputs\n\
              \x20       module: demo._core\n\
+             \x20       runtime: true\n\
              \x20       str_enums: true\n\
              \x20       hide_unspecified: true\n\
              \x20       package:\n\
@@ -665,7 +670,7 @@ mod tests {
         assert_eq!(errors.details_field.as_deref(), Some("details"));
         assert_eq!(errors.code_enum.as_deref(), Some("demo.v1.ErrorCode"));
         let py = &g.clients.python.as_ref().unwrap().options;
-        assert!(py.frozen_models && py.str_enums && py.hide_unspecified);
+        assert!(py.frozen_models && py.str_enums && py.hide_unspecified && py.runtime);
         assert_eq!(py.constructors, PyConstructors::Inputs);
         assert_eq!(py.module.as_deref(), Some("demo._core"));
         assert!(cfg.validate(false).is_ok());

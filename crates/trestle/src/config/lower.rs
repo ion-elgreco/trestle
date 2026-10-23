@@ -299,6 +299,7 @@ fn lower_python_options(options: &super::PythonOptions) -> Result<olai_codegen::
         python_repr: options.python_repr,
         module: options.module.clone(),
         async_methods: options.async_methods,
+        runtime: options.runtime,
         keyword_only: options.keyword_only,
         str_enums: options.str_enums,
         hide_unspecified: options.hide_unspecified,

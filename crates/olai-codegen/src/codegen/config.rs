@@ -253,6 +253,12 @@ pub struct PythonOptions {
     /// Every client method also gets a `<name>_async` twin that returns an `asyncio.Future`.
     /// The binding crate depends on `pyo3-async-runtimes` (with `tokio-runtime`).
     pub async_methods: bool,
+    /// Generate the Tokio runtime of the bindings, `codegen/runtime.rs`: one multi-thread
+    /// runtime, `rt()`, made on first use, which panics in a forked child, where Tokio's thread
+    /// pool does not work. The methods block on it, and the generated `register` installs it in
+    /// `pyo3-async-runtimes` for the `_async` methods. The binding crate depends on `tokio`.
+    /// Without it, the binding crate supplies `crate::runtime::get_runtime(py)`.
+    pub runtime: bool,
     /// Optional parameters of client methods are keyword-only (`*` in the signature).
     pub keyword_only: bool,
     /// Enums are Python `enum.StrEnum` classes (Python 3.11+): a member equals its name, and
