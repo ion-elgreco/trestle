@@ -5,6 +5,7 @@ import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 import "google/protobuf/struct.proto";
+import "olai/trestle/v1/annotations.proto";
 
 enum Color {
   COLOR_UNSPECIFIED = 0;
@@ -147,6 +148,34 @@ message SearchWidgetsRequest {
   string prefix = 1 [(google.api.field_behavior) = REQUIRED];
 }
 
+message StreamWidgetsRequest {
+  // Only the widgets whose names start with this.
+  optional string prefix = 1;
+}
+
+// One line of a widget stream.
+message WidgetLine {
+  // The name of the widget.
+  string name = 1;
+  // When the widget was created, in epoch milliseconds.
+  int64 created_at = 2;
+}
+
+message WidgetVersionRequest {
+  // The name of the widget.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// The version of a widget, partly from the response headers.
+message WidgetVersion {
+  // The name of the widget, from the body.
+  string name = 1;
+  // The version, from the `Widget-Version` header.
+  int64 version = 2 [(olai.trestle.v1.response_header) = "Widget-Version"];
+  // The entity tag, from the `ETag` header.
+  optional string etag = 3 [(olai.trestle.v1.response_header) = "ETag"];
+}
+
 // Requests that `google.api.http` writes in less common ways.
 service ProbeService {
   // Whether a widget exists: a `HEAD` request, which fails for a missing widget.
@@ -165,6 +194,16 @@ service ProbeService {
       get: "/api/v1/search"
       body: "*"
     };
+  }
+
+  // Stream widgets: an NDJSON answer, one line per widget.
+  rpc StreamWidgets(StreamWidgetsRequest) returns (stream WidgetLine) {
+    option (google.api.http) = {get: "/api/v1/widget-lines"};
+  }
+
+  // The version of a widget: fields from the response headers.
+  rpc WidgetVersion(WidgetVersionRequest) returns (.demo.v1.WidgetVersion) {
+    option (google.api.http) = {get: "/api/v1/widgets/{name}/version"};
   }
 }
 

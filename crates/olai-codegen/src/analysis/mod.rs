@@ -746,6 +746,7 @@ mod tests {
             method_name: "GetCatalog".to_string(),
             input_type: "GetCatalogRequest".to_string(),
             output_type: "Catalog".to_string(),
+            server_streaming: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -795,6 +796,7 @@ mod tests {
             method_name: "UpdateCatalog".to_string(),
             input_type: "UpdateCatalogRequest".to_string(),
             output_type: "Catalog".to_string(),
+            server_streaming: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -826,6 +828,7 @@ mod tests {
             method_name: "SomeMethod".to_string(),
             input_type: "".to_string(),
             output_type: "".to_string(),
+            server_streaming: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -874,6 +877,7 @@ mod tests {
             method_name: "DoThing".to_string(),
             input_type: "DoThingRequest".to_string(),
             output_type: "DoThingResponse".to_string(),
+            server_streaming: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -933,6 +937,7 @@ mod tests {
             method_name: "Make".to_string(),
             input_type: "MakeReq".to_string(),
             output_type: "MakeResp".to_string(),
+            server_streaming: false,
             operation: None,
             http_rule: HttpRule::default(),
             http_pattern: HttpPattern::default(),
@@ -952,6 +957,7 @@ mod tests {
         MessageField {
             name: name.to_string(),
             json_name: None,
+            response_header: None,
             unified_type: UnifiedType {
                 base_type: BaseType::String,
                 is_optional: optional,
@@ -970,6 +976,7 @@ mod tests {
         MessageField {
             name: name.to_string(),
             json_name: None,
+            response_header: None,
             unified_type: UnifiedType {
                 base_type: BaseType::String,
                 is_optional: false,
@@ -989,6 +996,7 @@ mod tests {
             method_name: "Method".to_string(),
             input_type: "".to_string(),
             output_type: "".to_string(),
+            server_streaming: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -1162,6 +1170,7 @@ mod tests {
                 fields: vec![MessageField {
                     name: "catalog_name".to_string(),
                     json_name: None,
+                    response_header: None,
                     unified_type: UnifiedType {
                         base_type: BaseType::String,
                         is_optional: false,
@@ -1190,6 +1199,7 @@ mod tests {
                     MessageField {
                         name: "catalog_name".to_string(),
                         json_name: None,
+                        response_header: None,
                         unified_type: UnifiedType {
                             base_type: BaseType::String,
                             is_optional: false,
@@ -1207,6 +1217,7 @@ mod tests {
                     MessageField {
                         name: "schema_name".to_string(),
                         json_name: None,
+                        response_header: None,
                         unified_type: UnifiedType {
                             base_type: BaseType::String,
                             is_optional: false,
@@ -1242,6 +1253,7 @@ mod tests {
                     method_name: "ListCatalogs".to_string(),
                     input_type: "ListCatalogsRequest".to_string(),
                     output_type: "ListCatalogsResponse".to_string(),
+                    server_streaming: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1258,6 +1270,7 @@ mod tests {
                     method_name: "GetCatalog".to_string(),
                     input_type: "GetCatalogRequest".to_string(),
                     output_type: "Catalog".to_string(),
+                    server_streaming: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1282,6 +1295,7 @@ mod tests {
                     method_name: "ListSchemas".to_string(),
                     input_type: "ListSchemasRequest".to_string(),
                     output_type: "ListSchemasResponse".to_string(),
+                    server_streaming: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1298,6 +1312,7 @@ mod tests {
                     method_name: "GetSchema".to_string(),
                     input_type: "GetSchemaRequest".to_string(),
                     output_type: "Schema".to_string(),
+                    server_streaming: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1322,6 +1337,7 @@ mod tests {
                     method_name: "ListTables".to_string(),
                     input_type: "ListTablesRequest".to_string(),
                     output_type: "ListTablesResponse".to_string(),
+                    server_streaming: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1338,6 +1354,7 @@ mod tests {
                     method_name: "GetTable".to_string(),
                     input_type: "GetTableRequest".to_string(),
                     output_type: "Table".to_string(),
+                    server_streaming: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),

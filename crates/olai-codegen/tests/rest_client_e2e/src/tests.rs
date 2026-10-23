@@ -151,6 +151,28 @@ async fn search_widgets(State(seen): State<Seen>, body: Bytes) -> Response {
     axum::Json(json!({"widgets": widgets})).into_response()
 }
 
+async fn stream_widgets(uri: OriginalUri) -> Response {
+    let prefix = uri
+        .query()
+        .and_then(|q| q.strip_prefix("prefix="))
+        .unwrap_or_default();
+    let lines: String = ["w1", "w2", "x1"]
+        .into_iter()
+        .filter(|name| name.starts_with(prefix))
+        .map(|name| format!("{}\n\n", json!({"name": name, "created_at": 1})))
+        .collect();
+    ([(header::CONTENT_TYPE, "application/x-ndjson")], lines).into_response()
+}
+
+async fn widget_version(Path(name): Path<String>) -> Response {
+    let body = if name == "bare" {
+        String::new()
+    } else {
+        json!({"name": name}).to_string()
+    };
+    ([("Widget-Version", "7"), ("ETag", "abc")], body).into_response()
+}
+
 /// Start the demo server on a free port; returns its base URL and what it saw.
 async fn serve() -> (url::Url, Seen) {
     let seen = Seen::default();
@@ -161,6 +183,8 @@ async fn serve() -> (url::Url, Seen) {
             get(get_widget).delete(delete_widget).head(widget_exists),
         )
         .route("/api/v1/search", get(search_widgets))
+        .route("/api/v1/widget-lines", get(stream_widgets))
+        .route("/api/v1/widgets/{name}/version", get(widget_version))
         .route("/auth/tokens", post(exchange_token))
         .with_state(seen.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -295,7 +319,9 @@ async fn free_form_json_keeps_whole_numbers() {
     let mut attributes = Struct::default();
     attributes.fields.insert("count".into(), Value::from(3_i64));
     attributes.fields.insert("ratio".into(), Value::from(0.5));
-    attributes.fields.insert("nested".into(), Value::from(nested));
+    attributes
+        .fields
+        .insert("nested".into(), Value::from(nested));
     client
         .create_widget("w")
         .with_attributes(attributes)
@@ -314,7 +340,10 @@ async fn free_form_json_keeps_whole_numbers() {
     let attributes = widget.attributes.as_option().unwrap();
     assert_eq!(attributes.fields["count"], Value::from(3_i64));
     assert_eq!(widget.notes.len(), 2);
-    assert_eq!(widget.rows["t"].values, [Value::from(1_i64), Value::from(2_i64)]);
+    assert_eq!(
+        widget.rows["t"].values,
+        [Value::from(1_i64), Value::from(2_i64)]
+    );
     // The models write the whole numbers back as integers too.
     let json = serde_json::to_string(&widget).unwrap();
     assert!(json.contains(r#""rows":{"t":[1,2]}"#), "{json}");
@@ -336,6 +365,27 @@ async fn head_requests_and_get_bodies() {
         seen.contains(&r#"GET body {"prefix":"w"}"#.to_string()),
         "{seen:?}"
     );
+}
+
+#[tokio::test]
+async fn ndjson_answers_and_header_fields() {
+    let (base, _seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    let widgets = client
+        .stream_widgets()
+        .with_prefix("w".to_string())
+        .await
+        .unwrap();
+    let names: Vec<_> = widgets.iter().map(|w| w.name.as_str()).collect();
+    assert_eq!(names, ["w1", "w2"]);
+    assert_eq!(widgets[0].created_at, 1);
+
+    let version = client.widget_version("w").await.unwrap();
+    assert_eq!(version.name, "w");
+    assert_eq!(version.version, 7);
+    assert_eq!(version.etag.as_deref(), Some("abc"));
+    let bare = client.widget_version("bare").await.unwrap();
+    assert_eq!((bare.name.as_str(), bare.version), ("", 7));
 }
 
 #[tokio::test]

@@ -18,6 +18,7 @@ use quote::{format_ident, quote};
 use super::{doc_tokens, extract_type_ident, format_tokens};
 use crate::Result;
 use crate::codegen::{MethodHandler, Runtime, ServiceHandler};
+use crate::parsing::MessageField;
 use crate::parsing::types::BaseType;
 
 /// Generate client code for a service
@@ -34,7 +35,7 @@ pub(crate) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
             .rest_client
             .form_encoded_methods
             .contains(&full_name);
-        let method_code = client_method(method, form_body);
+        let method_code = client_method(method, form_body)?;
         method_tokens.push(method_code);
     }
 
@@ -124,7 +125,10 @@ pub(crate) fn transport_tokens(
 
 /// Generate client method implementation. `form_body` sends the request body form-encoded
 /// instead of as JSON.
-pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> TokenStream {
+///
+/// A server-streaming method reads the body as NDJSON, one output message per line. Output fields
+/// with a `response_header` come from the response headers; their body may be empty.
+pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> Result<TokenStream> {
     let doc_attrs = doc_tokens(method.plan.metadata.documentation.as_deref());
     let method_name = method.plan.base_method_ident();
     let input_type_ident = method.input_type();
@@ -133,6 +137,7 @@ pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> TokenStream 
     let url_formatting = generate_url_formatting(&method, has_query_params);
     let query_handling = generate_query_parameters(&method);
     let error_module = method.config.client_error_module();
+    let result_type = method.result_type();
     // A request with no path value, query parameter or body is not read.
     let request_ident =
         if method.plan.formats_path_values() || has_query_params || method.plan.has_request_body {
@@ -147,44 +152,132 @@ pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> TokenStream 
         (false, _) => quote! {},
     };
 
-    if let Some(output_type) = method.output_type() {
-        let parse_body = if method.config.rest_client.ignore_unknown_enum_values
-            && method.config.runtime == Runtime::Buffa
-        {
-            quote! {
-                let options = ::buffa::json::JsonParseOptions::new().ignore_unknown_enum_values(true);
-                Ok(::buffa::json::with_json_parse_options(&options, || serde_json::from_slice(&result))?)
+    let read_response = match method.output_type() {
+        Some(output_type) => read_output(&method, &output_type)?,
+        None => quote! { Ok(()) },
+    };
+
+    Ok(quote! {
+        #doc_attrs
+        pub async fn #method_name(&self, #request_ident: &#input_type_ident) -> Result<#result_type> {
+            #url_formatting
+            #query_handling
+            let response = self.client.#http_method(url)#body_handling.send().await?;
+            if !response.status().is_success() {
+                return Err(#error_module::parse_error_response(response).await);
             }
+            #read_response
+        }
+    })
+}
+
+/// The statements that turn a successful `response` into the method's output.
+fn read_output(
+    method: &MethodHandler<'_>,
+    output_type: &proc_macro2::Ident,
+) -> Result<TokenStream> {
+    let lenient = method.config.rest_client.ignore_unknown_enum_values
+        && method.config.runtime == Runtime::Buffa;
+    let options = lenient.then(|| {
+        quote! { let options = ::buffa::json::JsonParseOptions::new().ignore_unknown_enum_values(true); }
+    });
+    let from_slice = |bytes: TokenStream| {
+        if lenient {
+            quote! { ::buffa::json::with_json_parse_options(&options, || serde_json::from_slice(#bytes)) }
         } else {
-            quote! { Ok(serde_json::from_slice(&result)?) }
-        };
-        quote! {
-            #doc_attrs
-            pub async fn #method_name(&self, #request_ident: &#input_type_ident) -> Result<#output_type> {
-                #url_formatting
-                #query_handling
-                let response = self.client.#http_method(url)#body_handling.send().await?;
-                if !response.status().is_success() {
-                    return Err(#error_module::parse_error_response(response).await);
-                }
-                let result = response.bytes().await?;
-                #parse_body
-            }
+            quote! { serde_json::from_slice(#bytes) }
         }
-    } else {
-        quote! {
-            #doc_attrs
-            pub async fn #method_name(&self, #request_ident: &#input_type_ident) -> Result<()> {
-                #url_formatting
-                #query_handling
-                let response = self.client.#http_method(url)#body_handling.send().await?;
-                if !response.status().is_success() {
-                    return Err(#error_module::parse_error_response(response).await);
-                }
-                Ok(())
-            }
+    };
+
+    let header_fields = method.response_header_fields();
+    if method.plan.metadata.server_streaming {
+        if !header_fields.is_empty() {
+            return Err(crate::Error::Build(format!(
+                "method `{}` streams its output, so its output fields cannot come from response headers",
+                method.plan.handler_function_name
+            )));
         }
+        let parse_line = from_slice(quote! { line });
+        return Ok(quote! {
+            let result = response.bytes().await?;
+            #options
+            result
+                .split(|byte| *byte == b'\n')
+                .filter(|line| !line.trim_ascii().is_empty())
+                .map(|line| -> Result<#output_type> { Ok(#parse_line?) })
+                .collect()
+        });
     }
+
+    let parse = from_slice(quote! { &result });
+    if header_fields.is_empty() {
+        return Ok(quote! {
+            let result = response.bytes().await?;
+            #options
+            Ok(#parse?)
+        });
+    }
+    let assignments = header_fields
+        .iter()
+        .map(|field| header_assignment(method, field))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(quote! {
+        let headers = response.headers().clone();
+        let result = response.bytes().await?;
+        #options
+        let mut output: #output_type = if result.trim_ascii().is_empty() {
+            Default::default()
+        } else {
+            #parse?
+        };
+        #(#assignments)*
+        Ok(output)
+    })
+}
+
+/// The statement that sets an output field from its response header, when the header is there and
+/// parses.
+fn header_assignment(method: &MethodHandler<'_>, field: &MessageField) -> Result<TokenStream> {
+    let field_ident = format_ident!("{}", field.name);
+    let header = field.response_header.as_deref().unwrap_or_default();
+    let ty = &field.unified_type;
+    let is_string = match ty.base_type {
+        BaseType::String => true,
+        BaseType::Int32
+        | BaseType::Int64
+        | BaseType::Bool
+        | BaseType::Float32
+        | BaseType::Float64 => false,
+        _ => {
+            return Err(crate::Error::Build(format!(
+                "field `{}` of the output of `{}` comes from a response header, so it must be a string, number or bool",
+                field.name, method.plan.handler_function_name
+            )));
+        }
+    };
+    if ty.is_repeated {
+        return Err(crate::Error::Build(format!(
+            "field `{}` of the output of `{}` comes from a response header, so it cannot be repeated",
+            field.name, method.plan.handler_function_name
+        )));
+    }
+    let value = quote! { headers.get(#header).and_then(|value| value.to_str().ok()) };
+    Ok(match (is_string, ty.is_optional) {
+        (true, true) => quote! { output.#field_ident = #value.map(str::to_string); },
+        (true, false) => quote! {
+            if let Some(value) = #value {
+                output.#field_ident = value.to_string();
+            }
+        },
+        (false, true) => {
+            quote! { output.#field_ident = #value.and_then(|value| value.parse().ok()); }
+        }
+        (false, false) => quote! {
+            if let Some(value) = #value.and_then(|value| value.parse().ok()) {
+                output.#field_ident = value;
+            }
+        },
+    })
 }
 
 /// Generate URL formatting code that properly substitutes path parameters.

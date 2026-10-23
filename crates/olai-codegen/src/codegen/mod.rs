@@ -1486,6 +1486,30 @@ impl MethodHandler<'_> {
             .map(|t| extract_type_ident(&t.info.name))
     }
 
+    /// The type a client call resolves to: the output message, a `Vec` of them for a
+    /// server-streaming method (one per NDJSON line), or `()` for `Empty`.
+    pub(crate) fn result_type(&self) -> TokenStream {
+        match self.output_type() {
+            Some(output) if self.plan.metadata.server_streaming => quote! { Vec<#output> },
+            Some(output) => quote! { #output },
+            None => quote! { () },
+        }
+    }
+
+    /// The output fields that come from HTTP response headers instead of the body.
+    pub(crate) fn response_header_fields(&self) -> Vec<&MessageField> {
+        self.output_message()
+            .map(|output| {
+                output
+                    .info
+                    .fields
+                    .iter()
+                    .filter(|f| f.response_header.is_some())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub(crate) fn list_output_field(&self) -> Option<&MessageField> {
         self.output_message()?
             .info

@@ -124,7 +124,7 @@ fn generate_method_typings_signature(method: &MethodHandler<'_>) -> Option<Strin
         }
         _ => {
             if let Some(output_type) = method.output_type() {
-                python_type_annotation_from_ident(&output_type)
+                streamed_annotation(method, python_type_annotation_from_ident(&output_type))
             } else {
                 "Any".to_string()
             }
@@ -332,6 +332,15 @@ fn collect_parameter_documentation(method: &MethodHandler<'_>) -> Vec<(String, S
     param_docs
 }
 
+/// The annotation of a method's result: a `List` for a server-streaming method.
+fn streamed_annotation(method: &MethodHandler<'_>, annotation: String) -> String {
+    if method.plan.metadata.server_streaming {
+        format!("List[{annotation}]")
+    } else {
+        annotation
+    }
+}
+
 /// The `Returns:` text of a method's docstring; empty for a method that returns nothing.
 fn get_return_type_documentation(method: &MethodHandler<'_>) -> String {
     if method.output_type().is_none() {
@@ -516,7 +525,7 @@ fn generate_aggregate_method_typing(
         _ => {
             // Empty-returning RPCs (e.g. a `Touch*` custom method) are typed `None` in Python.
             if let Some(output_type) = method.output_type() {
-                python_type_annotation_from_ident(&output_type)
+                streamed_annotation(method, python_type_annotation_from_ident(&output_type))
             } else {
                 "None".to_string()
             }

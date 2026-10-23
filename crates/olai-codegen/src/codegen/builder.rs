@@ -162,7 +162,7 @@ fn generate_request_builder(
             method.plan.handler_function_name
         ))
     })?;
-    let output_type_ident = method.output_type();
+    let result_type = method.result_type();
     let client_type_ident = service.low_level_client_type(protocol);
     let method_name = format_ident!("{}", method.plan.handler_function_name);
 
@@ -228,12 +228,7 @@ fn generate_request_builder(
     };
 
     // Generate IntoFuture implementation
-    let into_future_impl = generate_into_future_impl(
-        &builder_ident,
-        &client_type_ident,
-        output_type_ident.as_ref(),
-        &method_name,
-    );
+    let into_future_impl = generate_into_future_impl(&builder_ident, &result_type, &method_name);
 
     let tokens = quote! {
         #[doc = #builder_doc]
@@ -472,34 +467,18 @@ fn generate_oneof_variant_methods(
 /// Generate IntoFuture implementation
 fn generate_into_future_impl(
     builder_ident: &proc_macro2::Ident,
-    _client_type_ident: &proc_macro2::Ident,
-    output_type_ident: Option<&proc_macro2::Ident>,
+    result_type: &TokenStream,
     method_name: &proc_macro2::Ident,
 ) -> TokenStream {
-    if let Some(out_ident) = output_type_ident {
-        quote! {
-            impl IntoFuture for #builder_ident {
-                type Output = Result<#out_ident>;
-                type IntoFuture = BoxFut<'static, Self::Output>;
+    quote! {
+        impl IntoFuture for #builder_ident {
+            type Output = Result<#result_type>;
+            type IntoFuture = BoxFut<'static, Self::Output>;
 
-                fn into_future(self) -> Self::IntoFuture {
-                    let client = self.client;
-                    let request = self.request;
-                    Box::pin(async move { client.#method_name(&request).await })
-                }
-            }
-        }
-    } else {
-        quote! {
-            impl IntoFuture for #builder_ident {
-                type Output = Result<()>;
-                type IntoFuture = BoxFut<'static, Self::Output>;
-
-                fn into_future(self) -> Self::IntoFuture {
-                    let client = self.client;
-                    let request = self.request;
-                    Box::pin(async move { client.#method_name(&request).await })
-                }
+            fn into_future(self) -> Self::IntoFuture {
+                let client = self.client;
+                let request = self.request;
+                Box::pin(async move { client.#method_name(&request).await })
             }
         }
     }
@@ -607,6 +586,7 @@ mod tests {
             MessageField {
                 name: "name".to_string(),
                 json_name: None,
+                response_header: None,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: false,
@@ -621,6 +601,7 @@ mod tests {
             MessageField {
                 name: "comment".to_string(),
                 json_name: None,
+                response_header: None,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: true,
@@ -635,6 +616,7 @@ mod tests {
             MessageField {
                 name: "properties".to_string(),
                 json_name: None,
+                response_header: None,
                 unified_type: UnifiedType {
                     base_type: BaseType::Map(
                         Box::new(UnifiedType {

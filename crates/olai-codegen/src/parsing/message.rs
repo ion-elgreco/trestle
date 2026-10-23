@@ -111,6 +111,7 @@ pub(super) fn process_message(
         let field_info = MessageField {
             name: field.name().to_string(),
             json_name,
+            response_header: extract_response_header(field),
             unified_type,
             documentation,
             field_behavior,
@@ -135,6 +136,7 @@ pub(super) fn process_message(
         let oneof_field = MessageField {
             name: oneof_field_name.clone(),
             json_name: None,
+            response_header: None,
             unified_type: UnifiedType {
                 base_type: BaseType::OneOf(enum_type_name.clone()),
                 is_optional: true, // oneof fields are always Option<enum>
@@ -206,6 +208,23 @@ pub(super) fn process_message(
     }
 
     Ok(())
+}
+
+/// The `(olai.trestle.v1.response_header)` option of a field: the HTTP response header that the
+/// field comes from.
+fn extract_response_header(field: &FieldDescriptorProto) -> Option<String> {
+    let options = field.options.as_ref()?;
+    options
+        .unknown_fields()
+        .iter()
+        .find_map(|(number, value)| match value {
+            protobuf::UnknownValueRef::LengthDelimited(bytes)
+                if number == super::TRESTLE_RESPONSE_HEADER_EXTENSION =>
+            {
+                String::from_utf8(bytes.to_vec()).ok()
+            }
+            _ => None,
+        })
 }
 
 /// Extract google.api.field_behavior option from field-level options

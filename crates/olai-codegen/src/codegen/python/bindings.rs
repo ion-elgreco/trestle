@@ -42,10 +42,17 @@ fn qualified_wrapper_ident(ty: &UnifiedType) -> Ident {
 /// expression converting the bare client result `result` into it.
 ///
 /// Returns `(return_type, convert_expr)`, or `None` for an `Empty`-returning method
-/// ([`MethodHandler::output_type`] is `None`).
+/// ([`MethodHandler::output_type`] is `None`). A server-streaming method returns a list.
 fn wrap_single_output(method: &MethodHandler<'_>) -> Option<(TokenStream, TokenStream)> {
     let w = wrapper_ident(&method.output_type()?);
-    Some((quote! { #w }, quote! { #w::from(result) }))
+    if method.plan.metadata.server_streaming {
+        Some((
+            quote! { Vec<#w> },
+            quote! { result.into_iter().map(#w::from).collect::<Vec<_>>() },
+        ))
+    } else {
+        Some((quote! { #w }, quote! { #w::from(result) }))
+    }
 }
 
 /// `mut` keyword for the `let request = ...` binding, but only when there are
