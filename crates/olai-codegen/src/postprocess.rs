@@ -68,11 +68,17 @@ impl ModelRewrites {
             && self.json_value_module.is_none()
     }
 
-    /// The field-name style of the model file `file_name` (`<package>.rs`).
+    /// The field-name style of the model file `file_name`: `<package>.rs` (one file per package,
+    /// as the buf plugin writes) or `<package>.<proto file>.rs` (one per proto file, as
+    /// buffa-build writes).
     fn field_names_for(&self, file_name: &str) -> JsonFieldNames {
-        file_name
-            .strip_suffix(".rs")
-            .and_then(|package| self.packages.get(package))
+        let Some(stem) = file_name.strip_suffix(".rs") else {
+            return self.field_names;
+        };
+        let parent = stem.rsplit_once('.').map(|(package, _)| package);
+        self.packages
+            .get(stem)
+            .or_else(|| parent.and_then(|package| self.packages.get(package)))
             .copied()
             .unwrap_or(self.field_names)
     }
@@ -86,6 +92,7 @@ impl ModelRewrites {
         }
         if let Some(module) = &self.int64_module {
             out = int64_helpers_to(&out, module);
+            out = int64_containers_to(&out, module);
         }
         if let Some(module) = &self.json_value_module {
             out = json_value_serializers(&out, module);
@@ -209,6 +216,66 @@ fn int64_helpers_to(src: &str, module: &str) -> String {
         .into_owned()
 }
 
+/// Point the repeated `int64`/`uint64` fields and the maps with such values at the
+/// `repeated_int64` and `map_int64` helpers of `module`: buffa sends them through its generic
+/// `proto_seq` and `proto_map`, which write quoted strings.
+fn int64_containers_to(src: &str, module: &str) -> String {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    for i in 0..lines.len() {
+        let trimmed = lines[i].trim_start();
+        if !trimmed.starts_with("pub ") || !trimmed.contains(':') && !trimmed.ends_with('<') {
+            continue;
+        }
+        let (decl, _) = declaration(&lines, i);
+        let int64 = |ty: &str| ty == "i64" || ty == "u64";
+        let (from, to) = if decl
+            .split_once("Vec<")
+            .is_some_and(|(_, rest)| int64(rest.split('>').next().unwrap_or_default()))
+        {
+            ("::buffa::json_helpers::proto_seq", "repeated_int64")
+        } else if decl
+            .split_once("HashMap<")
+            .and_then(|(_, rest)| rest.rsplit_once('>'))
+            .and_then(|(args, _)| args.rsplit_once(','))
+            .is_some_and(|(_, value)| int64(value.trim()))
+        {
+            ("::buffa::json_helpers::proto_map", "map_int64")
+        } else {
+            continue;
+        };
+        for j in attribute_lines(&lines, i) {
+            out[j] = out[j].replace(from, &format!("{module}::{to}"));
+        }
+    }
+    let mut out = out.join("\n");
+    if src.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+/// The declaration of the field at line `start`, whitespace collapsed (`pub a: Vec<i64>,`), and
+/// the line it ends on: up to the `,` outside the type's `<..>`.
+fn declaration(lines: &[&str], start: usize) -> (String, usize) {
+    let mut end = start;
+    let mut decl = String::new();
+    loop {
+        decl.push_str(lines[end].trim());
+        decl.push(' ');
+        let depth = decl.matches('<').count() as isize - decl.matches('>').count() as isize;
+        if (depth <= 0 && lines[end].trim_end().ends_with(',')) || end + 1 == lines.len() {
+            break;
+        }
+        end += 1;
+    }
+    let decl = decl
+        .replace(", >", ">")
+        .replace("< ", "<")
+        .replace(" >", ">");
+    (decl, end)
+}
+
 /// Give each free-form JSON field (`google.protobuf.Value`, `Struct`, `ListValue`; singular,
 /// repeated or a map value) a `serialize_with` of `module`, which writes whole numbers as
 /// integers. A field declaration can span lines, so the field types are read with their
@@ -225,23 +292,7 @@ fn json_value_serializers(src: &str, module: &str) -> String {
             // A type that starts on the next lines, as rustfmt breaks a long `HashMap<..>`.
             trimmed.starts_with("pub ") && trimmed.ends_with('<')
         } {
-            // The whole declaration, up to the `,` that ends it.
-            let mut end = i;
-            let mut decl = String::new();
-            loop {
-                decl.push_str(lines[end].trim());
-                decl.push(' ');
-                // The `,` that ends the declaration is outside the type's `<..>`.
-                let depth = decl.matches('<').count() as isize - decl.matches('>').count() as isize;
-                if (depth <= 0 && lines[end].trim_end().ends_with(',')) || end + 1 == lines.len() {
-                    break;
-                }
-                end += 1;
-            }
-            let decl = decl
-                .replace("< ", "<")
-                .replace(" >", ">")
-                .replace(", >", ">");
+            let (decl, end) = declaration(&lines, i);
             let kind = if !decl.contains(JSON) {
                 None
             } else if decl.contains(": ::buffa::MessageField<") {
@@ -293,29 +344,30 @@ fn has_serde_key(attrs: &str, key: &str) -> bool {
 /// The attributes above the field declaration at line `field`: doc comments are skipped, and an
 /// attribute that spans lines is read whole.
 fn field_attributes(lines: &[&str], field: usize) -> String {
-    let mut attrs = String::new();
+    attribute_lines(lines, field)
+        .map(|j| lines[j].trim())
+        .collect()
+}
+
+/// The lines of the attributes and doc comments above the field declaration at line `field`.
+fn attribute_lines(lines: &[&str], field: usize) -> std::ops::Range<usize> {
     let mut j = field;
     while j > 0 {
         let prev = lines[j - 1].trim();
-        if prev.starts_with("//") {
-            j -= 1;
-        } else if prev.starts_with("#[") && prev.ends_with(']') {
-            attrs.push_str(prev);
+        if prev.starts_with("//") || prev.starts_with("#[") && prev.ends_with(']') {
             j -= 1;
         } else if prev.ends_with(")]") {
-            // The end of an attribute that spans lines: read up to its `#[`.
+            // The end of an attribute that spans lines: up to its `#[`.
             let mut k = j - 1;
             while k > 0 && !lines[k].trim_start().starts_with("#[") {
-                attrs.push_str(lines[k].trim());
                 k -= 1;
             }
-            attrs.push_str(lines[k].trim());
             j = k;
         } else {
             break;
         }
     }
-    attrs
+    j..field
 }
 
 /// Invert the proto3 JSON mapping: each uppercase letter becomes `_` + its lowercase.
@@ -511,11 +563,38 @@ mod tests {
             .insert("demo.scim.v2".into(), JsonFieldNames::Json);
         let src = r#"#[serde(rename = "userName", alias = "user_name")]"#;
         assert_eq!(rewrites.rewrite("demo.scim.v2.rs", src), src);
+        assert_eq!(rewrites.rewrite("demo.scim.v2.users.rs", src), src);
         assert!(
             rewrites
                 .rewrite("demo.v1.rs", src)
                 .contains(r#"rename = "user_name""#)
         );
+    }
+
+    #[test]
+    fn int64_containers_write_numbers() {
+        let src = r#"    #[serde(rename = "sizes", with = "::buffa::json_helpers::proto_seq")]
+    pub sizes: ::buffa::alloc::vec::Vec<i64>,
+    #[serde(
+        rename = "counts",
+        with = "::buffa::json_helpers::proto_map"
+    )]
+    pub counts: ::buffa::__private::HashMap<
+        ::buffa::alloc::string::String,
+        i64,
+    >,
+    #[serde(rename = "ratios", with = "::buffa::json_helpers::proto_seq")]
+    pub ratios: ::buffa::alloc::vec::Vec<f64>,
+"#;
+        let out = int64_containers_to(src, "crate::models::json_int64");
+        assert!(out.contains(r#"with = "crate::models::json_int64::repeated_int64""#));
+        assert!(out.contains(r#"with = "crate::models::json_int64::map_int64""#));
+        assert_eq!(
+            out.matches("::buffa::json_helpers::proto_seq").count(),
+            1,
+            "{out}"
+        );
+        assert!(out.ends_with(",\n"));
     }
 
     #[test]

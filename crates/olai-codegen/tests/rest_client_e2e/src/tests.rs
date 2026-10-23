@@ -353,6 +353,18 @@ async fn free_form_json_keeps_whole_numbers() {
     // The models write the whole numbers back as integers too.
     let json = serde_json::to_string(&widget).unwrap();
     assert!(json.contains(r#""rows":{"t":[1,2]}"#), "{json}");
+
+    // Repeated 64-bit integers and map values of them are numbers as well.
+    let widget = Widget {
+        sizes: vec![1, 2],
+        counts: [("a".to_string(), 3)].into_iter().collect(),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&widget).unwrap();
+    assert!(json.contains(r#""sizes":[1,2]"#), "{json}");
+    assert!(json.contains(r#""counts":{"a":3}"#), "{json}");
+    let back: Widget = serde_json::from_str(r#"{"sizes":[1,"2"],"counts":{"a":"3"}}"#).unwrap();
+    assert_eq!((back.sizes, back.counts["a"]), (vec![1, 2], 3));
 }
 
 #[tokio::test]

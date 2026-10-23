@@ -53,6 +53,10 @@ message Widget {
   map<string, google.protobuf.ListValue> rows = 11;
   // The kind of widget: a field named after a Rust keyword.
   optional string type = 12;
+  // Sizes, as 64-bit integers.
+  repeated int64 sizes = 13;
+  // Counts by name, as 64-bit integers.
+  map<string, int64> counts = 14;
 }
 
 message ListWidgetsRequest {

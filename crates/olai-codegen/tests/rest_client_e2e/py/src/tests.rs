@@ -179,7 +179,8 @@ assert w.created_at == 1700000000000
 assert w.properties == {"a": "1"}
 assert repr(w) == (
     "Widget(name='a/b c', created_at=1700000000000, size_bytes=0, "
-    "properties={'a': '1'}, display_name='', metadata_location='', notes=[], rows={})"
+    "properties={'a': '1'}, display_name='', metadata_location='', notes=[], rows={}, "
+    "sizes=[], counts={})"
 ), repr(w)
 try:
     w.name = "x"

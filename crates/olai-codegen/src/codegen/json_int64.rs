@@ -87,6 +87,36 @@ pub(crate) fn module() -> String {
                     ::buffa::json_helpers::opt_uint64::deserialize(d)
                 }
             }
+
+            /// A repeated `i64` or `u64` as an array of JSON numbers.
+            pub mod repeated_int64 {
+                pub use ::buffa::json_helpers::proto_seq::deserialize;
+
+                pub fn serialize<T: ::serde::Serialize, S: ::serde::Serializer>(
+                    values: &[T],
+                    s: S,
+                ) -> ::core::result::Result<S::Ok, S::Error> {
+                    s.collect_seq(values)
+                }
+            }
+
+            /// A map with `i64` or `u64` values, the values as JSON numbers.
+            pub mod map_int64 {
+                pub use ::buffa::json_helpers::proto_map::deserialize;
+
+                pub fn serialize<'a, M, K, V, S>(
+                    map: &'a M,
+                    s: S,
+                ) -> ::core::result::Result<S::Ok, S::Error>
+                where
+                    &'a M: ::core::iter::IntoIterator<Item = (&'a K, &'a V)>,
+                    K: ::core::fmt::Display + 'a,
+                    V: ::serde::Serialize + 'a,
+                    S: ::serde::Serializer,
+                {
+                    s.collect_map(map.into_iter().map(|(k, v)| (k.to_string(), v)))
+                }
+            }
         }
     };
     format_tokens_static(tokens)
