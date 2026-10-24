@@ -158,25 +158,13 @@ impl<'a> PyBackend<'a> {
                         register_submodule!(module, #segment, [#(#classes),*])?;
                     }
                 });
+                // The macro body goes in as text after formatting (`REGISTER_SUBMODULE_MACRO`):
+                // this placeholder marks its place.
                 let helpers = quote! {
                     /// The extension module, as Python imports it.
                     pub const CORE_MODULE: &str = #root;
 
-                    /// Register the submodule `<CORE_MODULE>.<name>` with its classes. It also
-                    /// goes in `sys.modules`, so `import <CORE_MODULE>.<name>` finds it.
-                    macro_rules! register_submodule {
-                        ($parent:expr, $mod_name:expr, [$($type:ty),* $(,)?]) => {{
-                            let py = $parent.py();
-                            let child = ::pyo3::types::PyModule::new(py, $mod_name)?;
-                            $(
-                                child.add_class::<$type>()?;
-                            )*
-                            $parent.add_submodule(&child)?;
-                            py.import("sys")?
-                                .getattr("modules")?
-                                .set_item(format!("{}.{}", CORE_MODULE, $mod_name), child)
-                        }};
-                    }
+                    macro_rules! register_submodule { () => {}; }
                 };
                 let body = quote! {
                     module.add_class::<#aggregate>()?;
@@ -214,6 +202,33 @@ impl<'a> PyBackend<'a> {
         }
     }
 }
+
+/// The `register_submodule!` macro of the bindings' `mod.rs`, as text: prettyplease prints a
+/// macro body as a token stream on few lines, and rustfmt leaves a body with repetitions as it
+/// is. It replaces [`REGISTER_SUBMODULE_PLACEHOLDER`].
+const REGISTER_SUBMODULE_MACRO: &str = r#"/// Register the submodule `<CORE_MODULE>.<name>` with its classes. It also goes in
+/// `sys.modules`, so `import <CORE_MODULE>.<name>` finds it.
+///
+/// Usage:
+/// ```ignore
+/// register_submodule!(module, "tables", [PyColumnInfo, PyTableInfo])?;
+/// ```
+macro_rules! register_submodule {
+    ($parent:expr, $mod_name:expr, [$($type:ty),* $(,)?]) => {{
+        let py = $parent.py();
+        let child = ::pyo3::types::PyModule::new(py, $mod_name)?;
+        $(
+            child.add_class::<$type>()?;
+        )*
+        $parent.add_submodule(&child)?;
+        py.import("sys")?
+            .getattr("modules")?
+            .set_item(format!("{}.{}", CORE_MODULE, $mod_name), child)
+    }};
+}"#;
+
+/// How prettyplease prints the placeholder of [`REGISTER_SUBMODULE_MACRO`].
+const REGISTER_SUBMODULE_PLACEHOLDER: &str = "macro_rules! register_submodule {\n    () => {};\n}";
 
 pub fn main_module(services: &[ServiceHandler<'_>]) -> crate::error::Result<String> {
     PyBackend::from_services(services).main_module(services)
@@ -434,7 +449,16 @@ impl BindingBackend for PyBackend<'_> {
             #register
         };
 
-        format_tokens(tokens)
+        let code = format_tokens(tokens)?;
+        if self.python.module.is_none() {
+            return Ok(code);
+        }
+        if !code.contains(REGISTER_SUBMODULE_PLACEHOLDER) {
+            return Err(crate::Error::Build(
+                "the placeholder of register_submodule! is not in the formatted bindings".into(),
+            ));
+        }
+        Ok(code.replacen(REGISTER_SUBMODULE_PLACEHOLDER, REGISTER_SUBMODULE_MACRO, 1))
     }
 
     fn param_defs(&self, method: &MethodHandler<'_>, mode: BindingMode) -> Vec<TokenStream> {
