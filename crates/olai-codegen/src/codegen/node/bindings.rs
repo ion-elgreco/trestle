@@ -298,8 +298,7 @@ impl BindingBackend for NapiBackend {
                 &self,
                 #(#param_defs,)*
             ) -> napi::Result<Vec<Buffer>> {
-                let mut request = #client_call;
-                #(#builder_calls)*
+                let request = #client_call #(#builder_calls)*;
                 request
                     .into_stream()
                     .map_ok(|item| Buffer::from(item.encode_to_vec()))
@@ -314,8 +313,7 @@ impl BindingBackend for NapiBackend {
                 env: Env,
                 #(#param_defs,)*
             ) -> napi::Result<ReadableStream<'_, Buffer>> {
-                let mut request = #client_call;
-                #(#builder_calls)*
+                let request = #client_call #(#builder_calls)*;
                 ReadableStream::new(
                     &env,
                     request
@@ -349,8 +347,7 @@ impl BindingBackend for NapiBackend {
                 &self,
                 #(#param_defs,)*
             ) -> napi::Result<()> {
-                let mut request = #client_call;
-                #(#builder_calls)*
+                let request = #client_call #(#builder_calls)*;
                 request
                     .await
                     .default_error()
@@ -427,8 +424,7 @@ impl NapiBackend {
                     &self,
                     #(#param_defs,)*
                 ) -> napi::Result<Buffer> {
-                    let mut request = #client_call;
-                    #(#builder_calls)*
+                    let request = #client_call #(#builder_calls)*;
                     request
                         .await
                         .map(|item| Buffer::from(item.encode_to_vec()))
@@ -446,8 +442,7 @@ impl NapiBackend {
                     &self,
                     #(#param_defs,)*
                 ) -> napi::Result<#ret> {
-                    let mut request = #client_call;
-                    #(#builder_calls)*
+                    let request = #client_call #(#builder_calls)*;
                     request
                         .await
                         .default_error()
@@ -471,35 +466,26 @@ impl SetterRender for NapiBackend {
         if matches!(setter.field_type.base_type, BaseType::Map(_, _))
             || setter.field_type.is_repeated
         {
-            // Maps and repeated fields arrive `Option`-wrapped; guard before forwarding.
-            quote! {
-                if let Some(#param_ident) = #param_ident {
-                    request = request.#with_method(#param_ident);
-                }
-            }
+            // Maps and repeated fields arrive `Option`-wrapped: one left out is the empty
+            // collection, which the request holds anyway.
+            quote! { .#with_method(#param_ident.unwrap_or_default()) }
         } else if let BaseType::Enum(enum_name) = &setter.field_type.base_type {
             // Enums cross as `Option<i32>`; convert to `Option<E>` (the bare enum the builder's
             // `with_*` setter expects) and drop invalid values. prost enums impl `TryFrom<i32>`;
             // buffa enums use `Enumeration::from_i32`.
             match self.runtime {
                 Runtime::Prost => quote! {
-                    request = request.#with_method(
-                        #param_ident.map(|v| v.try_into().ok()).flatten()
-                    );
+                    .#with_method(#param_ident.map(|v| v.try_into().ok()).flatten())
                 },
                 Runtime::Buffa => {
                     let enum_ty = enum_rust_type_path(enum_name);
                     quote! {
-                        request = request.#with_method(
-                            #param_ident.and_then(<#enum_ty as buffa::Enumeration>::from_i32)
-                        );
+                        .#with_method(#param_ident.and_then(<#enum_ty as buffa::Enumeration>::from_i32))
                     }
                 }
             }
         } else {
-            quote! {
-                request = request.#with_method(#param_ident);
-            }
+            quote! { .#with_method(#param_ident) }
         }
     }
 }

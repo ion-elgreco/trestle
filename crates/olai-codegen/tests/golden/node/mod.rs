@@ -45,13 +45,13 @@ impl NapiExampleClient {
 
     #[napi(catch_unwind)]
     pub async fn create_catalog(&self) -> napi::Result<Buffer> {
-        let mut request = self.client.create_catalog();
+        let request = self.client.create_catalog();
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
 
     #[napi(catch_unwind)]
     pub async fn list_catalogs(&self, max_results: i32) -> napi::Result<Vec<Buffer>> {
-        let mut request = self.client.list_catalogs(max_results, page_token);
+        let request = self.client.list_catalogs(max_results, page_token);
         request
             .into_stream()
             .map_ok(|item| Buffer::from(item.encode_to_vec()))
@@ -66,7 +66,7 @@ impl NapiExampleClient {
         env: Env,
         max_results: i32,
     ) -> napi::Result<ReadableStream<'_, Buffer>> {
-        let mut request = self.client.list_catalogs(max_results, page_token);
+        let request = self.client.list_catalogs(max_results, page_token);
         ReadableStream::new(
             &env,
             request
@@ -83,7 +83,7 @@ impl NapiExampleClient {
         &self,
         catalog_id: String,
     ) -> napi::Result<Buffer> {
-        let mut request = self.client.generate_catalog_token(catalog_id);
+        let request = self.client.generate_catalog_token(catalog_id);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
 
@@ -93,13 +93,13 @@ impl NapiExampleClient {
         tags: Option<Vec<String>>,
         max_results: i32,
     ) -> napi::Result<Buffer> {
-        let mut request = self.client.list_by_tags(tags, max_results);
+        let request = self.client.list_by_tags(tags, max_results);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
 
     #[napi(catch_unwind)]
     pub async fn list_by_catalog_type(&self, catalog_type: i32) -> napi::Result<Buffer> {
-        let mut request = self
+        let request = self
             .client
             .list_by_catalog_type(
                 catalog_type
@@ -119,7 +119,7 @@ impl NapiExampleClient {
         catalog_name: String,
         schema_type: i32,
     ) -> napi::Result<Buffer> {
-        let mut request = self
+        let request = self
             .client
             .create_schema(
                 name,
@@ -140,9 +140,7 @@ impl NapiExampleClient {
         catalog_name: String,
         max_results: i32,
     ) -> napi::Result<Vec<Buffer>> {
-        let mut request = self
-            .client
-            .list_schemas(catalog_name, max_results, page_token);
+        let request = self.client.list_schemas(catalog_name, max_results, page_token);
         request
             .into_stream()
             .map_ok(|item| Buffer::from(item.encode_to_vec()))
@@ -158,9 +156,7 @@ impl NapiExampleClient {
         catalog_name: String,
         max_results: i32,
     ) -> napi::Result<ReadableStream<'_, Buffer>> {
-        let mut request = self
-            .client
-            .list_schemas(catalog_name, max_results, page_token);
+        let request = self.client.list_schemas(catalog_name, max_results, page_token);
         ReadableStream::new(
             &env,
             request
@@ -180,7 +176,7 @@ impl NapiExampleClient {
         max_results: i32,
         page_token: String,
     ) -> napi::Result<Buffer> {
-        let mut request = self
+        let request = self
             .client
             .list_tag_assignments(entity_type, entity_name, max_results, page_token);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
@@ -192,7 +188,7 @@ impl NapiExampleClient {
         entity_type: String,
         entity_name: String,
     ) -> napi::Result<Buffer> {
-        let mut request = self.client.create_tag_assignment(entity_type, entity_name);
+        let request = self.client.create_tag_assignment(entity_type, entity_name);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
 
@@ -203,9 +199,7 @@ impl NapiExampleClient {
         entity_name: String,
         tag_key: String,
     ) -> napi::Result<Buffer> {
-        let mut request = self
-            .client
-            .get_tag_assignment(entity_type, entity_name, tag_key);
+        let request = self.client.get_tag_assignment(entity_type, entity_name, tag_key);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
 
@@ -216,7 +210,7 @@ impl NapiExampleClient {
         entity_name: String,
         tag_key: String,
     ) -> napi::Result<Buffer> {
-        let mut request = self
+        let request = self
             .client
             .delete_tag_assignment(entity_type, entity_name, tag_key);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
@@ -229,7 +223,7 @@ impl NapiExampleClient {
         entity_name: String,
         tag_key: String,
     ) -> napi::Result<()> {
-        let mut request = self
+        let request = self
             .client
             .touch_tag_assignment(entity_type, entity_name, tag_key);
         request.await.default_error()

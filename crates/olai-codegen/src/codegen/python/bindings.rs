@@ -58,17 +58,6 @@ fn wrap_single_output(method: &MethodHandler<'_>) -> Option<(TokenStream, TokenS
     }
 }
 
-/// `mut` keyword for the `let request = ...` binding, but only when there are
-/// optional-field setter calls that actually mutate it. Without setters the
-/// binding is never reassigned, so `let mut` would trip `unused_mut`.
-fn mut_if_setters(builder_calls: &[TokenStream]) -> TokenStream {
-    if builder_calls.is_empty() {
-        quote! {}
-    } else {
-        quote! { mut }
-    }
-}
-
 /// PyO3 binding backend. Holds the configured Python error/result type idents so the method bodies
 /// can wrap calls in the right `PyResult`/error conversion.
 pub(crate) struct PyBackend<'a> {
@@ -642,7 +631,6 @@ impl PyBackend<'_> {
         let signature = pyo3_signature(method, parts.mode, python.keyword_only);
         let client_call = &parts.client_call;
         let builder_calls = generate_builder_pattern(method, is_list, self);
-        let mut_kw = mut_if_setters(&builder_calls);
         let MethodOutput { future, value } = output;
         let (py_type, convert) = match &value {
             Some((py_type, convert)) => (py_type.clone(), convert.clone()),
@@ -659,8 +647,7 @@ impl PyBackend<'_> {
                 py: Python,
                 #(#param_defs,)*
             ) -> #py_result_type<#py_type> {
-                let #mut_kw request = #client_call;
-                #(#builder_calls)*
+                let request = #client_call #(#builder_calls)*;
                 let runtime = #runtime_call;
                 py.detach(|| {
                     // `result` is the bare client value; `#convert` lifts it into the `Py`
@@ -696,8 +683,7 @@ impl PyBackend<'_> {
                 py: Python<'py>,
                 #(#param_defs,)*
             ) -> ::pyo3::PyResult<crate::codegen::py_future::PyFuture<'py, #async_type>> {
-                let #mut_kw request = #client_call;
-                #(#builder_calls)*
+                let request = #client_call #(#builder_calls)*;
                 crate::codegen::py_future::PyFuture::new(py, async move {
                     #[allow(clippy::let_unit_value, unused_variables)]
                     let result = #future
@@ -733,58 +719,50 @@ impl SetterRender for PyBackend<'_> {
         param_ident: &Ident,
         with_method: &Ident,
     ) -> TokenStream {
+        let ty = setter.field_type;
+        let collection = ty.is_repeated || matches!(ty.base_type, BaseType::Map(..));
         // A free-form JSON argument is any Python object: convert it to the field's value.
-        if let Some(json) = json_param(setter.field_type) {
-            let value = super::model_conversions::json_from_py(
-                json,
-                setter.field_type,
-                quote! { #param_ident },
-                true,
-            );
-            let value = if setter.field_type.is_repeated
-                || matches!(setter.field_type.base_type, BaseType::Map(..))
-            {
-                value
+        if let Some(json) = json_param(ty) {
+            let value = if collection {
+                let items =
+                    super::model_conversions::json_from_py(json, ty, quote! { #param_ident }, true);
+                quote! {
+                    match #param_ident {
+                        ::core::option::Option::Some(#param_ident) => #items,
+                        ::core::option::Option::None => ::std::vec::Vec::new(),
+                    }
+                }
             } else {
-                // The builder takes the bare value, not the `MessageField`.
                 let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
-                quote! { #from_py(&#param_ident)? }
+                quote! { #param_ident.as_ref().map(#from_py).transpose()? }
             };
-            return quote! {
-                if let Some(#param_ident) = #param_ident {
-                    request = request.#with_method(#value);
-                }
-            };
+            return quote! { .#with_method(#value) };
         }
-        // Maps and repeated fields are `Option`-wrapped at the binding boundary; guard before
-        // forwarding. Repeated message/enum elements are also converted from their `Py`
-        // wrapper to the bare model.
-        if matches!(setter.field_type.base_type, BaseType::Map(_, _))
-            || setter.field_type.is_repeated
-        {
-            let inner = if message_map_value(setter.field_type).is_some() {
-                convert_map_values(quote! { #param_ident })
-            } else if param_needs_conversion(setter.field_type) {
-                quote! { #param_ident.into_iter().map(::core::convert::Into::into).collect::<::std::vec::Vec<_>>() }
-            } else {
-                quote! { #param_ident }
-            };
-            quote! {
-                if let Some(#param_ident) = #param_ident {
-                    request = request.#with_method(#inner);
+        // Maps and repeated fields are `Option`s at the binding boundary: one left out is the
+        // empty collection, which the request holds anyway. Message and enum elements are
+        // converted from their `Py` wrappers to the bare models.
+        if collection {
+            let value = quote! { #param_ident.unwrap_or_default() };
+            let value = if message_map_value(ty).is_some() {
+                convert_map_values(value)
+            } else if param_needs_conversion(ty) {
+                quote! {
+                    #value
+                        .into_iter()
+                        .map(::core::convert::Into::into)
+                        .collect::<::std::vec::Vec<_>>()
                 }
-            }
-        } else if param_needs_conversion(setter.field_type) {
+            } else {
+                value
+            };
+            return quote! { .#with_method(#value) };
+        }
+        if param_needs_conversion(ty) {
             // Optional singular message/enum: `Option<PyWrapper>` → `Option<Inner>` for
             // the builder, which accepts `impl Into<Option<Inner>>`.
-            quote! {
-                request = request.#with_method(#param_ident.map(::core::convert::Into::into));
-            }
-        } else {
-            quote! {
-                request = request.#with_method(#param_ident);
-            }
+            return quote! { .#with_method(#param_ident.map(::core::convert::Into::into)) };
         }
+        quote! { .#with_method(#param_ident) }
     }
 }
 

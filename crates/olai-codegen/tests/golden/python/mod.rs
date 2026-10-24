@@ -42,8 +42,10 @@ impl PyExampleClient {
         py: Python,
         catalog: ::core::option::Option<PyCatalog>,
     ) -> PyExampleResult<PyCatalog> {
-        let mut request = self.client.create_catalog();
-        request = request.with_catalog(catalog.map(::core::convert::Into::into));
+        let request = self
+            .client
+            .create_catalog()
+            .with_catalog(catalog.map(::core::convert::Into::into));
         let runtime = get_runtime(py)?;
         py.detach(|| {
             #[allow(clippy::let_unit_value)]
@@ -186,8 +188,10 @@ impl PyExampleClient {
         entity_name: String,
         tag: ::core::option::Option<PyTagAssignment>,
     ) -> PyExampleResult<PyTagAssignment> {
-        let mut request = self.client.create_tag_assignment(entity_type, entity_name);
-        request = request.with_tag(tag.map(::core::convert::Into::into));
+        let request = self
+            .client
+            .create_tag_assignment(entity_type, entity_name)
+            .with_tag(tag.map(::core::convert::Into::into));
         let runtime = get_runtime(py)?;
         py.detach(|| {
             #[allow(clippy::let_unit_value)]
