@@ -126,7 +126,8 @@ impl<'a> PyBackend<'a> {
     ///
     /// With [`PythonOptions::module`], the root client goes in the module itself and the
     /// classes of each proto package in a submodule named after its service segment, which is
-    /// also put in `sys.modules` so that `import <module>.<service>` finds it. Without it, every
+    /// also put in `sys.modules` so that `import <module>.<service>` finds it: the generated
+    /// `register_submodule!` macro does both, once per submodule. Without it, every
     /// class goes in the module. With the generated runtime ([`PythonOptions::runtime`]) and
     /// `_async` methods, it first installs that runtime in `pyo3-async-runtimes`.
     fn register_fn(&self, services: &[&ServiceHandler<'_>], aggregate: &Ident) -> TokenStream {
@@ -148,30 +149,48 @@ impl<'a> PyBackend<'a> {
                 .push(format_ident!("Py{}", service.client_type().to_string()));
         }
 
-        let body = match &self.python.module {
+        // With a module path, each submodule is registered by `register_submodule!`, which goes
+        // before `register`, as a macro is defined before its use.
+        let (helpers, body) = match &self.python.module {
             Some(root) => {
                 let children = groups.iter().map(|(segment, classes)| {
-                    let full = format!("{root}.{segment}");
                     quote! {
-                        let child = ::pyo3::types::PyModule::new(py, #segment)?;
-                        #(child.add_class::<#classes>()?;)*
-                        module.add_submodule(&child)?;
-                        modules.set_item(#full, &child)?;
+                        register_submodule!(module, #segment, [#(#classes),*])?;
                     }
                 });
-                quote! {
-                    let py = module.py();
-                    let modules = py.import("sys")?.getattr("modules")?;
+                let helpers = quote! {
+                    /// The extension module, as Python imports it.
+                    pub const CORE_MODULE: &str = #root;
+
+                    /// Register the submodule `<CORE_MODULE>.<name>` with its classes. It also
+                    /// goes in `sys.modules`, so `import <CORE_MODULE>.<name>` finds it.
+                    macro_rules! register_submodule {
+                        ($parent:expr, $mod_name:expr, [$($type:ty),* $(,)?]) => {{
+                            let py = $parent.py();
+                            let child = ::pyo3::types::PyModule::new(py, $mod_name)?;
+                            $(
+                                child.add_class::<$type>()?;
+                            )*
+                            $parent.add_submodule(&child)?;
+                            py.import("sys")?
+                                .getattr("modules")?
+                                .set_item(format!("{}.{}", CORE_MODULE, $mod_name), child)
+                        }};
+                    }
+                };
+                let body = quote! {
                     module.add_class::<#aggregate>()?;
                     #(#children)*
-                }
+                };
+                (helpers, body)
             }
             None => {
                 let classes = groups.values().flatten();
-                quote! {
+                let body = quote! {
                     module.add_class::<#aggregate>()?;
                     #(module.add_class::<#classes>()?;)*
-                }
+                };
+                (quote! {}, body)
             }
         };
         // With the generated runtime, the `_async` methods run on it too.
@@ -183,6 +202,8 @@ impl<'a> PyBackend<'a> {
             .is_some()
             .then(|| quote! { crate::codegen::error::add_exceptions(module)?; });
         quote! {
+            #helpers
+
             /// Add the generated classes to the extension module `module`.
             pub fn register(module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>) -> ::pyo3::PyResult<()> {
                 #init_async
