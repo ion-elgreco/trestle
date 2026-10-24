@@ -175,6 +175,20 @@ message SearchWidgetsRequest {
   map<string, google.protobuf.ListValue> filters = 3 [(google.api.field_behavior) = REQUIRED];
 }
 
+message TagWidgetRequest {
+  // The name of the widget: a path value, which the body leaves out.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  // The tag to add.
+  string tag = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RenameWidgetRequest {
+  // The name of the widget: a path value, which the body keeps too.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  // The new name.
+  string new_name = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
 message StreamWidgetsRequest {
   // Only the widgets whose names start with this.
   optional string prefix = 1;
@@ -219,6 +233,22 @@ service ProbeService {
   rpc SearchWidgets(SearchWidgetsRequest) returns (ListWidgetsResponse) {
     option (google.api.http) = {
       get: "/api/v1/search"
+      body: "*"
+    };
+  }
+
+  // Tag a widget: a body next to a path value.
+  rpc TagWidget(TagWidgetRequest) returns (Empty) {
+    option (google.api.http) = {
+      post: "/api/v1/widgets/{name}/tags"
+      body: "*"
+    };
+  }
+
+  // Rename a widget: a body that keeps the path value (`path_fields_in_body_methods`).
+  rpc RenameWidget(RenameWidgetRequest) returns (Empty) {
+    option (google.api.http) = {
+      post: "/api/v1/widgets/{name}/rename"
       body: "*"
     };
   }

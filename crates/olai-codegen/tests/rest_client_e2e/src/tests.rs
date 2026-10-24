@@ -167,6 +167,22 @@ async fn search_widgets(State(seen): State<Seen>, body: Bytes) -> Response {
     axum::Json(json!({"widgets": widgets})).into_response()
 }
 
+async fn tag_widget(State(seen): State<Seen>, Path(name): Path<String>, body: Bytes) -> Response {
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    seen.push(format!("tag {name} body {body}"));
+    StatusCode::OK.into_response()
+}
+
+async fn rename_widget(
+    State(seen): State<Seen>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    seen.push(format!("rename {name} body {body}"));
+    StatusCode::OK.into_response()
+}
+
 async fn stream_widgets(uri: OriginalUri) -> Response {
     let prefix = uri
         .query()
@@ -199,6 +215,8 @@ async fn serve() -> (url::Url, Seen) {
             get(get_widget).delete(delete_widget).head(widget_exists),
         )
         .route("/api/v1/search", get(search_widgets))
+        .route("/api/v1/widgets/{name}/tags", post(tag_widget))
+        .route("/api/v1/widgets/{name}/rename", post(rename_widget))
         .route("/api/v1/widget-lines", get(stream_widgets))
         .route("/api/v1/widgets/{name}/version", get(widget_version))
         .route("/auth/tokens", post(exchange_token))
@@ -465,6 +483,25 @@ async fn head_requests_and_get_bodies() {
     assert!(seen.contains(&"HEAD w".to_string()), "{seen:?}");
     assert!(
         seen.contains(&r#"GET body {"prefix":"w","tags":["a"],"filters":{"t":[1,2]}}"#.to_string()),
+        "{seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn path_values_stay_out_of_the_body() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    client.tag_widget("w", "blue").await.unwrap();
+    // A method of `path_fields_in_body_methods` keeps them.
+    client.rename_widget("w", "v").await.unwrap();
+    // The name is in the path only: a strict server rejects fields that it does not know.
+    let seen = seen.all();
+    assert!(
+        seen.contains(&r#"tag w body {"tag":"blue"}"#.to_string()),
+        "{seen:?}"
+    );
+    assert!(
+        seen.contains(&r#"rename w body {"name":"w","new_name":"v"}"#.to_string()),
         "{seen:?}"
     );
 }

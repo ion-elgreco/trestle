@@ -287,6 +287,10 @@ pub struct RustClient {
     /// RPCs (`package.Service.Method`) whose request body is sent form-encoded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub form_encoded_methods: Vec<String>,
+    /// RPCs (`package.Service.Method`) whose request body keeps the fields that go in the URL
+    /// path, for APIs that want them in both places.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_fields_in_body_methods: Vec<String>,
 }
 
 /// The JSON error body that the generated error module reads.
@@ -647,6 +651,7 @@ mod tests {
              \x20     error_module:\n\
              \x20       code_enum: demo.v1.ErrorCode\n\
              \x20     form_encoded_methods: [demo.v1.TokenService.ExchangeToken]\n\
+             \x20     path_fields_in_body_methods: [demo.v1.UserService.ReplaceUser]\n\
              \x20   python:\n\
              \x20     output: python/client/src\n\
              \x20     error_type: PyDemoError\n\
@@ -675,6 +680,10 @@ mod tests {
         assert_eq!(errors.code_field, "error_code");
         assert_eq!(errors.details_field.as_deref(), Some("details"));
         assert_eq!(errors.code_enum.as_deref(), Some("demo.v1.ErrorCode"));
+        assert_eq!(
+            rust.path_fields_in_body_methods,
+            ["demo.v1.UserService.ReplaceUser"]
+        );
         let py = &g.clients.python.as_ref().unwrap().options;
         assert!(py.frozen_models && py.str_enums && py.hide_unspecified && py.runtime);
         assert_eq!(py.constructors, PyConstructors::Inputs);

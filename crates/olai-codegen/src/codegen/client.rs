@@ -30,12 +30,10 @@ pub(crate) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
             "{}.{}.{}",
             service.plan.package, service.plan.service_name, method.plan.metadata.method_name
         );
-        let form_body = service
-            .config
-            .rest_client
-            .form_encoded_methods
-            .contains(&full_name);
-        let method_code = client_method(method, form_body)?;
+        let options = &service.config.rest_client;
+        let form_body = options.form_encoded_methods.contains(&full_name);
+        let path_fields_in_body = options.path_fields_in_body_methods.contains(&full_name);
+        let method_code = client_method(method, form_body, path_fields_in_body)?;
         method_tokens.push(method_code);
     }
 
@@ -126,11 +124,17 @@ pub(crate) fn transport_tokens(
 }
 
 /// Generate client method implementation. `form_body` sends the request body form-encoded
-/// instead of as JSON.
+/// instead of as JSON. The body leaves out the fields that go in the URL path, as
+/// `google.api.http` maps them, since a strict server rejects fields that it does not know;
+/// `path_fields_in_body` keeps them.
 ///
 /// A server-streaming method reads the body as NDJSON, one output message per line. Output fields
 /// with a `response_header` come from the response headers; their body may be empty.
-pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> Result<TokenStream> {
+pub fn client_method(
+    method: MethodHandler<'_>,
+    form_body: bool,
+    path_fields_in_body: bool,
+) -> Result<TokenStream> {
     let doc_attrs = doc_tokens(method.plan.metadata.documentation.as_deref());
     let method_name = method.plan.base_method_ident();
     let input_type_ident = method.input_type();
@@ -148,9 +152,32 @@ pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> Result<Token
             format_ident!("_request")
         };
 
+    // The path values are in the URL, so the body leaves them out: it is a copy of the request
+    // with those fields at their defaults, which the JSON and form serializers skip.
+    let path_fields: Vec<_> = if method.plan.has_request_body
+        && method.plan.formats_path_values()
+        && !path_fields_in_body
+    {
+        method
+            .plan
+            .path_parameters()
+            .map(|param| crate::utils::field_ident(&param.name))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let (body_copy, body) = if path_fields.is_empty() {
+        (quote! {}, quote! { request })
+    } else {
+        let copy = quote! {
+            let mut body = request.clone();
+            #(body.#path_fields = Default::default();)*
+        };
+        (copy, quote! { &body })
+    };
     let body_handling = match (method.plan.has_request_body, form_body) {
-        (true, false) => quote! { .json(request) },
-        (true, true) => quote! { .form(request) },
+        (true, false) => quote! { .json(#body) },
+        (true, true) => quote! { .form(#body) },
         (false, _) => quote! {},
     };
 
@@ -173,6 +200,7 @@ pub fn client_method(method: MethodHandler<'_>, form_body: bool) -> Result<Token
         pub async fn #method_name(&self, #request_ident: &#input_type_ident) -> Result<#result_type> {
             #url_formatting
             #query_handling
+            #body_copy
             let response = self.client.#http_method(url)#body_handling.send().await?;
             #not_found
             if !response.status().is_success() {

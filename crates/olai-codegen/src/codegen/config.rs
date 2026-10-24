@@ -456,6 +456,11 @@ pub struct RestClientOptions {
     /// (`application/x-www-form-urlencoded`) instead of as JSON. The response is still JSON.
     pub form_encoded_methods: Vec<String>,
 
+    /// RPCs, as `package.Service.Method`, whose request body keeps the fields that go in the URL
+    /// path. By `google.api.http` the body leaves them out; some APIs want them in both places
+    /// and check that the values match.
+    pub path_fields_in_body_methods: Vec<String>,
+
     /// Proto packages whose query parameters are sent by their JSON (lowerCamelCase) name, as
     /// their bodies are (`startIndex`, not `start_index`). Elsewhere a query parameter is sent
     /// by its proto name, or by its `json_name` when the proto sets one that differs from the
