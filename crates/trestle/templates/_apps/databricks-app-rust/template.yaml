@@ -67,6 +67,8 @@ components:
 template_context:
   has_app: true
   app_service_name: "{{ project_name | kebab_case }}-server"
+  # The proto package directory. A filter in a path (`|`) cannot be checked out on Windows.
+  project_name_snake: "{{ project_name | snake_case }}"
   app_port: 8080
   # Baked-in defaults that replace the dropped prompts (rust_edition, license).
   rust_edition: "2024"
