@@ -40,7 +40,7 @@ impl GenerateConfig {
         // the same directory, so `mod.rs` includes the buf-written model files as
         // plain siblings (`./<pkg>.rs`).
         let models_root = resolve_dir(&self.models.dir)?;
-        let common = resolve_dir_joined(&self.models.dir, MODELS_GEN_SUBDIR)?;
+        let common = Some(resolve_dir_joined(&self.models.dir, MODELS_GEN_SUBDIR)?);
         let models = Some(models_root);
 
         let server = self

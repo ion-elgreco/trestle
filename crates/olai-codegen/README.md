@@ -121,13 +121,15 @@ let metadata = parse_file_descriptor_set(&fds)?;
 let config = CodeGenConfig {
     context_type_path: "crate::RequestContext".into(),
     result_type_path: "crate::Result".into(),
-    output: CodeGenOutput { common: "src/gen/common".into(), ..Default::default() },
+    output: CodeGenOutput { common: Some("src/gen/common".into()), ..Default::default() },
     ..Default::default()
 };
 generate_code(&metadata, &config)?;
 ```
 
-See the rustdoc for the full `CodeGenConfig` / `CodeGenOutput` field reference.
+See the rustdoc for the full `CodeGenConfig` / `CodeGenOutput` field reference. A client-only
+crate sets `common` to `None`: no Axum extractors are written, and the models `mod.rs` does not
+declare them. The `server` output needs them.
 
 ## WASM / browser clients
 

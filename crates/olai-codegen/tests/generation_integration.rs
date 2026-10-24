@@ -67,7 +67,7 @@ fn rust_config(tmp: &Path) -> CodeGenConfig {
         connect_client_path: None,
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: Some(models),
             models_subdir: "_gen".into(),
             server: Some(server),
@@ -188,7 +188,7 @@ fn wasm_bindings_and_dts_are_emitted() {
         connect_client_path: None,
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: None,
             models_subdir: "_gen".into(),
             server: None,
@@ -627,7 +627,7 @@ fn node_ts_bindings_generated() {
         connect_client_path: None,
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: None,
             models_subdir: "_gen".into(),
             server: None,
@@ -781,4 +781,39 @@ fn rest_client_and_python_options_generate_valid_code() {
         bindings.contains("extends = ExampleError") && bindings.contains("add_exceptions(module)"),
         "PyO3 exception classes missing"
     );
+}
+
+// ── Without the common (extractor) output ────────────────────────────────────
+
+/// A client-only config without `common`: no extractors are written, and the models `mod.rs`
+/// does not declare them.
+#[test]
+fn no_common_output_leaves_out_the_extractors() {
+    let tmp = TempDir::new().unwrap();
+    let mut config = rust_config(tmp.path());
+    config.output.common = None;
+    config.output.server = None;
+    generate_code(&metadata(), &config).expect("generation succeeds");
+
+    let models = tmp.path().join("models/_gen");
+    assert!(
+        !models.join("extractors").exists(),
+        "no extractors without `common`"
+    );
+    let models_mod = std::fs::read_to_string(models.join("mod.rs")).expect("models mod.rs");
+    assert!(
+        !models_mod.contains("extractors"),
+        "the models mod.rs must not declare the extractors"
+    );
+    syn::parse_file(&models_mod).expect("the models mod.rs is valid Rust");
+}
+
+/// The server routes need the extractors of the common output.
+#[test]
+fn server_output_needs_the_common_output() {
+    let tmp = TempDir::new().unwrap();
+    let mut config = rust_config(tmp.path());
+    config.output.common = None;
+    let err = generate_code(&metadata(), &config).expect_err("a server needs `common`");
+    assert!(err.to_string().contains("CodeGenOutput::common"), "{err}");
 }

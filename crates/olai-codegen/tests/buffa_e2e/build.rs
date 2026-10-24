@@ -60,7 +60,7 @@ fn main() {
         connect_client_path: None,
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common: common_dir,
+            common: Some(common_dir),
             models: Some(models_dir),
             models_subdir: "_gen".into(),
             server: None,

@@ -30,7 +30,7 @@ fn make_test_config(
         connect_client_path: None,
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: None,
             models_subdir: "_gen".to_string(),
             server: None,

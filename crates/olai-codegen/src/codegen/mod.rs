@@ -209,8 +209,10 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
         models_path_crate.validate_for(&service.base_path)?;
     }
 
-    let common_code = generate_common_code(&plan, metadata, config)?;
-    output::write_generated_code(&common_code, &config.output.common)?;
+    if let Some(ref common_dir) = config.output.common {
+        let common_code = generate_common_code(&plan, metadata, config)?;
+        output::write_generated_code(&common_code, common_dir)?;
+    }
 
     if config.output.models.is_some() {
         let subdir = config
@@ -264,6 +266,7 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
             &plan.services,
             include_labels,
             include_pyo3_impls,
+            config.output.common.is_some(),
             metadata,
             config.runtime,
         );
@@ -889,6 +892,8 @@ fn generate_client_main_module(
 /// the includes are plain sibling references.
 ///
 /// When `include_labels` is `true`, also emits `pub mod labels; pub use labels::{ObjectLabel, Resource};`.
+/// When `include_extractors` is `true`, also declares the Axum extractors of the common
+/// output, `pub mod extractors;`.
 ///
 /// `metadata` is used to discover all resource-annotated messages (even those not returned
 /// directly by an RPC) so they can be included in `pub use` re-exports.
@@ -896,6 +901,7 @@ pub fn generate_models_mod(
     services: &[ServicePlan],
     include_labels: bool,
     include_pyo3_impls: bool,
+    include_extractors: bool,
     metadata: &CodeGenMetadata,
     runtime: Runtime,
 ) -> String {
@@ -1015,7 +1021,7 @@ pub fn generate_models_mod(
         quote! {}
     };
 
-    // The Axum extractors are always co-located in this directory under an
+    // The Axum extractors, when generated, are co-located in this directory under an
     // `extractors/` subdir (the common generator wrote `extractors/<svc>/...`
     // here), and this `mod.rs` overwrites the top-level `mod.rs` the common
     // generator emitted — so it must re-declare the `extractors` module.
@@ -1023,10 +1029,14 @@ pub fn generate_models_mod(
     // `FromRequest`/`FromRequestParts` impls never compile and the generated
     // route fns can't be mounted. Nesting under `extractors` also avoids the
     // per-service module names clashing with the model package modules above.
-    let extractors_mod = format_ident!("{EXTRACTORS_SUBDIR}");
-    let common_mods: TokenStream = quote! {
-        #[cfg(feature = "axum")]
-        pub mod #extractors_mod;
+    let common_mods: TokenStream = if include_extractors {
+        let extractors_mod = format_ident!("{EXTRACTORS_SUBDIR}");
+        quote! {
+            #[cfg(feature = "axum")]
+            pub mod #extractors_mod;
+        }
+    } else {
+        quote! {}
     };
 
     // Lints to silence across this module and every `include!`d model file below.

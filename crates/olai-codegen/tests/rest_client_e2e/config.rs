@@ -74,7 +74,7 @@ fn demo_config(out: &Path) -> CodeGenConfig {
             json_query_packages: vec![],
         },
         output: CodeGenOutput {
-            common: gen_dir.clone(),
+            common: Some(gen_dir.clone()),
             models: Some(models_dir),
             models_subdir: "_gen".into(),
             server: None,

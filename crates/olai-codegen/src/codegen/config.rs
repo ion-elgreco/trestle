@@ -612,6 +612,13 @@ impl CodeGenConfig {
 
     /// Check the options that need other options.
     pub(crate) fn validate_options(&self) -> Result<()> {
+        if self.output.server.is_some() && self.output.common.is_none() {
+            return Err(Error::Build(
+                "the server routes take the requests as Axum extractors: the server output \
+                 needs `CodeGenOutput::common`"
+                    .into(),
+            ));
+        }
         let python = self.python_options();
         if self.output.python.is_some() {
             if python.str_enums && python.package.is_none() {
@@ -680,13 +687,14 @@ impl CodeGenConfig {
 
 /// Output directory configuration for code generation.
 ///
-/// Only `common` is required. All other outputs are optional — set to `None` to skip that
-/// output entirely. For example, a server-only crate can omit `client`, and a client-only
-/// crate can omit `server`.
+/// All outputs are optional — set to `None` to skip that output entirely. For example, a
+/// server-only crate can omit `client`, and a client-only crate can omit `server` and
+/// `common`.
 #[derive(Debug, Clone)]
 pub struct CodeGenOutput {
-    /// Output directory for common (shared extractor) code.
-    pub common: PathBuf,
+    /// Output directory for common (shared extractor) code: the Axum request extractors of
+    /// the server. Generation is skipped when `None`; the `server` output needs it.
+    pub common: Option<PathBuf>,
     /// Parent models directory (e.g. `crates/common/src/models`).
     ///
     /// When `Some`, the generator writes `labels.rs`, `pyo3_impls.rs`, and `mod.rs`

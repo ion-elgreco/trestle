@@ -828,7 +828,7 @@ mod tests {
             connect_client_path: None,
             rest_client: Default::default(),
             output: CodeGenOutput {
-                common: "/tmp/c".into(),
+                common: Some("/tmp/c".into()),
                 models: None,
                 models_subdir: "_gen".into(),
                 server: None,

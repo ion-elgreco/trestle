@@ -86,7 +86,7 @@ fn full_config(tmp: &Path, runtime: Runtime) -> CodeGenConfig {
         connect_client_path: None,
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: Some(models),
             models_subdir: "_gen".into(),
             server: Some(server),
