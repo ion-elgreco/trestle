@@ -205,8 +205,9 @@ impl<'a> PyBackend<'a> {
 
 /// The `register_submodule!` macro of the bindings' `mod.rs`, as text: prettyplease prints a
 /// macro body as a token stream on few lines, and rustfmt leaves a body with repetitions as it
-/// is. It replaces [`REGISTER_SUBMODULE_PLACEHOLDER`].
-const REGISTER_SUBMODULE_MACRO: &str = r#"/// Register the submodule `<CORE_MODULE>.<name>` with its classes. It also goes in
+/// is. It replaces [`REGISTER_SUBMODULE_PLACEHOLDER`], after a blank line.
+const REGISTER_SUBMODULE_MACRO: &str = r#"
+/// Register the submodule `<CORE_MODULE>.<name>` with its classes. It also goes in
 /// `sys.modules`, so `import <CORE_MODULE>.<name>` finds it.
 ///
 /// Usage:
