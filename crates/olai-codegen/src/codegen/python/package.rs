@@ -89,7 +89,7 @@ pub(crate) fn public_modules<'a>(
             let mut out = format!("\"\"\"The classes of the `{segment}` API.\"\"\"\n\n");
             for (from, names) in &imports {
                 out.push_str(&format!("from {from} import (\n"));
-                for name in names.iter() {
+                for name in isort_order(names) {
                     out.push_str(&format!("    {name},\n"));
                 }
                 out.push_str(")\n");
@@ -103,6 +103,17 @@ pub(crate) fn public_modules<'a>(
             (format!("{segment}.py"), out)
         })
         .collect()
+}
+
+/// `names` in the order of isort (and ruff) within a `from` import: the constants (`ALL_CAPS`)
+/// first, then the others, each without case (`SharedDataObject` before `ShareInfo`).
+fn isort_order(names: &BTreeSet<String>) -> Vec<&String> {
+    let mut names: Vec<&String> = names.iter().collect();
+    names.sort_by_key(|name| {
+        let constant = name.len() > 1 && !name.chars().any(|c| c.is_lowercase());
+        (!constant, name.to_lowercase())
+    });
+    names
 }
 
 /// A Python docstring at `indent`, or `None` when `doc` is empty.
@@ -140,5 +151,16 @@ mod tests {
             Some("  \"\"\"First.\n  Second \\\"\\\"\\\" here.\n  \"\"\"\n")
         );
         assert_eq!(docstring(Some("  \n "), "    "), None);
+    }
+
+    #[test]
+    fn isort_order_puts_constants_first_and_ignores_case() {
+        let names: BTreeSet<String> = ["ShareInfo", "SharedDataObject", "ACL", "Share"]
+            .map(String::from)
+            .into();
+        assert_eq!(
+            isort_order(&names),
+            ["ACL", "Share", "SharedDataObject", "ShareInfo"]
+        );
     }
 }
