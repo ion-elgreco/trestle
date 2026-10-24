@@ -397,9 +397,13 @@ pub struct PythonOptions {
     /// `bindings.error_base_class`.
     #[serde(default)]
     pub error_module: bool,
-    /// The pure-Python package that gets `_enums.py`.
+    /// The pure-Python package that gets `_enums.py` and the `public_modules`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub package: Option<PythonPackage>,
+    /// A public module `<package>/<service>.py` per submodule of `module`, which re-exports
+    /// its classes and enums. Needs `package` and `module`.
+    #[serde(default)]
+    pub public_modules: bool,
 }
 
 /// Which generated Python model classes get a keyword constructor.
@@ -663,6 +667,7 @@ mod tests {
              \x20       runtime: true\n\
              \x20       str_enums: true\n\
              \x20       hide_unspecified: true\n\
+             \x20       public_modules: true\n\
              \x20       package:\n\
              \x20         dir: python/client/demo\n\
              \x20         name: demo\n";
@@ -686,6 +691,7 @@ mod tests {
         );
         let py = &g.clients.python.as_ref().unwrap().options;
         assert!(py.frozen_models && py.str_enums && py.hide_unspecified && py.runtime);
+        assert!(py.public_modules);
         assert_eq!(py.constructors, PyConstructors::Inputs);
         assert_eq!(py.module.as_deref(), Some("demo._core"));
         assert!(cfg.validate(false).is_ok());

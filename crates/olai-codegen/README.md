@@ -178,7 +178,8 @@ Every option is off by default.
 | `hide_unspecified` | The zero `*_UNSPECIFIED` value is not a member; a field that holds it reads as `None`. |
 | `stub_gen` | Annotate for `pyo3-stub-gen`, with the proto comments as docs, instead of writing the `.pyi`. |
 | `error_module` | Emit `codegen/error.rs`: client errors raise PyO3 exception classes, a base class (`bindings.error_base_class`) with `message`, `code`, `status` and `details`, and one subclass per kind of HTTP error status, which `register` adds to the module. Needs the client `error_module`. |
-| `package` | Where `_enums.py` goes: `{ dir, name }`. |
+| `package` | Where `_enums.py` and the public modules go: `{ dir, name }`. |
+| `public_modules` | A module `<package>/<service>.py` per submodule of `module`: it re-exports the classes of the submodule and the enums of its proto package, so users import `<package>.<service>`. Needs `package` and `module`. |
 
 `tests/rest_client_e2e` runs a client and Python bindings with all of these against a server.
 

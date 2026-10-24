@@ -334,6 +334,7 @@ fn lower_python_options(
         stub_gen: options.stub_gen,
         error_module,
         package,
+        public_modules: options.public_modules,
     })
 }
 

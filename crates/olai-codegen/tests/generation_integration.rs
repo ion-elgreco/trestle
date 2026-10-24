@@ -716,6 +716,7 @@ fn rest_client_and_python_options_generate_valid_code() {
                 dir: package.clone(),
                 name: "example".into(),
             }),
+            public_modules: true,
         },
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
@@ -772,6 +773,15 @@ fn rest_client_and_python_options_generate_valid_code() {
     assert!(
         !enums.contains("_UNSPECIFIED ="),
         "hidden zero values: {enums}"
+    );
+    // A public module per submodule: its classes and scoped client, and its enums.
+    let schemas = std::fs::read_to_string(package.join("schemas.py")).unwrap();
+    assert!(
+        schemas.contains("from example._core.schemas import (\n    DeleteSchemaResponse,")
+            && schemas.contains("    SchemaClient,\n)")
+            && schemas.contains("from example._enums import (\n    GetSchemaRequestView,")
+            && schemas.contains("    \"SchemaType\",\n]"),
+        "{schemas}"
     );
     assert!(
         !package.join("_errors.py").exists(),

@@ -42,26 +42,54 @@ pub(crate) fn helper_files(config: &crate::codegen::CodeGenConfig) -> Vec<(Strin
     files
 }
 
-/// The pure-Python file of the package, `_enums.py`, by file name, when its option is on and
-/// the project has enums.
+/// The pure-Python files of the package by file name, when their options are on: `_enums.py`
+/// when the project has enums, and the [`PythonOptions::public_modules`].
 pub(crate) fn package_files(
     config: &crate::codegen::CodeGenConfig,
     plan: &crate::analysis::GenerationPlan,
     metadata: &crate::parsing::CodeGenMetadata,
 ) -> Vec<(String, String)> {
     let python = config.python_options();
-    if python.package.is_none() || !python.str_enums {
+    let Some(package_config) = &python.package else {
         return Vec::new();
-    }
+    };
     let services: Vec<_> = plan.services.iter().collect();
     let classes = model_conversions::ModelClasses::new(&services, metadata, python);
-    if classes.enums.is_empty() {
-        return Vec::new();
+    let mut files = Vec::new();
+    if python.str_enums && !classes.enums.is_empty() {
+        files.push((
+            "_enums.py".to_string(),
+            package::enums_py(metadata, &classes.enums, python),
+        ));
     }
-    vec![(
-        "_enums.py".to_string(),
-        package::enums_py(metadata, &classes.enums, python),
-    )]
+    if let Some(module) = python.module.as_deref().filter(|_| python.public_modules) {
+        let handlers: Vec<_> = plan
+            .services
+            .iter()
+            .map(|plan| crate::codegen::ServiceHandler {
+                plan,
+                metadata,
+                config,
+            })
+            .collect();
+        let clients = handlers
+            .iter()
+            .filter(|s| s.emits_scoped_binding())
+            .map(|s| {
+                (
+                    package_segment(&s.plan.package),
+                    s.client_type().to_string(),
+                )
+            });
+        files.extend(package::public_modules(
+            module,
+            &package_config.name,
+            python.str_enums,
+            classes.public_names(),
+            clients,
+        ));
+    }
+    files
 }
 
 /// The `pyo3-stub-gen` attribute that goes before a `#[pyclass]`, with

@@ -279,6 +279,11 @@ pub struct PythonOptions {
     pub error_module: Option<PyErrorModuleConfig>,
     /// The pure-Python package file `_enums.py` (with [`str_enums`](Self::str_enums)).
     pub package: Option<PyPackageConfig>,
+    /// Write a public module `<package>/<service>.py` per submodule of
+    /// [`module`](Self::module): it re-exports the classes of the submodule and the enums of
+    /// its proto package, so that users import `my_pkg.<service>`, not the extension module.
+    /// Needs [`package`](Self::package) and [`module`](Self::module).
+    pub public_modules: bool,
 }
 
 /// The exception classes of the generated Python error module.
@@ -302,7 +307,8 @@ pub enum PyConstructors {
     Inputs,
 }
 
-/// Where the generated pure-Python file `_enums.py` goes.
+/// Where the generated pure-Python files go: `_enums.py` and the
+/// [`public_modules`](PythonOptions::public_modules).
 #[derive(Debug, Clone)]
 pub struct PyPackageConfig {
     /// Directory of the Python package (e.g. `python/my_pkg`).
@@ -621,6 +627,13 @@ impl CodeGenConfig {
         }
         let python = self.python_options();
         if self.output.python.is_some() {
+            if python.public_modules && (python.package.is_none() || python.module.is_none()) {
+                return Err(Error::Build(
+                    "the Python `public_modules` re-export the submodules of \
+                     `PythonOptions::module` in `PythonOptions::package`: they need both"
+                        .into(),
+                ));
+            }
             if python.str_enums && python.package.is_none() {
                 return Err(Error::Build(
                     "the Python `str_enums` write `_enums.py`: they need `PythonOptions::package`"

@@ -375,6 +375,21 @@ impl<'a> ModelClasses<'a> {
             Some((super::package_segment(package), wrapper_ident(name)))
         })
     }
+
+    /// The Python names of the enums and the messages, with the Python submodule segment of
+    /// their package and whether they are enums.
+    pub(crate) fn public_names(&self) -> impl Iterator<Item = (&'a str, String, bool)> {
+        let enums = self.enums.iter().map(|name| (*name, true));
+        let messages = self.messages.iter().map(|name| (*name, false));
+        enums.chain(messages).filter_map(|(name, is_enum)| {
+            let package = package_of(name, &self.packages)?;
+            Some((
+                super::package_segment(package),
+                python_class_name(name),
+                is_enum,
+            ))
+        })
+    }
 }
 
 /// Whether an enum value has no Python member: with

@@ -91,6 +91,12 @@ impl TrestleConfig {
                      `clients.python.options.package`",
                 ));
             }
+            if o.public_modules && (o.package.is_none() || o.module.is_none()) {
+                return Err(Error::other(
+                    "`clients.python.options.public_modules` re-export the submodules of \
+                     `module` in `package`: set both",
+                ));
+            }
             if o.hide_unspecified && !o.str_enums {
                 return Err(Error::other(
                     "`clients.python.options.hide_unspecified` needs `str_enums`",
