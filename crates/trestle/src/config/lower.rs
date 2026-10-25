@@ -163,6 +163,7 @@ impl GenerateConfig {
                 .filter(|(_, names)| **names == super::JsonFieldNames::Json)
                 .map(|(package, _)| package.clone())
                 .collect(),
+            user_agent: rust.and_then(|r| r.user_agent.clone()),
         }
     }
 
@@ -335,6 +336,7 @@ fn lower_python_options(
         error_module,
         package,
         public_modules: options.public_modules,
+        user_agent: options.user_agent.clone(),
     })
 }
 

@@ -688,6 +688,7 @@ fn rest_client_and_python_options_generate_valid_code() {
         form_encoded_methods: vec![],
         path_fields_in_body_methods: vec![],
         json_query_packages: vec![],
+        user_agent: Some("example-client".into()),
     };
     config.bindings = Some(BindingsConfig {
         aggregate_client_name: "ExampleClient".into(),
@@ -717,6 +718,7 @@ fn rest_client_and_python_options_generate_valid_code() {
                 name: "example".into(),
             }),
             public_modules: true,
+            user_agent: Some("example-python".into()),
         },
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
@@ -742,6 +744,12 @@ fn rest_client_and_python_options_generate_valid_code() {
         "error module missing"
     );
     assert!(client.contains("ignore_unknown_enum_values(true)"));
+    // The default `User-Agent`, outside the browser; the aggregate client can set another.
+    assert!(
+        client.contains("\"example-client/\"") && client.contains("not(target_arch = \"wasm32\")"),
+        "default User-Agent missing"
+    );
+    assert!(client.contains("pub fn with_user_agent("));
 
     let models = read_all(&tmp.path().join("models"));
     assert!(
@@ -759,6 +767,10 @@ fn rest_client_and_python_options_generate_valid_code() {
     assert!(bindings.contains("_async"), "async twins missing");
     assert!(bindings.contains("pub fn register("), "register missing");
     assert!(bindings.contains("PyFuture"), "PyFuture helper missing");
+    assert!(
+        bindings.contains("\"example-python/\""),
+        "Python User-Agent missing"
+    );
     assert!(
         bindings.contains("pub fn rt()") && !bindings.contains("get_runtime"),
         "the bindings use the generated runtime"

@@ -13,7 +13,8 @@ use crate::codegen::DemoClient;
 use crate::codegen::error::Error;
 use crate::models::demo::v1::{Color, CreateWidgetRequest, ErrorCode, Widget};
 
-/// What the server saw: the raw request paths, bodies, content types and authorization headers.
+/// What the server saw: the raw request paths, bodies, content types, authorization headers and
+/// user agents.
 #[derive(Clone, Default)]
 struct Seen(Arc<Mutex<Vec<String>>>);
 
@@ -34,6 +35,9 @@ fn record(seen: &Seen, uri: &OriginalUri, headers: &HeaderMap) {
     }
     if let Some(ct) = headers.get(header::CONTENT_TYPE) {
         seen.push(format!("content-type {}", ct.to_str().unwrap()));
+    }
+    if let Some(agent) = headers.get(header::USER_AGENT) {
+        seen.push(format!("user-agent {}", agent.to_str().unwrap()));
     }
 }
 
@@ -571,4 +575,35 @@ async fn bearer_token_goes_in_every_request_and_form_bodies_are_encoded() {
     // The token never shows in `Debug`.
     let transport = crate::codegen::transport::HttpClient::default().with_token("secret");
     assert!(!format!("{transport:?}").contains("secret"));
+}
+
+#[tokio::test]
+async fn user_agent_goes_in_every_request() {
+    let (base, seen) = serve().await;
+    let default = format!("user-agent demo-client/{}", env!("CARGO_PKG_VERSION"));
+    DemoClient::new_unauthenticated(base.clone())
+        .widget("w")
+        .delete()
+        .await
+        .unwrap();
+    DemoClient::new_with_token(base.clone(), "secret")
+        .widget("w")
+        .delete()
+        .await
+        .unwrap();
+    DemoClient::new_unauthenticated(base)
+        .with_user_agent("demo-cli/1.0")
+        .widget("w")
+        .delete()
+        .await
+        .unwrap();
+    let agents: Vec<String> = seen
+        .all()
+        .into_iter()
+        .filter(|e| e.starts_with("user-agent "))
+        .collect();
+    assert_eq!(
+        agents,
+        [default.clone(), default, "user-agent demo-cli/1.0".into()]
+    );
 }

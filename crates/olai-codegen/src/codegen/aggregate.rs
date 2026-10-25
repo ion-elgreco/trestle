@@ -137,9 +137,19 @@ pub(crate) fn generate(
             }
         }
     });
+    let user_agent = config.uses_reqwest_transport().then(|| {
+        quote! {
+            /// The same client, sending `user_agent` as the `User-Agent` of every request.
+            pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
+                self.client = self.client.with_user_agent(user_agent);
+                self
+            }
+        }
+    });
     let convenience_ctors = quote! {
         #token_ctors
         #wasm_ctor
+        #user_agent
     };
 
     let imports = generate_imports(&services, &transport_import);

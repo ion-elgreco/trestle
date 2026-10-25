@@ -291,6 +291,10 @@ pub struct RustClient {
     /// path, for APIs that want them in both places.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path_fields_in_body_methods: Vec<String>,
+    /// The product of the `User-Agent` that the `reqwest` transport sends by default:
+    /// `<product>/<version of the client crate>`. Not sent in the browser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
 }
 
 /// The JSON error body that the generated error module reads.
@@ -404,6 +408,10 @@ pub struct PythonOptions {
     /// its classes and enums. Needs `package` and `module`.
     #[serde(default)]
     pub public_modules: bool,
+    /// The product of the Python client's `User-Agent`: `<product>/<version of the binding
+    /// crate>`. Needs the `reqwest` transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
 }
 
 /// Which generated Python model classes get a keyword constructor.

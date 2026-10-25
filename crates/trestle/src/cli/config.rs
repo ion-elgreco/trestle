@@ -204,6 +204,7 @@ fn apply_flags(cfg: &mut TrestleConfig, args: &ConfigArgs) {
                 error_module: None,
                 form_encoded_methods: Vec::new(),
                 path_fields_in_body_methods: Vec::new(),
+                user_agent: None,
             });
         }
         if args.clients.contains(&ClientArg::Python) {
@@ -300,6 +301,7 @@ fn prompt_missing(cfg: &mut TrestleConfig) -> Result<()> {
             error_module: None,
             form_encoded_methods: Vec::new(),
             path_fields_in_body_methods: Vec::new(),
+            user_agent: None,
         });
     }
     if clients.contains(&ClientSel::Python) && cfg.generate.clients.python.is_none() {

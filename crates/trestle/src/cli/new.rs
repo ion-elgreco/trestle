@@ -565,6 +565,7 @@ fn emit_project_config(
                     error_module: None,
                     form_encoded_methods: Vec::new(),
                     path_fields_in_body_methods: Vec::new(),
+                    user_agent: None,
                 }),
                 python: None,
                 node,

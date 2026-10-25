@@ -6,8 +6,9 @@ use std::process::Command;
 
 use olai_codegen::postprocess::{JsonFieldNames, ModelRewrites};
 use olai_codegen::{
-    BindingsConfig, CodeGenConfig, CodeGenMetadata, CodeGenOutput, ErrorModuleConfig, PyConstructors,
-    PyErrorModuleConfig, PyPackageConfig, PythonOptions, REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions, Runtime,
+    BindingsConfig, CodeGenConfig, CodeGenMetadata, CodeGenOutput, ErrorModuleConfig,
+    PyConstructors, PyErrorModuleConfig, PyPackageConfig, PythonOptions,
+    REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions, Runtime,
 };
 
 /// The fixture directory (the one with `proto/`).
@@ -33,7 +34,10 @@ fn compile_descriptors(out: &Path) -> PathBuf {
         .expect("protoc on PATH");
     assert!(status.success(), "protoc failed");
     println!("cargo:rerun-if-changed={}", fixture.join("proto").display());
-    println!("cargo:rerun-if-changed={}", fixture.join("../../src").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        fixture.join("../../src").display()
+    );
     descriptors
 }
 
@@ -43,7 +47,12 @@ fn demo_config(out: &Path) -> CodeGenConfig {
     let models_dir = out.join("models");
     let gen_dir = models_dir.join("_gen");
     let package_dir = out.join("pkg").join("demo");
-    for dir in [&gen_dir, &out.join("client"), &out.join("python"), &package_dir] {
+    for dir in [
+        &gen_dir,
+        &out.join("client"),
+        &out.join("python"),
+        &package_dir,
+    ] {
         std::fs::create_dir_all(dir).unwrap();
     }
     CodeGenConfig {
@@ -72,6 +81,7 @@ fn demo_config(out: &Path) -> CodeGenConfig {
             form_encoded_methods: vec!["demo.v1.TokenService.ExchangeToken".into()],
             path_fields_in_body_methods: vec!["demo.v1.ProbeService.RenameWidget".into()],
             json_query_packages: vec![],
+            user_agent: Some("demo-client".into()),
         },
         output: CodeGenOutput {
             common: Some(gen_dir.clone()),
@@ -117,6 +127,8 @@ fn demo_config(out: &Path) -> CodeGenConfig {
                     dir: package_dir,
                     name: "demo".into(),
                 }),
+                public_modules: false,
+                user_agent: Some("demo-python".into()),
             },
         }),
     }

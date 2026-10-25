@@ -624,7 +624,10 @@ fn generate_client_code(
         .is_some();
 
     if config.uses_reqwest_transport() {
-        files.insert("transport.rs".to_string(), transport::generate());
+        files.insert(
+            "transport.rs".to_string(),
+            transport::generate(config.rest_client.user_agent.as_deref()),
+        );
     }
     if let Some(errors) = &config.rest_client.error_module {
         files.insert(

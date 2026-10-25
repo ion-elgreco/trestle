@@ -387,6 +387,12 @@ impl BindingBackend for PyBackend<'_> {
                 /// request as the bearer token.
             }
         });
+        let user_agent = self.python.user_agent.as_ref().map(|product| {
+            let prefix = format!("{product}/");
+            quote! {
+                let client = client.with_user_agent(concat!(#prefix, env!("CARGO_PKG_VERSION")));
+            }
+        });
         let register = self.register_fn(&sorted_services, &py_aggregate_client_ident);
 
         let tokens = quote! {
@@ -428,6 +434,7 @@ impl BindingBackend for PyBackend<'_> {
                         Some(token) => #aggregate_client_ident::new_with_token(base_url, token),
                         None => #aggregate_client_ident::new_unauthenticated(base_url),
                     };
+                    #user_agent
                     Ok(Self { client })
                 }
 

@@ -284,6 +284,10 @@ pub struct PythonOptions {
     /// its proto package, so that users import `my_pkg.<service>`, not the extension module.
     /// Needs [`package`](Self::package) and [`module`](Self::module).
     pub public_modules: bool,
+    /// The product of the `User-Agent` of the Python client:
+    /// `<product>/<version of the binding crate>`, instead of the Rust client's. Needs the
+    /// `reqwest` transport.
+    pub user_agent: Option<String>,
 }
 
 /// The exception classes of the generated Python error module.
@@ -472,6 +476,11 @@ pub struct RestClientOptions {
     /// by its proto name, or by its `json_name` when the proto sets one that differs from the
     /// default. The generated server extractors read the same keys.
     pub json_query_packages: Vec<String>,
+
+    /// The product of the `User-Agent` that the generated `reqwest` transport sends by default:
+    /// `<product>/<version of the client crate>`. The browser (`wasm32`) sends its own. Every
+    /// transport can set another one with `with_user_agent`. Needs the `reqwest` transport.
+    pub user_agent: Option<String>,
 }
 
 /// Shape of the JSON error body that the generated error module reads.
@@ -625,8 +634,22 @@ impl CodeGenConfig {
                     .into(),
             ));
         }
+        if self.rest_client.user_agent.is_some() && !self.uses_reqwest_transport() {
+            return Err(Error::Build(
+                "the default `User-Agent` is sent by the generated `reqwest` transport: \
+                 `RestClientOptions::user_agent` needs it"
+                    .into(),
+            ));
+        }
         let python = self.python_options();
         if self.output.python.is_some() {
+            if python.user_agent.is_some() && !self.uses_reqwest_transport() {
+                return Err(Error::Build(
+                    "the Python `User-Agent` is set on the generated `reqwest` transport: \
+                     `PythonOptions::user_agent` needs it"
+                        .into(),
+                ));
+            }
             if python.public_modules && (python.package.is_none() || python.module.is_none()) {
                 return Err(Error::Build(
                     "the Python `public_modules` re-export the submodules of \
