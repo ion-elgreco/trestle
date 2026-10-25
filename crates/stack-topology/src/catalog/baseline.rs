@@ -1075,10 +1075,12 @@ pub const MLFLOW_AI_GATEWAY_MODELS_DEFAULT: &str =
     "anthropic:claude-opus-5-5,anthropic:claude-sonnet-5-5,anthropic:claude-haiku-5-5";
 
 /// `mlflow` — experiment tracking and its built-in AI Gateway.
-/// the Databricks-shaped tracking API, the OTel ingest path, the AI Gateway, and the UI. It
-/// serves its whole surface under `/mlflow`, so the tracking API rewrites under that base, and
-/// the Databricks-shaped OTel (`/api/2.0/otel`) and AI Gateway (`/ai-gateway`) mounts rewrite
-/// onto the paths MLflow serves them at under it.
+///
+/// It fronts the Databricks-shaped tracking API, the OTel ingest path, the AI Gateway, and the
+/// UI. It serves its whole surface under `/mlflow`, so the tracking API
+/// (`/api/{2.0,3.0,4.0}/mlflow`) rewrites under that base, and the Databricks-shaped OTel
+/// (`/api/2.0/otel`) and AI Gateway (`/ai-gateway`) mounts rewrite onto the paths MLflow
+/// serves them at under it.
 fn mlflow() -> Arc<dyn Module> {
     let mut provides = Provides {
         helpers: vec![HelperService::init("mlflow-gateway-init")],
@@ -1164,6 +1166,10 @@ fn mlflow() -> Arc<dyn Module> {
             base_path: "/mlflow".into(),
             endpoints: vec![
                 Endpoint::api("tracking", 5000, "/api/2.0/mlflow", Rewrite::Inherit),
+                // MLflow 3's client also calls versioned APIs beside 2.0: traces, assessments and
+                // `server-info` under `/api/3.0/mlflow`, trace locations under `/api/4.0/mlflow`.
+                Endpoint::api("tracking_v3", 5000, "/api/3.0/mlflow", Rewrite::Inherit),
+                Endpoint::api("tracking_v4", 5000, "/api/4.0/mlflow", Rewrite::Inherit),
                 Endpoint::api("otel", 5000, "/api/2.0/otel", Rewrite::To("/mlflow".into())),
                 Endpoint::api(
                     "ai_gateway",
@@ -1261,8 +1267,9 @@ fn mlflow() -> Arc<dyn Module> {
 /// Both serve registered models, and an environment should have one registry. With UC present,
 /// the server's registry store is UC (`--registry-store-uri uc:…`, see the fragment), so
 /// MLflow's own registry API and UI read and write UC models, and clients get
-/// `MLFLOW_REGISTRY_URI` to talk to UC's API directly. UC stays optional: MLflow alone keeps
-/// its registry in its own database.
+/// `MLFLOW_REGISTRY_URI` to talk to UC's API directly (loading a version needs the credentials
+/// UC vends). The graph draws the link as an integration edge, and the server starts after UC.
+/// UC stays optional: MLflow alone keeps its registry in its own database.
 struct Mlflow(DataModule);
 
 impl Module for Mlflow {
@@ -1310,23 +1317,51 @@ impl Module for Mlflow {
         _knobs: &ResolvedKnobs,
         stack: &StackFacts,
     ) -> Cow<'_, BTreeMap<String, ClientValue>> {
-        if !stack.has("unity-catalog") {
+        let hosted_store = stack.is_hosted(Role::OBJECT_STORE);
+        if hosted_store && !stack.has("unity-catalog") {
             return Cow::Borrowed(&self.0.provides.client_env);
         }
-        // The MLflow client's OSS Unity Catalog registry: `uc:` + the origin it appends
-        // `/api/2.1/unity-catalog` to (UC's REST mount sits at the gateway root).
         let mut env = self.0.provides.client_env.clone();
-        env.insert(
-            "MLFLOW_REGISTRY_URI".into(),
-            ClientValue::module_endpoint(
-                "unity-catalog",
-                UNITY_CATALOG_SERVICE,
-                "rest",
-                UrlPart::Origin,
-            )
-            .with_prefix("uc:"),
-        );
+        // With the object store in the stack, artifacts go through the server's proxy
+        // (`--serve-artifacts`). Otherwise `server-info` has the client move them with presigned
+        // URLs, signed for the store's in-network endpoint, which a host client can't reach. A
+        // hosted store's URLs are signed for its public endpoint, so they work from anywhere and
+        // stay on.
+        if !hosted_store {
+            for key in [
+                "MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD",
+                "MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD",
+            ] {
+                env.insert(key.into(), ClientValue::literal("false"));
+            }
+        }
+        if stack.has("unity-catalog") {
+            // The MLflow client's OSS Unity Catalog registry: `uc:` + the origin it appends
+            // `/api/2.1/unity-catalog` to (UC's REST mount sits at the gateway root). The server's
+            // UC store already serves clients that only set the tracking URI, but just for
+            // registering: a version's download URI is UC's raw storage location, which
+            // `--serve-artifacts` doesn't proxy. Loading a version reads it with credentials UC
+            // vends, and only a client whose registry is UC asks UC for them.
+            env.insert(
+                "MLFLOW_REGISTRY_URI".into(),
+                ClientValue::module_endpoint(
+                    "unity-catalog",
+                    UNITY_CATALOG_SERVICE,
+                    "rest",
+                    UrlPart::Origin,
+                )
+                .with_prefix("uc:"),
+            );
+        }
         Cow::Owned(env)
+    }
+    fn integrates_with_in(&self, _knobs: &ResolvedKnobs, stack: &StackFacts) -> Vec<ModuleId> {
+        // The server's model registry is UC's when both are in the stack.
+        if stack.has("unity-catalog") {
+            vec![ModuleId::from("unity-catalog")]
+        } else {
+            Vec::new()
+        }
     }
 }
 
