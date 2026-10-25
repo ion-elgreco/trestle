@@ -84,6 +84,7 @@ pub mod projection;
 pub mod render;
 pub mod report;
 pub mod target;
+pub mod workspace;
 
 // --- model: the vocabulary types ---
 pub use model::connection::{
@@ -100,9 +101,10 @@ pub use catalog::credentials::{
 pub use catalog::deploy::{DeployCtx, DeployPhase, DeployStepSpec, RenderedStep};
 pub use catalog::module::{
     ClientNotebook, ClientValue, ConnectionBinding, DataModule, ExtraResource, GatewayTls,
-    HelperKind, HelperService, ImpersonatedHost, Knob, KnobKind, KnobRejection, Module, ModuleId,
-    PortDecl, PortMapping, Provides, PythonClient, Readiness, ReadyGate, RenderCtx, RenderSpec,
-    ResolvedKnobs, ResourceDemand, StackFacts, TemplateError, UrlPart, is_model_ref,
+    HelperKind, HelperService, ImpersonatedHost, Knob, KnobKind, KnobRejection, MeshNetwork,
+    Module, ModuleId, PortDecl, PortMapping, Provides, PythonClient, Readiness, ReadyGate,
+    RenderCtx, RenderSpec, ResolvedKnobs, ResourceDemand, StackFacts, TemplateError, UrlPart,
+    is_model_ref,
 };
 pub use catalog::{
     Catalog, DATA_ROOT_DEFAULT, DATA_ROOT_VAR, HOST_PORT_VAR_PREFIX, baseline_catalog,
@@ -145,6 +147,12 @@ pub use address::{AddressError, ServiceRef};
 
 // --- manifest: persist a user's choices, re-plan deterministically ---
 pub use manifest::{CatalogSource, EnvManifest, ManifestError, pin_dedicated_ports};
+
+// --- workspace: several environments on one host ---
+pub use workspace::{
+    MAX_SLOT, PortConflict, SLOT_PORT_STRIDE, WORKSPACE_FILE, WorkspaceEnv, WorkspaceError,
+    WorkspaceManifest, port_conflicts,
+};
 
 // --- report: a human-readable layout summary ---
 pub use report::layout_report;
