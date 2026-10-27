@@ -764,6 +764,10 @@ impl SetterRender for PyBackend<'_> {
             };
             return quote! { .#with_method(#value) };
         }
+        if ty.is_singular_bytes() {
+            let value = bytes_to_vec(quote! { #param_ident }, true);
+            return quote! { .#with_method(#value) };
+        }
         if param_needs_conversion(ty) {
             // Optional singular message/enum: `Option<PyWrapper>` → `Option<Inner>` for
             // the builder, which accepts `impl Into<Option<Inner>>`.
@@ -841,10 +845,31 @@ fn param_needs_conversion(ty: &UnifiedType) -> bool {
     )
 }
 
+/// The type that takes a singular `bytes` value from Python, `Option`al or not: `PyBackedBytes`,
+/// which takes `bytes` without copying it byte by byte, as a `Vec<u8>` would.
+pub(super) fn py_bytes_input(optional: bool) -> TokenStream {
+    match optional {
+        true => quote! { ::core::option::Option<::pyo3::pybacked::PyBackedBytes> },
+        false => quote! { ::pyo3::pybacked::PyBackedBytes },
+    }
+}
+
+/// The bytes of the [`py_bytes_input`] value `expr`, for the model.
+pub(super) fn bytes_to_vec(expr: TokenStream, optional: bool) -> TokenStream {
+    match optional {
+        true => quote! { #expr.map(|v| v.to_vec()) },
+        false => quote! { #expr.to_vec() },
+    }
+}
+
 /// Rewrite a rendered param `syn::Type` so a message/enum base type becomes its
-/// `Py` wrapper, preserving the `Option`/`Vec` cardinality wrapping. Scalars,
+/// `Py` wrapper, preserving the `Option`/`Vec` cardinality wrapping. A `bytes` param is
+/// `PyBackedBytes`, which takes `bytes` without copying it byte by byte. Other scalars,
 /// maps, and `()` are returned unchanged.
 fn wrap_param_type(ty: &UnifiedType, rendered: &syn::Type) -> TokenStream {
+    if ty.is_singular_bytes() {
+        return py_bytes_input(ty.is_optional);
+    }
     if let Some(value) = message_map_value(ty) {
         let wrapper = qualified_wrapper_ident(value);
         return quote! {
@@ -905,6 +930,9 @@ fn convert_param_value(ty: &UnifiedType, expr: TokenStream) -> TokenStream {
     }
     if message_map_value(ty).is_some() {
         return convert_map_values(expr);
+    }
+    if ty.is_singular_bytes() {
+        return bytes_to_vec(expr, ty.is_optional);
     }
     if !param_needs_conversion(ty) {
         return expr;

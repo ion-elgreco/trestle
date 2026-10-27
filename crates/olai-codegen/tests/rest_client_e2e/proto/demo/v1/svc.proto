@@ -217,6 +217,31 @@ message WidgetVersion {
   optional string etag = 3 [(olai.trestle.v1.response_header) = "ETag"];
 }
 
+message PutBlobRequest {
+  // The path of the blob, over several segments.
+  string path = 1 [(google.api.field_behavior) = REQUIRED];
+  // The bytes of the blob.
+  bytes data = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (olai.trestle.v1.raw_body) = true
+  ];
+}
+
+message GetBlobRequest {
+  // The path of the blob, over several segments.
+  string path = 1 [(google.api.field_behavior) = REQUIRED];
+  // The bytes to read, in the `Range` header.
+  optional string range = 2 [(olai.trestle.v1.request_header) = "Range"];
+}
+
+// A blob: its bytes from the body, its size from a header.
+message Blob {
+  // The bytes of the blob.
+  bytes data = 1 [(olai.trestle.v1.raw_body) = true];
+  // The size, from the `Content-Length` header.
+  optional int64 size = 2 [(olai.trestle.v1.response_header) = "Content-Length"];
+}
+
 // Requests that `google.api.http` writes in less common ways.
 service ProbeService {
   // Whether a widget exists: a `HEAD` request, which fails for a missing widget.
@@ -261,6 +286,19 @@ service ProbeService {
   // The version of a widget: fields from the response headers.
   rpc WidgetVersion(WidgetVersionRequest) returns (.demo.v1.WidgetVersion) {
     option (google.api.http) = {get: "/api/v1/widgets/{name}/version"};
+  }
+
+  // Store a blob: a raw request body, at a path value of several segments.
+  rpc PutBlob(PutBlobRequest) returns (Empty) {
+    option (google.api.http) = {
+      put: "/api/v1/blobs/{path=**}"
+      body: "data"
+    };
+  }
+
+  // Read a blob: a raw response body.
+  rpc GetBlob(GetBlobRequest) returns (Blob) {
+    option (google.api.http) = {get: "/api/v1/blobs/{path=**}"};
   }
 }
 

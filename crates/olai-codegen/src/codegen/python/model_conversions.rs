@@ -1311,8 +1311,10 @@ impl FieldAccessor {
             return self.json_getter(json);
         }
         let getter = self.getter_ident();
-        let ret = self.py_type();
-        let body = self.read_expr();
+        let (ret, body) = match self.ty.is_singular_bytes() {
+            true => self.bytes_getter(),
+            false => (self.py_type(), self.read_expr()),
+        };
         let doc = doc_tokens(self.documentation.as_deref());
         quote! {
             #doc
@@ -1323,6 +1325,39 @@ impl FieldAccessor {
         }
     }
 
+    /// The return type and body of the getter of a singular `bytes` field: a `Cow` that lends the
+    /// bytes, which PyO3 copies into `bytes` once, and the stubs show as `bytes`.
+    fn bytes_getter(&self) -> (TokenStream, TokenStream) {
+        let ident = &self.ident;
+        match self.is_optional_scalar() {
+            true => (
+                quote! { ::core::option::Option<::std::borrow::Cow<'_, [u8]>> },
+                quote! { self.0.#ident.as_deref().map(::std::borrow::Cow::Borrowed) },
+            ),
+            false => (
+                quote! { ::std::borrow::Cow<'_, [u8]> },
+                quote! { ::std::borrow::Cow::Borrowed(&self.0.#ident) },
+            ),
+        }
+    }
+
+    /// The type that a setter or constructor takes: the Python-visible type, but `bytes` for a
+    /// singular `bytes` field.
+    fn input_type(&self) -> TokenStream {
+        match self.ty.is_singular_bytes() {
+            true => super::bindings::py_bytes_input(self.is_optional_scalar()),
+            false => self.py_type(),
+        }
+    }
+
+    /// [`Self::input_type`] without its `Option`, for a required constructor argument.
+    fn input_base_type(&self) -> TokenStream {
+        match self.ty.is_singular_bytes() {
+            true => super::bindings::py_bytes_input(false),
+            false => self.base_py_type(),
+        }
+    }
+
     /// `#[setter]` accepting the Python-visible type and storing into the inner.
     fn setter(&self) -> TokenStream {
         if let Some(json) = self.json {
@@ -1330,7 +1365,7 @@ impl FieldAccessor {
         }
         let ident = &self.ident;
         let setter_name = format_ident!("set_{}", self.ident);
-        let arg = self.py_type();
+        let arg = self.input_type();
         let store = self.write_expr();
         quote! {
             #[setter(#ident)]
@@ -1481,6 +1516,9 @@ impl FieldAccessor {
     fn write_expr(&self) -> TokenStream {
         if self.ty.is_repeated {
             return self.write_repeated();
+        }
+        if self.ty.is_singular_bytes() {
+            return super::bindings::bytes_to_vec(quote! { value }, self.is_optional_scalar());
         }
         if let BaseType::Map(_, value) = &self.ty.base_type {
             // Message values arrive as their wrappers.
@@ -1962,9 +2000,9 @@ fn constructor(
             return quote! { #ident: ::pyo3::Bound<'_, ::pyo3::PyAny> };
         }
         let ty = if a.py_type_is_optional() {
-            a.base_py_type()
+            a.input_base_type()
         } else {
-            a.py_type()
+            a.input_type()
         };
         quote! { #ident: #ty }
     });
@@ -1977,7 +2015,7 @@ fn constructor(
         if a.json.is_some() {
             return quote! { #ident: ::core::option::Option<::pyo3::Bound<'_, ::pyo3::PyAny>> };
         }
-        let ty = a.py_type();
+        let ty = a.input_type();
         if a.py_type_is_optional() {
             quote! { #ident: #ty }
         } else {
@@ -2252,7 +2290,9 @@ mod tests {
             name: name.to_string(),
             json_name: None,
             response_header: None,
+            request_header: None,
             emit_unpopulated: false,
+            raw_body: false,
             unified_type: ty,
             documentation: None,
             oneof_variants: None,

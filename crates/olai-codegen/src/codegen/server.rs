@@ -32,9 +32,13 @@ use crate::{
 /// This generates:
 /// - FromRequestParts extractor implementations for path/query parameters
 /// - FromRequest extractor implementations for JSON body
+///
+/// A method with a raw body or a request header field gets no extractor: the server emitter refuses
+/// it.
 pub(super) fn generate_common(service: &ServiceHandler<'_>) -> crate::error::Result<String> {
     let extractor_impls = service
         .rest_methods()
+        .filter(|method| !beyond_server(method))
         .map(|method| from_request_extractor(&method))
         .collect_vec();
     let mod_path = service.models_path_crate();
@@ -68,6 +72,7 @@ pub(super) fn generate_common(service: &ServiceHandler<'_>) -> crate::error::Res
 }
 
 pub(super) fn generate_server(service: &ServiceHandler<'_>) -> crate::error::Result<String> {
+    refuse_unsupported(service)?;
     let handler_function_impls = service
         .rest_methods()
         .map(|method| axum_route_handler_impl(&method, &service.plan.handler_name))
@@ -94,6 +99,27 @@ pub(super) fn generate_server(service: &ServiceHandler<'_>) -> crate::error::Res
     };
 
     format_tokens(tokens)
+}
+
+/// Whether a method sends or reads a raw body (`(olai.trestle.v1.raw_body)`), or has a field in a
+/// request header (`(olai.trestle.v1.request_header)`): what the server emitter does not support.
+fn beyond_server(method: &MethodHandler<'_>) -> bool {
+    method.plan.raw_request_body.is_some()
+        || method.plan.raw_response_body.is_some()
+        || !method.plan.request_headers.is_empty()
+}
+
+/// The server emitter refuses a method with a raw body or a request header field, rather than
+/// give it an extractor that its client does not match.
+fn refuse_unsupported(service: &ServiceHandler<'_>) -> crate::error::Result<()> {
+    match service.rest_methods().find(beyond_server) {
+        Some(method) => Err(crate::Error::Build(format!(
+            "method `{}` has a raw body or a request header field, which the server emitter does \
+             not support",
+            method.plan.handler_function_name
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// Generate extractor implementation for a specific method.
@@ -442,6 +468,9 @@ mod tests {
             // Server extractor tests don't consult `shape`; the test service has no resource.
             shape: crate::analysis::MethodShape::Unbound,
             has_http_route: true,
+            raw_request_body: None,
+            raw_response_body: None,
+            request_headers: Vec::new(),
         }
     }
 

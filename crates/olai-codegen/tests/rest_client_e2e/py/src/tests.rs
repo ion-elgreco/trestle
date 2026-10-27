@@ -119,7 +119,22 @@ fn serve() -> (String, tokio::runtime::Runtime) {
             )
             .route("/api/v1/search", get(search_widgets))
             .route("/api/v1/widget-lines", get(stream_widgets))
-            .route("/api/v1/widgets/{name}/version", get(widget_version));
+            .route("/api/v1/widgets/{name}/version", get(widget_version))
+            .route(
+                "/api/v1/blobs/{*path}",
+                axum::routing::put(|body: axum::body::Bytes| async move {
+                    assert_eq!(body.as_ref(), b"\x00\x01\xff");
+                    StatusCode::NO_CONTENT
+                })
+                .get(
+                    |Path(path): Path<String>, headers: axum::http::HeaderMap| async move {
+                        match headers.get("Range").and_then(|v| v.to_str().ok()) {
+                            Some(range) => format!("range:{range}"),
+                            None => format!("blob:{path}"),
+                        }
+                    },
+                ),
+            );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -308,6 +323,12 @@ assert [w.name for w in client.stream_widgets()] == ["w1", "w2"]
 version = client.widget_version("w")
 assert (version.name, version.version, version.etag) == ("w", 7, "abc"), version
 
+# A raw body: `bytes` in and out.
+assert client.put_blob("x/y", b"\x00\x01\xff") is None
+blob = client.get_blob("x/y")
+assert (blob.data, blob.size) == (b"blob:x/y", 8), blob
+assert client.get_blob("x/y", range="bytes=0-1").data == b"range:bytes=0-1"
+
 # Each method has an `_async` twin.
 async def main():
     w = await client.widget("w").get_async()
@@ -354,6 +375,7 @@ fn stubs() {
         "class DemoError(builtins.Exception):",
         "class NotFoundError(DemoError):",
         "def details(self) -> list[typing.Any]:",
+        "def put_blob(self, path: builtins.str, data: bytes) -> None:",
     ] {
         assert!(root.contains(expected), "missing `{expected}` in:\n{root}");
     }
@@ -372,6 +394,7 @@ fn stubs() {
         "def extra(self) -> typing.Any:",
         "def notes(self) -> list[typing.Any]:",
         "def rows(self) -> dict[str, list[typing.Any]]:",
+        "def data(self) -> builtins.bytes:",
     ] {
         assert!(
             models.contains(expected),

@@ -244,6 +244,15 @@ pub struct MethodPlan {
     /// ConnectRPC emitter can use it — but it has no REST route, so the REST client/handler
     /// emitters skip it. `true` for methods with an HTTP annotation, `false` otherwise.
     pub has_http_route: bool,
+    /// The request field that is sent as the raw HTTP body (`(olai.trestle.v1.raw_body)`).
+    pub raw_request_body: Option<String>,
+    /// The response field that takes the raw HTTP body (`(olai.trestle.v1.raw_body)`); the other
+    /// fields of the response come from headers.
+    pub raw_response_body: Option<String>,
+    /// The request fields that go in HTTP request headers (`(olai.trestle.v1.request_header)`),
+    /// with their headers. They are query parameters to the builders and bindings, but not in
+    /// the URL.
+    pub request_headers: Vec<(String, String)>,
 }
 
 impl MethodPlan {
@@ -260,6 +269,16 @@ impl MethodPlan {
         self.has_http_route
             && self.path_parameters().next().is_some()
             && !self.http_pattern.parameter_names().is_empty()
+    }
+
+    /// The query parameters that go in the URL: not the ones in request headers.
+    pub fn url_query_parameters(&self) -> impl Iterator<Item = &QueryParam> {
+        self.query_parameters().filter(|param| {
+            !self
+                .request_headers
+                .iter()
+                .any(|(field, _)| *field == param.name)
+        })
     }
 
     pub fn query_parameters(&self) -> impl Iterator<Item = &QueryParam> {

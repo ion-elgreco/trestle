@@ -82,8 +82,14 @@ pub struct MessageField {
     /// The HTTP response header that this response field comes from
     /// (`(olai.trestle.v1.response_header)`), instead of the body.
     pub response_header: Option<String>,
+    /// The HTTP request header that this request field goes in
+    /// (`(olai.trestle.v1.request_header)`), instead of the query or the body.
+    pub request_header: Option<String>,
     /// Whether the field is sent even when unpopulated (`(olai.trestle.v1.emit_unpopulated)`).
     pub emit_unpopulated: bool,
+    /// Whether the field is the raw HTTP body of its message (`(olai.trestle.v1.raw_body)`): the
+    /// bytes of a request body, or of a response body, instead of JSON.
+    pub raw_body: bool,
     /// Language-agnostic type; carries `is_optional` and `is_repeated` flags.
     pub unified_type: UnifiedType,
     pub documentation: Option<String>,

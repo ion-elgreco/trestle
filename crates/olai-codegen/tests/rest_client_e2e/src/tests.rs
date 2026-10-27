@@ -5,7 +5,7 @@ use axum::body::Bytes;
 use axum::extract::{OriginalUri, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use futures::TryStreamExt;
 use serde_json::{Value, json};
 
@@ -209,6 +209,33 @@ async fn widget_version(Path(name): Path<String>) -> Response {
     ([("Widget-Version", "7"), ("ETag", "abc")], body).into_response()
 }
 
+/// Store a blob: the server notes its path, content type and bytes.
+async fn put_blob(
+    State(seen): State<Seen>,
+    uri: OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    seen.push(format!(
+        "PUT {} {content_type} {:?}",
+        uri.path(),
+        body.as_ref()
+    ));
+    StatusCode::NO_CONTENT
+}
+
+/// A blob whose bytes are `blob:` and its path, or `range:` and the `Range` header.
+async fn get_blob(Path(path): Path<String>, headers: HeaderMap) -> Vec<u8> {
+    match headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
+        Some(range) => format!("range:{range}").into_bytes(),
+        None => format!("blob:{path}").into_bytes(),
+    }
+}
+
 /// Start the demo server on a free port; returns its base URL and what it saw.
 async fn serve() -> (url::Url, Seen) {
     let seen = Seen::default();
@@ -223,6 +250,7 @@ async fn serve() -> (url::Url, Seen) {
         .route("/api/v1/widgets/{name}/rename", post(rename_widget))
         .route("/api/v1/widget-lines", get(stream_widgets))
         .route("/api/v1/widgets/{name}/version", get(widget_version))
+        .route("/api/v1/blobs/{*path}", put(put_blob).get(get_blob))
         .route("/auth/tokens", post(exchange_token))
         .with_state(seen.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -529,6 +557,31 @@ async fn ndjson_answers_and_header_fields() {
     assert_eq!(version.etag.as_deref(), Some("abc"));
     let bare = client.widget_version("bare").await.unwrap();
     assert_eq!((bare.name.as_str(), bare.version), ("", 7));
+}
+
+#[tokio::test]
+async fn raw_bodies_and_paths_of_several_segments() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    // A path value keeps its `/` and drops its leading one.
+    client
+        .put_blob("/a/b c.bin", vec![0, 1, 255])
+        .await
+        .unwrap();
+    assert_eq!(
+        seen.all(),
+        ["PUT /api/v1/blobs/a/b%20c.bin application/octet-stream [0, 1, 255]"]
+    );
+    let blob = client.get_blob("x/y").await.unwrap();
+    assert_eq!(blob.data, b"blob:x/y");
+    assert_eq!(blob.size, Some(8));
+    // A request header field goes in its header, not in the query.
+    let part = client
+        .get_blob("x/y")
+        .with_range("bytes=0-1".to_string())
+        .await
+        .unwrap();
+    assert_eq!(part.data, b"range:bytes=0-1");
 }
 
 #[tokio::test]

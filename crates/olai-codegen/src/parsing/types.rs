@@ -596,6 +596,11 @@ impl UnifiedType {
         quote::format_ident!("{}", name)
     }
 
+    /// A singular `bytes` value: not repeated.
+    pub fn is_singular_bytes(&self) -> bool {
+        matches!(self.base_type, BaseType::Bytes) && !self.is_repeated
+    }
+
     /// Create a simple string type
     pub fn string() -> Self {
         Self {
