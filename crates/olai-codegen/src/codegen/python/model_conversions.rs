@@ -1521,11 +1521,12 @@ impl FieldAccessor {
             return super::bindings::bytes_to_vec(quote! { value }, self.is_optional_scalar());
         }
         if let BaseType::Map(_, value) = &self.ty.base_type {
-            // Message values arrive as their wrappers.
+            // Message values arrive as their wrappers. The entries move into the model's map,
+            // which may hash differently from the `std` map of the argument.
             return if self.in_project && matches!(value.base_type, BaseType::Message(_)) {
                 quote! { value.into_iter().map(|(k, v)| (k, ::core::convert::Into::into(v))).collect() }
             } else {
-                quote! { value }
+                quote! { value.into_iter().collect() }
             };
         }
         if self.is_optional_scalar() {
@@ -1945,7 +1946,8 @@ fn py_type_for(ty: &UnifiedType, in_project: bool) -> TokenStream {
 }
 
 /// Read a `map<string, V>` field into a `HashMap`, converting message values to
-/// their wrappers when in-project.
+/// their wrappers when in-project. The entries are copied one by one: the model's map
+/// (buffa's) and the Python-visible `std` map may hash differently.
 fn read_map(access: &TokenStream, value: &UnifiedType, in_project: bool) -> TokenStream {
     match &value.base_type {
         BaseType::Message(_) if in_project => {
@@ -1954,7 +1956,12 @@ fn read_map(access: &TokenStream, value: &UnifiedType, in_project: bool) -> Toke
                 #access.iter().map(|(k, v)| (k.clone(), #w::from(v.clone()))).collect()
             }
         }
-        _ => quote! { #access.clone() },
+        BaseType::Int32
+        | BaseType::Int64
+        | BaseType::Bool
+        | BaseType::Float32
+        | BaseType::Float64 => quote! { #access.iter().map(|(k, v)| (k.clone(), *v)).collect() },
+        _ => quote! { #access.iter().map(|(k, v)| (k.clone(), v.clone())).collect() },
     }
 }
 

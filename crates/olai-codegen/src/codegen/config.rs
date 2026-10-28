@@ -435,6 +435,50 @@ pub struct CodeGenConfig {
     ///
     /// The default keeps the historical output.
     pub rest_client: RestClientOptions,
+
+    /// Options of the generated server (`output.server`, `output.common`). See [`ServerOptions`].
+    pub server: ServerOptions,
+}
+
+/// Options of the generated server: its extractors, its answer to an RPC without a response
+/// message, and the ConnectRPC bridge.
+#[derive(Debug, Clone)]
+pub struct ServerOptions {
+    /// The cargo feature of the app's server crate that the generated route modules (`server`)
+    /// are gated on with `#[cfg(feature = ...)]`, for a crate that has axum as an optional
+    /// dependency. `None` for a crate that always has it. Default `axum`.
+    pub axum_feature: Option<String>,
+
+    /// A module with the extractors of the app, instead of axum's: `Json<T>`, `Query<T>` and
+    /// `Path<T>` (tuple structs that implement `FromRequest` or `FromRequestParts` for every
+    /// state, with an `IntoResponse` rejection; `Json<T>` is the response too), and
+    /// `fn invalid_argument(message: String) -> axum::response::Response`, the answer to a
+    /// request that fails its `validate()`. With axum's own, a bad request is answered in plain
+    /// text.
+    pub extractors: Option<String>,
+
+    /// The type that answers an RPC whose response is `google.protobuf.Empty`: `Default` and
+    /// `IntoResponse`, such as an empty JSON object. Without it, the answer has no body.
+    pub empty_response: Option<String>,
+
+    /// Emit, for every service with `(olai.trestle.v1.connect)`, the bridge from its handler
+    /// trait to the ConnectRPC service trait that connect-rust generates at this path: a template
+    /// with `{service}` and `{version}`, as [`CodeGenConfig::models_path_template`], such as
+    /// `my_models::connect::{service}::{version}`. The error of
+    /// [`CodeGenConfig::result_type_path`] must convert `Into<connectrpc::ConnectError>`. Buffa
+    /// only.
+    pub connect_service_path_template: Option<String>,
+}
+
+impl Default for ServerOptions {
+    fn default() -> Self {
+        Self {
+            axum_feature: Some("axum".into()),
+            extractors: None,
+            empty_response: None,
+            connect_service_path_template: None,
+        }
+    }
 }
 
 /// Wire-format and error options of the generated REST client.
@@ -481,6 +525,31 @@ pub struct RestClientOptions {
     /// `<product>/<version of the client crate>`. The browser (`wasm32`) sends its own. Every
     /// transport can set another one with `with_user_agent`. Needs the `reqwest` transport.
     pub user_agent: Option<String>,
+
+    /// Append a `routes` module to the models `mod.rs`: the table of every routed RPC (service,
+    /// RPC, HTTP method, path template) with the JSON round trip of its request and response
+    /// messages, for checks of what the models keep of a server's JSON. Needs `serde_json` in
+    /// the models crate.
+    pub route_table: bool,
+
+    /// Also call the services with `(olai.trestle.v1.connect)` over ConnectRPC, when the client
+    /// prefers it (`Protocol::Connect`, `with_protocol`): in binary protobuf, through the
+    /// `reqwest` transport. The other services stay REST whatever the protocol. See
+    /// [`RuntimeConnect`]. Needs the `reqwest` transport and the REST client alone.
+    pub connect_at_runtime: Option<RuntimeConnect>,
+}
+
+/// The ConnectRPC side of the REST client ([`RestClientOptions::connect_at_runtime`]).
+#[derive(Debug, Clone)]
+pub struct RuntimeConnect {
+    /// Where the clients that connect-rust generates for the services are: a template with
+    /// `{service}` and `{version}`, as [`CodeGenConfig::models_path_template`], such as
+    /// `my_models::connect::{service}::{version}`.
+    pub client_path_template: String,
+    /// The cargo feature of the client crate that enables the Connect side, when it is optional:
+    /// the Connect code is gated on it, and without it every call is REST. The Connect side is
+    /// never built for `wasm32`.
+    pub feature: Option<String>,
 }
 
 /// Shape of the JSON error body that the generated error module reads.
@@ -640,6 +709,19 @@ impl CodeGenConfig {
                  `RestClientOptions::user_agent` needs it"
                     .into(),
             ));
+        }
+        if let Some(connect) = &self.rest_client.connect_at_runtime {
+            if !self.uses_reqwest_transport()
+                || !self.client_protocols.rest
+                || self.client_protocols.connect
+            {
+                return Err(Error::Build(
+                    "`RestClientOptions::connect_at_runtime` needs the generated `reqwest` \
+                     transport and the REST client alone (`ClientProtocols::default()`)"
+                        .into(),
+                ));
+            }
+            ModelsPath::new(&connect.client_path_template)?;
         }
         let python = self.python_options();
         if self.output.python.is_some() {

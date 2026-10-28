@@ -41,3 +41,66 @@ pub mod tags {
 
 #[cfg(feature = "axum")]
 pub mod extractors;
+/// The checks of the `REQUIRED` fields of the messages (`google.api.field_behavior`):
+/// `validate()` on every message that has one. A required string, list or map must not
+/// be empty, a message must be set and valid in turn, an enum must not be its zero
+/// value.
+pub mod validate {
+    /// A required field that is missing.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ValidationError {
+        /// The field, by its proto name; a field of a nested message as
+        /// `outer.inner`.
+        pub field: ::std::string::String,
+    }
+
+    impl ValidationError {
+        fn missing(field: &str) -> Self {
+            Self { field: field.into() }
+        }
+
+        fn nested(mut self, field: &str) -> Self {
+            self.field = format!("{field}.{}", self.field);
+            self
+        }
+    }
+
+    impl ::core::fmt::Display for ValidationError {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+            write!(f, "the field `{}` is required", self.field)
+        }
+    }
+
+    impl ::std::error::Error for ValidationError {}
+    impl crate::models::schemas::v1::CreateSchemaRequest {
+        /// Checks the `REQUIRED` fields.
+        pub fn validate(&self) -> ::core::result::Result<(), ValidationError> {
+            if self.r#name.is_empty() {
+                return ::core::result::Result::Err(ValidationError::missing("name"));
+            }
+            if self.r#catalog_name.is_empty() {
+                return ::core::result::Result::Err(
+                    ValidationError::missing("catalog_name"),
+                );
+            }
+            if self.r#schema_type.as_known().is_none_or(|v| v as i32 == 0) {
+                return ::core::result::Result::Err(
+                    ValidationError::missing("schema_type"),
+                );
+            }
+            ::core::result::Result::Ok(())
+        }
+    }
+
+    impl crate::models::schemas::v1::ListSchemasRequest {
+        /// Checks the `REQUIRED` fields.
+        pub fn validate(&self) -> ::core::result::Result<(), ValidationError> {
+            if self.r#catalog_name.is_empty() {
+                return ::core::result::Result::Err(
+                    ValidationError::missing("catalog_name"),
+                );
+            }
+            ::core::result::Result::Ok(())
+        }
+    }
+}

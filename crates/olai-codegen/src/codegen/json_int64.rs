@@ -195,9 +195,9 @@ pub(crate) fn value_module() -> String {
                 }
             }
 
-            /// A singular field.
-            pub fn message_field<T: Exact + Default, S: ::serde::Serializer>(
-                field: &::buffa::MessageField<T>,
+            /// A singular field, inline or boxed.
+            pub fn message_field<T: Exact + Default, P: ::buffa::ProtoBox<T>, S: ::serde::Serializer>(
+                field: &::buffa::MessageField<T, P>,
                 s: S,
             ) -> ::core::result::Result<S::Ok, S::Error> {
                 match field.as_option() {

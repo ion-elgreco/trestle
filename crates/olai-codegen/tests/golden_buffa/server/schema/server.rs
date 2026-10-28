@@ -10,7 +10,7 @@ pub async fn create_schema<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: CreateSchemaRequest,
-) -> Result<::axum::Json<Schema>>
+) -> Result<axum::Json<Schema>>
 where
     T: SchemaHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -23,7 +23,7 @@ pub async fn get_schema<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: GetSchemaRequest,
-) -> Result<::axum::Json<Schema>>
+) -> Result<axum::Json<Schema>>
 where
     T: SchemaHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -36,7 +36,7 @@ pub async fn list_schemas<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: ListSchemasRequest,
-) -> Result<::axum::Json<ListSchemasResponse>>
+) -> Result<axum::Json<ListSchemasResponse>>
 where
     T: SchemaHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -49,7 +49,7 @@ pub async fn update_schema<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: UpdateSchemaRequest,
-) -> Result<::axum::Json<Schema>>
+) -> Result<axum::Json<Schema>>
 where
     T: SchemaHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -62,11 +62,31 @@ pub async fn delete_schema<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: DeleteSchemaRequest,
-) -> Result<::axum::Json<DeleteSchemaResponse>>
+) -> Result<axum::Json<DeleteSchemaResponse>>
 where
     T: SchemaHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
 {
     let result = handler.delete_schema(request, context).await?;
     Ok(axum::Json(result))
+}
+
+/// The routes of the service with their handlers, for an app to merge: the app's
+/// state (`T`) implements the handler trait, and `Cx` is the context of its requests.
+pub fn router<T, Cx>() -> axum::Router<T>
+where
+    T: SchemaHandler<Cx> + Clone + Send + Sync + 'static,
+    Cx: axum::extract::FromRequestParts<T> + Send + 'static,
+{
+    axum::Router::new()
+        .route(
+            "/schemas",
+            axum::routing::post(create_schema::<T, Cx>).get(list_schemas::<T, Cx>),
+        )
+        .route(
+            "/schemas/{full_name}",
+            axum::routing::get(get_schema::<T, Cx>)
+                .patch(update_schema::<T, Cx>)
+                .delete(delete_schema::<T, Cx>),
+        )
 }

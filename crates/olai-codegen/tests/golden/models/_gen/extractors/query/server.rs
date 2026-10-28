@@ -20,10 +20,11 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListByTagsRequest {
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(ListByTagsRequest {
+        let request = ListByTagsRequest {
             tags,
             max_results,
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -41,8 +42,9 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListByCatalogTypeReq
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(ListByCatalogTypeRequest {
+        let request = ListByCatalogTypeRequest {
             catalog_type: catalog_type as i32,
-        })
+        };
+        Ok(request)
     }
 }

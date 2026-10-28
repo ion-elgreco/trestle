@@ -23,13 +23,14 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListTagAssignmentsRe
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(ListTagAssignmentsRequest {
+        let request = ListTagAssignmentsRequest {
             entity_type,
             entity_name,
             max_results,
             page_token,
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -45,17 +46,18 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for CreateTagAssignmentReques
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         let body_req = axum::extract::Request::from_parts(parts, body);
-        let axum::extract::Json::<CreateTagAssignmentRequest>(body) = body_req
+        let axum::Json::<CreateTagAssignmentRequest>(body) = body_req
             .extract()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         let tag = body.tag;
-        Ok(CreateTagAssignmentRequest {
+        let request = CreateTagAssignmentRequest {
             entity_type,
             entity_name,
             tag,
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -69,12 +71,13 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for GetTagAssignmentRequ
             .extract::<axum::extract::Path<(String, String, String)>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(GetTagAssignmentRequest {
+        let request = GetTagAssignmentRequest {
             entity_type,
             entity_name,
             tag_key,
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -88,12 +91,13 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for DeleteTagAssignmentR
             .extract::<axum::extract::Path<(String, String, String)>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(DeleteTagAssignmentRequest {
+        let request = DeleteTagAssignmentRequest {
             entity_type,
             entity_name,
             tag_key,
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -108,11 +112,12 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for TouchTagAssignmentRequest
             .extract::<axum::extract::Path<(String, String, String)>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(TouchTagAssignmentRequest {
+        let request = TouchTagAssignmentRequest {
             entity_type,
             entity_name,
             tag_key,
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }

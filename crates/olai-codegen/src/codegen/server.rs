@@ -21,11 +21,51 @@ use quote::{format_ident, quote};
 use syn::{Path, Type};
 
 use super::format_tokens;
+use super::validate::has_required_fields;
 use crate::{
+    Error,
     analysis::{MethodPlan, RequestParam},
-    codegen::{MethodHandler, Runtime, ServiceHandler},
+    codegen::{CodeGenConfig, MethodHandler, Runtime, ServiceHandler},
+    parsing::http::HttpPattern,
     parsing::types::{BaseType, RenderContext},
 };
+
+/// The extractor types and the bad-request answer that the generated code uses: the app's
+/// ([`ServerOptions::extractors`](super::ServerOptions::extractors)) or axum's.
+struct Extractors {
+    json: Path,
+    query: Path,
+    path: Path,
+    /// The answer to a request that fails `validate()`, with the error as `e`.
+    invalid_argument: TokenStream,
+}
+
+impl Extractors {
+    fn of(config: &CodeGenConfig) -> Self {
+        match &config.server.extractors {
+            Some(module) => {
+                let module: Path = syn::parse_str(module).expect("valid extractors path");
+                Self {
+                    json: syn::parse_quote! { #module::Json },
+                    query: syn::parse_quote! { #module::Query },
+                    path: syn::parse_quote! { #module::Path },
+                    invalid_argument: quote! { #module::invalid_argument(e.to_string()) },
+                }
+            }
+            None => Self {
+                json: syn::parse_quote! { axum::Json },
+                query: syn::parse_quote! { axum_extra::extract::Query },
+                path: syn::parse_quote! { axum::extract::Path },
+                invalid_argument: quote! {
+                    axum::response::IntoResponse::into_response((
+                        axum::http::StatusCode::BAD_REQUEST,
+                        e.to_string(),
+                    ))
+                },
+            },
+        }
+    }
+}
 
 /// Generate server side code for axum servers
 ///
@@ -36,15 +76,16 @@ use crate::{
 /// A method with a raw body or a request header field gets no extractor: the server emitter refuses
 /// it.
 pub(super) fn generate_common(service: &ServiceHandler<'_>) -> crate::error::Result<String> {
-    let extractor_impls = service
-        .rest_methods()
-        .filter(|method| !beyond_server(method))
-        .map(|method| from_request_extractor(&method))
+    let extractors = Extractors::of(service.config);
+    let methods = server_methods(service);
+    let extractor_impls = methods
+        .iter()
+        .map(|method| from_request_extractor(method, &extractors))
         .collect_vec();
     let mod_path = service.models_path_crate();
 
     // Only import RequestPartsExt when there are FromRequestParts impls (path/query params).
-    let has_parts_extractors = service.rest_methods().any(|m| m.plan.needs_request_parts);
+    let has_parts_extractors = methods.iter().any(|m| extracts_from_parts(m));
 
     let axum_imports = if has_parts_extractors {
         quote! { use axum::{RequestExt, RequestPartsExt}; }
@@ -72,13 +113,29 @@ pub(super) fn generate_common(service: &ServiceHandler<'_>) -> crate::error::Res
 }
 
 pub(super) fn generate_server(service: &ServiceHandler<'_>) -> crate::error::Result<String> {
-    refuse_unsupported(service)?;
-    let handler_function_impls = service
-        .rest_methods()
-        .map(|method| axum_route_handler_impl(&method, &service.plan.handler_name))
+    let extractors = Extractors::of(service.config);
+    let empty_response: Option<Path> = service
+        .config
+        .server
+        .empty_response
+        .as_deref()
+        .map(|path| syn::parse_str(path).expect("valid empty_response path"));
+    let methods = server_methods(service);
+    let handler_function_impls = methods
+        .iter()
+        .map(|method| {
+            axum_route_handler_impl(
+                method,
+                &service.plan.handler_name,
+                &extractors,
+                empty_response.as_ref(),
+            )
+        })
         .collect_vec();
+    let router = router_fn(service, &methods)?;
 
     let mod_path = service.models_path();
+    let foreign_models = service.foreign_models_imports();
     // handler_name is a validated Rust identifier, so this parse is infallible.
     let trait_path: Path =
         syn::parse_str(&format!("super::handler::{}", service.plan.handler_name)).unwrap();
@@ -91,35 +148,135 @@ pub(super) fn generate_server(service: &ServiceHandler<'_>) -> crate::error::Res
         #![allow(unused_mut, clippy::too_many_arguments)]
         use #result_path;
         use #mod_path::*;
+        #(#foreign_models)*
         use #trait_path;
         use axum::extract::State;
 
         #(#handler_function_impls)*
 
+        #router
     };
 
     format_tokens(tokens)
 }
 
-/// Whether a method sends or reads a raw body (`(olai.trestle.v1.raw_body)`), or has a field in a
-/// request header (`(olai.trestle.v1.request_header)`): what the server emitter does not support.
-fn beyond_server(method: &MethodHandler<'_>) -> bool {
-    method.plan.raw_request_body.is_some()
-        || method.plan.raw_response_body.is_some()
-        || !method.plan.request_headers.is_empty()
+/// The `router()` of the service: every route with its handler, for an app to merge.
+fn router_fn(
+    service: &ServiceHandler<'_>,
+    methods: &[MethodHandler<'_>],
+) -> crate::error::Result<TokenStream> {
+    let handler_trait = format_ident!("{}", service.plan.handler_name);
+    let mut routes: Vec<(String, Vec<TokenStream>)> = Vec::new();
+    for method in methods {
+        let path = axum_path(&method.plan.http_pattern);
+        let verb = match method.plan.http_method.to_ascii_uppercase().as_str() {
+            "GET" => "get",
+            "POST" => "post",
+            "PUT" => "put",
+            "PATCH" => "patch",
+            "DELETE" => "delete",
+            "HEAD" => "head",
+            other => {
+                return Err(Error::Build(format!(
+                    "no axum route for the HTTP method `{other}` of `{}`",
+                    method.plan.handler_function_name
+                )));
+            }
+        };
+        let verb = format_ident!("{verb}");
+        let handler = format_ident!("{}", method.plan.handler_function_name);
+        let call = quote! { #verb(#handler::<T, Cx>) };
+        match routes.iter_mut().find(|(p, _)| *p == path) {
+            Some((_, calls)) => calls.push(call),
+            None => routes.push((path, vec![call])),
+        }
+    }
+    let routes = routes.into_iter().map(|(path, calls)| {
+        let (first, rest) = calls.split_first().expect("a route has a method");
+        quote! { .route(#path, axum::routing::#first #(.#rest)*) }
+    });
+    Ok(quote! {
+        /// The routes of the service with their handlers, for an app to merge: the app's
+        /// state (`T`) implements the handler trait, and `Cx` is the context of its requests.
+        pub fn router<T, Cx>() -> axum::Router<T>
+        where
+            T: #handler_trait<Cx> + Clone + Send + Sync + 'static,
+            Cx: axum::extract::FromRequestParts<T> + Send + 'static,
+        {
+            axum::Router::new() #(#routes)*
+        }
+    })
 }
 
-/// The server emitter refuses a method with a raw body or a request header field, rather than
-/// give it an extractor that its client does not match.
-fn refuse_unsupported(service: &ServiceHandler<'_>) -> crate::error::Result<()> {
-    match service.rest_methods().find(beyond_server) {
-        Some(method) => Err(crate::Error::Build(format!(
-            "method `{}` has a raw body or a request header field, which the server emitter does \
-             not support",
-            method.plan.handler_function_name
-        ))),
-        None => Ok(()),
+/// The axum form of a route template: `{name}` for a path parameter, `{*name}` for one of
+/// several segments (`{name=**}`), the rest as in the template.
+fn axum_path(pattern: &HttpPattern) -> String {
+    let mut path = String::new();
+    let mut rest = pattern.template.as_str();
+    while let Some(start) = rest.find('{') {
+        path.push_str(&rest[..start]);
+        let end = rest[start..]
+            .find('}')
+            .map_or(rest.len(), |end| start + end + 1);
+        let parameter = &rest[start + 1..end - 1];
+        let name = parameter.split('=').next().unwrap_or(parameter);
+        if pattern.multi_segment_parameters.iter().any(|p| p == name) {
+            path.push_str(&format!("{{*{name}}}"));
+        } else {
+            path.push_str(&format!("{{{name}}}"));
+        }
+        rest = &rest[end..];
     }
+    path.push_str(rest);
+    path
+}
+
+/// The `validate()` call of a request whose message has `REQUIRED` fields, answered with the
+/// extractors' bad request.
+fn validation(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStream {
+    if !has_required_fields(method.metadata, &method.plan.metadata.input_type) {
+        return quote! {};
+    }
+    let invalid_argument = &extractors.invalid_argument;
+    quote! {
+        request.validate().map_err(|e| #invalid_argument)?;
+    }
+}
+
+/// The routed methods that the server emitter supports: an extractor, a route and a handler
+/// method each. Left out, for the app to write by hand: a method that sends or reads a raw body
+/// (`(olai.trestle.v1.raw_body)`) or has a field in a request header
+/// (`(olai.trestle.v1.request_header)`), and a method whose request message another method of
+/// the service already extracts (a message has one extractor).
+pub(super) fn server_methods<'a>(service: &'a ServiceHandler<'a>) -> Vec<MethodHandler<'a>> {
+    let mut extracted: Vec<String> = Vec::new();
+    service
+        .rest_methods()
+        .filter(|method| {
+            if method.plan.raw_request_body.is_some()
+                || method.plan.raw_response_body.is_some()
+                || !method.plan.request_headers.is_empty()
+            {
+                return false;
+            }
+            let input = &method.plan.metadata.input_type;
+            if extracted.contains(input) {
+                tracing::warn!(
+                    "no server route for `{}`: another method extracts `{input}` already",
+                    method.plan.handler_function_name
+                );
+                return false;
+            }
+            extracted.push(input.clone());
+            true
+        })
+        .collect()
+}
+
+/// Whether the request is read from the request parts alone (path and query, `FromRequestParts`)
+/// rather than with a body (`FromRequest`). A GET with a body reads the body.
+fn extracts_from_parts(method: &MethodHandler<'_>) -> bool {
+    method.plan.needs_request_parts && method.plan.body_fields().next().is_none()
 }
 
 /// Generate extractor implementation for a specific method.
@@ -127,19 +284,25 @@ fn refuse_unsupported(service: &ServiceHandler<'_>) -> crate::error::Result<()> 
 /// Path/query-only methods use `FromRequestParts`; body-bearing methods use `FromRequest`. The
 /// split is precomputed on the plan (`needs_request_parts`) so this no longer re-matches the
 /// `RequestType` enum.
-fn from_request_extractor(method: &MethodHandler<'_>) -> TokenStream {
-    if method.plan.needs_request_parts {
-        from_request_parts_impl(method)
+fn from_request_extractor(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStream {
+    if extracts_from_parts(method) {
+        from_request_parts_impl(method, extractors)
     } else {
-        from_request_impl(method)
+        from_request_impl(method, extractors)
     }
 }
 
 /// Generate route handler function
-fn axum_route_handler_impl(method: &MethodHandler<'_>, handler_trait: &str) -> TokenStream {
+fn axum_route_handler_impl(
+    method: &MethodHandler<'_>,
+    handler_trait: &str,
+    extractors: &Extractors,
+    empty_response: Option<&Path>,
+) -> TokenStream {
     let handler_method = format_ident!("{}", method.plan.handler_function_name);
     let input_type = method.input_type();
     let handler_trait_ident = format_ident!("{}", handler_trait);
+    let json = &extractors.json;
 
     if method.plan.has_response {
         let output_type = method.output_type();
@@ -148,62 +311,80 @@ fn axum_route_handler_impl(method: &MethodHandler<'_>, handler_trait: &str) -> T
                 State(handler): State<T>,
                 context: Cx,
                 request: #input_type,
-            ) -> Result<::axum::Json<#output_type>>
+            ) -> Result<#json<#output_type>>
             where
                 T: #handler_trait_ident<Cx> + Clone + Send + Sync + 'static,
                 Cx: axum::extract::FromRequestParts<T> + Send,
             {
                 let result = handler.#handler_method(request, context).await?;
-                Ok(axum::Json(result))
+                Ok(#json(result))
             }
         }
     } else {
+        let (output, answer) = match empty_response {
+            Some(empty) => (
+                quote! { #empty },
+                quote! { ::core::default::Default::default() },
+            ),
+            None => (quote! { () }, quote! { () }),
+        };
         quote! {
             pub async fn #handler_method<T, Cx>(
                 State(handler): State<T>,
                 context: Cx,
                 request: #input_type,
-            ) -> Result<()>
+            ) -> Result<#output>
             where
                 T: #handler_trait_ident<Cx> + Clone + Send + Sync + 'static,
                 Cx: axum::extract::FromRequestParts<T> + Send,
             {
                 handler.#handler_method(request, context).await?;
-                Ok(())
+                Ok(#answer)
             }
         }
     }
 }
 
 /// Generate FromRequestParts implementation for path/query parameters
-fn from_request_parts_impl(method: &MethodHandler<'_>) -> TokenStream {
+fn from_request_parts_impl(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStream {
     let input_type = method.input_type();
-    let path_extractions = path_extractions(method);
-    let query_extractions = query_extractions(method);
+    let path_extractions = path_extractions(method, extractors);
+    let query_extractions = query_extractions(method, extractors);
     let field_assignments = field_assignments(method.plan, method.config.runtime);
+    let validation = validation(method, extractors);
+    // A request without path or query parameters reads nothing from the parts.
+    let parts = if method.plan.parameters.is_empty() {
+        quote! { _parts }
+    } else {
+        quote! { parts }
+    };
 
     quote! {
         impl<S: Send + Sync> axum::extract::FromRequestParts<S> for #input_type {
             type Rejection = axum::response::Response;
 
             async fn from_request_parts(
-                parts: &mut axum::http::request::Parts,
+                #parts: &mut axum::http::request::Parts,
                 _state: &S,
             ) -> Result<Self, Self::Rejection> {
                 #path_extractions
                 #query_extractions
 
-                Ok(#input_type {
+                let request = #input_type {
                     #field_assignments
-                })
+                };
+                #validation
+                Ok(request)
             }
         }
     }
 }
 
 /// Generate FromRequest implementation for JSON body
-fn from_request_impl(method: &MethodHandler<'_>) -> TokenStream {
+fn from_request_impl(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStream {
     let input_type = method.input_type();
+    let json = &extractors.json;
+    let validation = validation(method, extractors);
 
     let is_hybrid = method
         .plan
@@ -214,7 +395,7 @@ fn from_request_impl(method: &MethodHandler<'_>) -> TokenStream {
     // Check if we need a hybrid extractor (path/query + body)
     if is_hybrid {
         // Generate hybrid implementation
-        generate_hybrid_request_impl(method)
+        generate_hybrid_request_impl(method, extractors)
     } else {
         // Simple JSON body extraction
         quote! {
@@ -225,10 +406,11 @@ fn from_request_impl(method: &MethodHandler<'_>) -> TokenStream {
                     req: axum::extract::Request<axum::body::Body>,
                     _state: &S,
                 ) -> Result<Self, Self::Rejection> {
-                    let axum::extract::Json(request) = req
-                        .extract()
+                    let #json(request) = req
+                        .extract::<#json<#input_type>, _>()
                         .await
                         .map_err(axum::response::IntoResponse::into_response)?;
+                    #validation
                     Ok(request)
                 }
             }
@@ -237,15 +419,16 @@ fn from_request_impl(method: &MethodHandler<'_>) -> TokenStream {
 }
 
 /// Generate hybrid FromRequest implementation for methods with path/query + body
-fn generate_hybrid_request_impl(method: &MethodHandler<'_>) -> TokenStream {
+fn generate_hybrid_request_impl(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStream {
     // Only reached when is_hybrid == true (caller checked path/query params exist),
     // which requires a non-Empty input message, so input_type() is always Some here.
     let input_type = method.input_type().unwrap();
-    let path_extractions = path_extractions(method);
-    let query_extractions = query_extractions(method);
+    let path_extractions = path_extractions(method, extractors);
+    let query_extractions = query_extractions(method, extractors);
     // Oneof fields deserialize from JSON like any other field, so no special treatment needed.
-    let body_extractions = generate_body_extractions_tokens(method.plan, &input_type);
+    let body_extractions = generate_body_extractions_tokens(method.plan, &input_type, extractors);
     let field_assignments = field_assignments(method.plan, method.config.runtime);
+    let validation = validation(method, extractors);
 
     // When the method has no body fields, the request body is unused — bind it to
     // `_body` so it doesn't trip `unused_variables`.
@@ -271,20 +454,27 @@ fn generate_hybrid_request_impl(method: &MethodHandler<'_>) -> TokenStream {
                 // Extract body fields (only when the request has a body).
                 #body_extractions
 
-                Ok(#input_type {
+                let request = #input_type {
                     #field_assignments
-                })
+                };
+                #validation
+                Ok(request)
             }
         }
     }
 }
 
 /// Generate body parameter extractions as TokenStream
-fn generate_body_extractions_tokens(method: &MethodPlan, response_type: &Ident) -> TokenStream {
+fn generate_body_extractions_tokens(
+    method: &MethodPlan,
+    response_type: &Ident,
+    extractors: &Extractors,
+) -> TokenStream {
     let body_fields = method.body_fields().collect_vec();
     if body_fields.is_empty() {
         quote! {}
     } else {
+        let json = &extractors.json;
         let field_names: Vec<_> = body_fields
             .iter()
             .map(|f| format_ident!("{}", f.name))
@@ -299,7 +489,7 @@ fn generate_body_extractions_tokens(method: &MethodPlan, response_type: &Ident) 
         };
         quote! {
             let body_req = axum::extract::Request::from_parts(parts, body);
-            let axum::extract::Json::<#response_type>(body) = body_req
+            let #json::<#response_type>(body) = body_req
                 .extract()
                 .await
                 .map_err(axum::response::IntoResponse::into_response)?;
@@ -309,7 +499,7 @@ fn generate_body_extractions_tokens(method: &MethodPlan, response_type: &Ident) 
 }
 
 /// Generate path parameter extractions as TokenStream
-fn path_extractions(method: &MethodHandler<'_>) -> TokenStream {
+fn path_extractions(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStream {
     let params = &method.plan.path_parameters().collect_vec();
 
     if params.is_empty() {
@@ -334,9 +524,10 @@ fn path_extractions(method: &MethodHandler<'_>) -> TokenStream {
             )
         };
 
+        let path = &extractors.path;
         quote! {
-            let axum::extract::Path(#pat) = parts
-                .extract::<axum::extract::Path<#ty>>()
+            let #path(#pat) = parts
+                .extract::<#path<#ty>>()
                 .await
                 .map_err(axum::response::IntoResponse::into_response)?;
         }
@@ -344,7 +535,7 @@ fn path_extractions(method: &MethodHandler<'_>) -> TokenStream {
 }
 
 /// Generate query parameter extractions as TokenStream
-fn query_extractions(method: &MethodHandler<'_>) -> TokenStream {
+fn query_extractions(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStream {
     let params = method.plan.query_parameters().collect_vec();
     if params.is_empty() {
         quote! {}
@@ -369,6 +560,7 @@ fn query_extractions(method: &MethodHandler<'_>) -> TokenStream {
         });
 
         let param_names: Vec<Ident> = params.iter().map(|p| format_ident!("{}", p.name)).collect();
+        let query = &extractors.query;
 
         quote! {
             #[derive(serde::Deserialize)]
@@ -377,8 +569,8 @@ fn query_extractions(method: &MethodHandler<'_>) -> TokenStream {
             }
             // axum_extra::extract::Query uses serde_html_form which supports repeated query
             // parameters (?foo=a&foo=b → Vec<T>), unlike axum::extract::Query (serde_urlencoded).
-            let axum_extra::extract::Query(QueryParams { #(#param_names),* }) = parts
-                .extract::<axum_extra::extract::Query<QueryParams>>()
+            let #query(QueryParams { #(#param_names),* }) = parts
+                .extract::<#query<QueryParams>>()
                 .await
                 .map_err(axum::response::IntoResponse::into_response)?;
         }
@@ -443,6 +635,7 @@ mod tests {
                 input_type: "ListThingsRequest".to_string(),
                 output_type: "ListThingsResponse".to_string(),
                 server_streaming: false,
+                no_side_effects: false,
                 operation: None,
                 http_rule: HttpRule {
                     selector: "".to_string(),

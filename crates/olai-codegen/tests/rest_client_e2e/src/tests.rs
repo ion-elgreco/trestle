@@ -660,3 +660,27 @@ async fn user_agent_goes_in_every_request() {
         [default.clone(), default, "user-agent demo-cli/1.0".into()]
     );
 }
+
+/// The route table names every routed RPC, and round-trips a JSON body through its message:
+/// a request only when the body is the whole message and not a form, a response only when the
+/// RPC answers with one message.
+#[test]
+fn route_table_round_trips_the_messages() {
+    use crate::models::routes::{ROUTES, Route};
+
+    let route = |rpc: &str| -> &Route { ROUTES.iter().find(|r| r.rpc == rpc).unwrap() };
+    let get = route("GetWidget");
+    assert_eq!(get.service, "demo.v1.WidgetService");
+    assert_eq!((get.method, get.path), ("GET", "/api/v1/widgets/{name}"));
+    assert!(get.request.is_none());
+    let kept = (get.response.unwrap())(br#"{"name": "w", "unknown": 1}"#).unwrap();
+    assert_eq!(kept["name"], "w");
+    assert!(kept.get("unknown").is_none());
+
+    let create = route("CreateWidget");
+    assert!(create.request.is_some());
+    assert!(create.response.is_some());
+    assert!(route("ExchangeToken").request.is_none());
+    assert!(route("DeleteWidget").response.is_none());
+    assert!(route("StreamWidgets").response.is_none());
+}

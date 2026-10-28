@@ -381,10 +381,49 @@ impl BindingBackend for PyBackend<'_> {
                 /// A client of the API at one base URL.
             }
         });
+        let runtime_connect = services
+            .first()
+            .is_some_and(|s| s.config.rest_client.connect_at_runtime.is_some());
         let new_doc = self.python.stub_gen.then(|| {
+            if runtime_connect {
+                quote! {
+                    /// A client of the API at `base_url`. `token`, when set, goes in every
+                    /// request as the bearer token. `protocol` is `"rest"`, or `"connect"` to
+                    /// call the services that are served over ConnectRPC too that way, in
+                    /// binary protobuf; the other services are called over REST either way.
+                }
+            } else {
+                quote! {
+                    /// A client of the API at `base_url`. `token`, when set, goes in every
+                    /// request as the bearer token.
+                }
+            }
+        });
+        let protocol_signature = runtime_connect.then(|| quote! { , protocol = "rest" });
+        let protocol_param = runtime_connect.then(|| quote! { , protocol: &str });
+        let protocol_choice = runtime_connect.then(|| {
             quote! {
-                /// A client of the API at `base_url`. `token`, when set, goes in every
-                /// request as the bearer token.
+                let client = match protocol {
+                    "rest" => client,
+                    "connect" => client.with_protocol(#client_crate::Protocol::Connect),
+                    other => {
+                        return Err(::pyo3::exceptions::PyValueError::new_err(format!(
+                            "protocol must be \"rest\" or \"connect\", not {other:?}"
+                        )));
+                    }
+                };
+            }
+        });
+        let protocol_getter = runtime_connect.then(|| {
+            quote! {
+                /// The protocol of the calls: `"rest"` or `"connect"`.
+                #[getter]
+                pub fn protocol(&self) -> &'static str {
+                    match self.client.protocol() {
+                        #client_crate::Protocol::Rest => "rest",
+                        #client_crate::Protocol::Connect => "connect",
+                    }
+                }
             }
         });
         let user_agent = self.python.user_agent.as_ref().map(|product| {
@@ -427,16 +466,19 @@ impl BindingBackend for PyBackend<'_> {
             impl #py_aggregate_client_ident {
                 #new_doc
                 #[new]
-                #[pyo3(signature = (base_url, token = None))]
-                pub fn new(base_url: String, token: Option<String>) -> PyResult<Self> {
+                #[pyo3(signature = (base_url, token = None #protocol_signature))]
+                pub fn new(base_url: String, token: Option<String> #protocol_param) -> PyResult<Self> {
                     let base_url = base_url.parse().map_err(#py_error_type::from)?;
                     let client = match token {
                         Some(token) => #aggregate_client_ident::new_with_token(base_url, token),
                         None => #aggregate_client_ident::new_unauthenticated(base_url),
                     };
                     #user_agent
+                    #protocol_choice
                     Ok(Self { client })
                 }
+
+                #protocol_getter
 
                 #(#methods)*
 

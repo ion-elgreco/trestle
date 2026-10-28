@@ -149,6 +149,9 @@ pub struct ServiceInfo {
     pub name: String,
     /// Proto package name (e.g. `"unitycatalog.catalogs.v1"`).
     pub package: String,
+    /// The service is served over ConnectRPC too (`(olai.trestle.v1.connect)`): the server
+    /// mounts its Connect routes, and the clients call it over Connect when they prefer Connect.
+    pub connect: bool,
     pub documentation: Option<String>,
     pub methods: Vec<MethodMetadata>,
 }
@@ -168,6 +171,9 @@ pub struct MethodMetadata {
     /// A server-streaming RPC (`returns (stream T)`): over REST, an NDJSON answer with one `T`
     /// per line.
     pub server_streaming: bool,
+    /// `option idempotency_level = NO_SIDE_EFFECTS`: a read. Over Connect it may be a GET, and
+    /// a server need not record it as a change.
+    pub no_side_effects: bool,
 }
 
 impl MethodMetadata {
@@ -201,6 +207,7 @@ mod tests {
         let mut service_info = ServiceInfo {
             name: "TestService".to_string(),
             package: "test.v1".to_string(),
+            connect: false,
             documentation: Some("Test service documentation".to_string()),
             methods: Vec::new(),
         };
@@ -219,6 +226,7 @@ mod tests {
             input_type: ".test.TestRequest".to_string(),
             output_type: ".test.TestResponse".to_string(),
             server_streaming: false,
+            no_side_effects: false,
             operation: None,
             http_pattern: crate::parsing::http::HttpPattern::parse("/test"),
             http_rule,

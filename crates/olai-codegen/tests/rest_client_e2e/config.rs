@@ -64,6 +64,7 @@ fn demo_config(out: &Path) -> CodeGenConfig {
         resource_store_crate_name: "olai_store".into(),
         runtime: Runtime::Buffa,
         transport_type_path: REQWEST_TRANSPORT_TYPE_PATH.into(),
+        server: Default::default(),
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
@@ -82,6 +83,8 @@ fn demo_config(out: &Path) -> CodeGenConfig {
             path_fields_in_body_methods: vec!["demo.v1.ProbeService.RenameWidget".into()],
             json_query_packages: vec![],
             user_agent: Some("demo-client".into()),
+            route_table: true,
+            connect_at_runtime: None,
         },
         output: CodeGenOutput {
             common: Some(gen_dir.clone()),

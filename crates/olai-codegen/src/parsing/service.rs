@@ -27,6 +27,7 @@ pub(super) fn process_service(
     let service_info = ServiceInfo {
         name: service_name.to_string(),
         package: package.to_string(),
+        connect: bool_service_option(service, super::TRESTLE_CONNECT_EXTENSION),
         documentation: service_documentation,
         methods: Vec::new(),
     };
@@ -94,6 +95,7 @@ fn process_method(
         http_pattern,
         documentation: method_documentation,
         server_streaming: method.server_streaming(),
+        no_side_effects: no_side_effects(method),
     };
 
     // Add to the service's methods
@@ -102,6 +104,25 @@ fn process_method(
     }
 
     Ok(())
+}
+
+/// Whether the method has `option idempotency_level = NO_SIDE_EFFECTS`.
+fn no_side_effects(method: &MethodDescriptorProto) -> bool {
+    use protobuf::descriptor::method_options::IdempotencyLevel;
+    method
+        .options
+        .as_ref()
+        .is_some_and(|options| options.idempotency_level() == IdempotencyLevel::NO_SIDE_EFFECTS)
+}
+
+/// A `bool` option of trestle on a service, such as `(olai.trestle.v1.connect)`, by its extension
+/// number.
+fn bool_service_option(service: &ServiceDescriptorProto, number: u32) -> bool {
+    service.options.as_ref().is_some_and(|options| {
+        options.unknown_fields().iter().any(|(n, value)| {
+            n == number && matches!(value, protobuf::UnknownValueRef::Varint(v) if v != 0)
+        })
+    })
 }
 
 /// Extract gnostic annotations from method-level options

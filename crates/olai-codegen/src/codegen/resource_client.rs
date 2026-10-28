@@ -201,7 +201,7 @@ fn child_nav_method(
     let leaf_ident = format_ident!("{}", leaf);
 
     let parent_args = parent_components.iter().map(|c| quote! { &self.#c });
-    let low_level = child_low_level_ctor(&module, &child_low_level);
+    let low_level = child_low_level_ctor(child, &module, &child_low_level);
     let doc = format!(" Access a `{}` within this resource.", link.child_singular);
 
     Some(quote! {
@@ -239,7 +239,7 @@ fn child_create_method(
     let (new_args, method_param_defs) =
         render_child_builder_args(&create, &required, &parent_names);
 
-    let low_level = child_low_level_ctor(&module, &child_low_level);
+    let low_level = child_low_level_ctor(child, &module, &child_low_level);
     let doc = format!(" Create a `{}` within this resource.", link.child_singular);
     Some(quote! {
         #[doc = #doc]
@@ -279,7 +279,7 @@ fn child_list_method(
     let required: Vec<&RequestParam> = list.required_parameters().collect();
     let (new_args, method_param_defs) = render_child_builder_args(&list, &required, &parent_names);
 
-    let low_level = child_low_level_ctor(&module, &child_low_level);
+    let low_level = child_low_level_ctor(child, &module, &child_low_level);
     let doc = format!(
         " List `{}` resources within this resource.",
         link.child_singular
@@ -324,16 +324,25 @@ fn classify_builder_args(required: &[&RequestParam], parent_names: &[String]) ->
 }
 
 /// `crate::codegen::<module>::<LowLevel>::new(self.client.client.clone(), self.client.base_url.clone())`
-/// — the child's low-level client built from this scoped client's cloud client + base URL. Shared by
-/// the child nav/create/list emitters.
+/// — the child's low-level client built from this scoped client's cloud client + base URL (and
+/// the protocol of its calls, with `connect_at_runtime`). Shared by the child nav/create/list
+/// emitters.
 fn child_low_level_ctor(
+    child: &ServiceHandler<'_>,
     module: &proc_macro2::Ident,
     child_low_level: &proc_macro2::Ident,
 ) -> TokenStream {
+    let protocol = child
+        .config
+        .rest_client
+        .connect_at_runtime
+        .is_some()
+        .then(|| quote! { , self.client.protocol });
     quote! {
         crate::codegen::#module::#child_low_level::new(
             self.client.client.clone(),
-            self.client.base_url.clone(),
+            self.client.base_url.clone()
+            #protocol
         )
     }
 }
@@ -823,6 +832,7 @@ mod tests {
             resource_store_crate_name: "olai_store".into(),
             runtime: crate::Runtime::Prost,
             transport_type_path: crate::DEFAULT_TRANSPORT_TYPE_PATH.into(),
+            server: Default::default(),
             dual_transport: false,
             client_protocols: crate::ClientProtocols::default(),
             connect_client_path: None,
@@ -859,6 +869,7 @@ mod tests {
             handler_name: crate::utils::strings::service_to_handler_name(service_name),
             base_path,
             package: package.to_string(),
+            connect: false,
             methods: vec![],
             managed_resources: vec![ManagedResource {
                 type_name: "X".to_string(),

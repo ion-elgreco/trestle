@@ -69,6 +69,7 @@ fn connect_metadata() -> CodeGenMetadata {
         input_type: "GetThingRequest".to_string(),
         output_type: "Thing".to_string(),
         server_streaming: false,
+        no_side_effects: false,
         operation: None,
         http_rule: Default::default(),
         http_pattern: HttpPattern::default(),
@@ -77,6 +78,7 @@ fn connect_metadata() -> CodeGenMetadata {
     let service = ServiceInfo {
         name: "ReadService".to_string(),
         package: "example.read.v1".to_string(),
+        connect: false,
         documentation: None,
         methods: vec![method],
     };
@@ -100,6 +102,7 @@ fn connect_config(client_dir: &Path) -> CodeGenConfig {
         resource_store_crate_name: "olai_store".into(),
         runtime: olai_codegen::Runtime::Buffa,
         transport_type_path: olai_codegen::DEFAULT_TRANSPORT_TYPE_PATH.into(),
+        server: Default::default(),
         dual_transport: false,
         client_protocols: ClientProtocols {
             rest: false,

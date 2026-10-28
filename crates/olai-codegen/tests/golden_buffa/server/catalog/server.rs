@@ -10,7 +10,7 @@ pub async fn create_catalog<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: CreateCatalogRequest,
-) -> Result<::axum::Json<Catalog>>
+) -> Result<axum::Json<Catalog>>
 where
     T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -23,7 +23,7 @@ pub async fn get_catalog<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: GetCatalogRequest,
-) -> Result<::axum::Json<Catalog>>
+) -> Result<axum::Json<Catalog>>
 where
     T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -36,7 +36,7 @@ pub async fn list_catalogs<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: ListCatalogsRequest,
-) -> Result<::axum::Json<ListCatalogsResponse>>
+) -> Result<axum::Json<ListCatalogsResponse>>
 where
     T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -49,7 +49,7 @@ pub async fn update_catalog<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: UpdateCatalogRequest,
-) -> Result<::axum::Json<Catalog>>
+) -> Result<axum::Json<Catalog>>
 where
     T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -62,7 +62,7 @@ pub async fn delete_catalog<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: DeleteCatalogRequest,
-) -> Result<::axum::Json<DeleteCatalogResponse>>
+) -> Result<axum::Json<DeleteCatalogResponse>>
 where
     T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -75,7 +75,7 @@ pub async fn generate_catalog_token<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: GenerateCatalogTokenRequest,
-) -> Result<::axum::Json<CatalogToken>>
+) -> Result<axum::Json<CatalogToken>>
 where
     T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
@@ -88,11 +88,36 @@ pub async fn get_catalog_status<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: GetCatalogStatusRequest,
-) -> Result<::axum::Json<CatalogStatus>>
+) -> Result<axum::Json<CatalogStatus>>
 where
     T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
 {
     let result = handler.get_catalog_status(request, context).await?;
     Ok(axum::Json(result))
+}
+
+/// The routes of the service with their handlers, for an app to merge: the app's
+/// state (`T`) implements the handler trait, and `Cx` is the context of its requests.
+pub fn router<T, Cx>() -> axum::Router<T>
+where
+    T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
+    Cx: axum::extract::FromRequestParts<T> + Send + 'static,
+{
+    axum::Router::new()
+        .route(
+            "/catalogs",
+            axum::routing::post(create_catalog::<T, Cx>).get(list_catalogs::<T, Cx>),
+        )
+        .route(
+            "/catalogs/{name}",
+            axum::routing::get(get_catalog::<T, Cx>)
+                .patch(update_catalog::<T, Cx>)
+                .delete(delete_catalog::<T, Cx>),
+        )
+        .route("/catalog-tokens", axum::routing::post(generate_catalog_token::<T, Cx>))
+        .route(
+            "/catalogs/{name}/status",
+            axum::routing::get(get_catalog_status::<T, Cx>),
+        )
 }

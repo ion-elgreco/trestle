@@ -23,9 +23,10 @@ use crate::codegen::{MethodHandler, ServiceHandler};
 pub(super) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
     let context_ident = last_segment(&service.config.context_type_path);
     let mut trait_methods = Vec::new();
-    // The handler trait backs the Axum (REST) server, so it covers only routed methods. Routeless
-    // (ConnectRPC-only) methods get no REST handler; a ConnectRPC server facade is a follow-up.
-    for method in service.rest_methods() {
+    // The handler trait backs the Axum (REST) server, so it covers only routed methods that the
+    // server emitter supports (see `server::server_methods`). Routeless (ConnectRPC-only)
+    // methods get no REST handler.
+    for method in super::server::server_methods(service) {
         let method_code = handler_trait_method(&method, &context_ident);
         trait_methods.push(method_code);
     }
@@ -82,6 +83,7 @@ pub fn handler_trait(
 ) -> Result<String> {
     let trait_ident = format_ident!("{}", trait_name);
     let mod_path = service.models_path();
+    let foreign_models = service.foreign_models_imports();
     let result_path: syn::Path =
         syn::parse_str(&service.config.result_type_path).expect("valid result_type_path");
     let default_cx: syn::Path =
@@ -92,6 +94,7 @@ pub fn handler_trait(
 
         use #result_path;
         use #mod_path::*;
+        #(#foreign_models)*
 
         #[async_trait]
         pub trait #trait_ident<Cx = #default_cx>: Send + Sync + 'static {

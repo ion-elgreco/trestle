@@ -20,11 +20,12 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListByTagsRequest {
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(ListByTagsRequest {
+        let request = ListByTagsRequest {
             tags,
             max_results,
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -42,9 +43,10 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListByCatalogTypeReq
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(ListByCatalogTypeRequest {
+        let request = ListByCatalogTypeRequest {
             catalog_type: buffa::EnumValue::Known(catalog_type),
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }

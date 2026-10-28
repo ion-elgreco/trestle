@@ -215,7 +215,7 @@ impl PyCatalog {
             >>::from(value) as i32;
         }
         if let ::core::option::Option::Some(value) = properties {
-            inner.properties = value;
+            inner.properties = value.into_iter().collect();
         }
         {
             let value = storage_config;
@@ -251,7 +251,7 @@ impl PyCatalog {
     fn properties(
         &self,
     ) -> ::std::collections::HashMap<::std::string::String, ::std::string::String> {
-        self.0.properties.clone()
+        self.0.properties.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 
     #[getter]
@@ -286,7 +286,7 @@ impl PyCatalog {
         &mut self,
         value: ::std::collections::HashMap<::std::string::String, ::std::string::String>,
     ) {
-        self.0.properties = value;
+        self.0.properties = value.into_iter().collect();
     }
 
     #[setter(storage_config)]

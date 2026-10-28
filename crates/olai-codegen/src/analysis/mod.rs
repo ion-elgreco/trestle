@@ -416,6 +416,7 @@ fn analyze_service(
             handler_name,
             base_path,
             package: info.package.clone(),
+            connect: info.connect,
             methods: method_plans,
             managed_resources,
             documentation: info.documentation.clone(),
@@ -834,6 +835,7 @@ mod tests {
             input_type: "GetCatalogRequest".to_string(),
             output_type: "Catalog".to_string(),
             server_streaming: false,
+            no_side_effects: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -853,6 +855,7 @@ mod tests {
         let service_info = ServiceInfo {
             name: "CatalogService".to_string(),
             package: "example.catalogs.v1".to_string(),
+            connect: false,
             documentation: None,
             methods: vec![make_get_method()],
         };
@@ -884,6 +887,7 @@ mod tests {
             input_type: "UpdateCatalogRequest".to_string(),
             output_type: "Catalog".to_string(),
             server_streaming: false,
+            no_side_effects: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -898,6 +902,7 @@ mod tests {
         let service_info = ServiceInfo {
             name: "CatalogService".to_string(),
             package: "example.catalogs.v1".to_string(),
+            connect: false,
             documentation: None,
             methods: vec![make_get_method(), update_method],
         };
@@ -916,6 +921,7 @@ mod tests {
             input_type: "".to_string(),
             output_type: "".to_string(),
             server_streaming: false,
+            no_side_effects: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -965,6 +971,7 @@ mod tests {
             input_type: "DoThingRequest".to_string(),
             output_type: "DoThingResponse".to_string(),
             server_streaming: false,
+            no_side_effects: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -1025,6 +1032,7 @@ mod tests {
             input_type: "MakeReq".to_string(),
             output_type: "MakeResp".to_string(),
             server_streaming: false,
+            no_side_effects: false,
             operation: None,
             http_rule: HttpRule::default(),
             http_pattern: HttpPattern::default(),
@@ -1090,6 +1098,7 @@ mod tests {
             input_type: "".to_string(),
             output_type: "".to_string(),
             server_streaming: false,
+            no_side_effects: false,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -1348,6 +1357,7 @@ mod tests {
         let catalog_svc = ServiceInfo {
             name: "CatalogService".to_string(),
             package: "example.v1".to_string(),
+            connect: false,
             documentation: None,
             methods: vec![
                 MethodMetadata {
@@ -1356,6 +1366,7 @@ mod tests {
                     input_type: "ListCatalogsRequest".to_string(),
                     output_type: "ListCatalogsResponse".to_string(),
                     server_streaming: false,
+                    no_side_effects: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1373,6 +1384,7 @@ mod tests {
                     input_type: "GetCatalogRequest".to_string(),
                     output_type: "Catalog".to_string(),
                     server_streaming: false,
+                    no_side_effects: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1390,6 +1402,7 @@ mod tests {
         let schema_svc = ServiceInfo {
             name: "SchemaService".to_string(),
             package: "example.v1".to_string(),
+            connect: false,
             documentation: None,
             methods: vec![
                 MethodMetadata {
@@ -1398,6 +1411,7 @@ mod tests {
                     input_type: "ListSchemasRequest".to_string(),
                     output_type: "ListSchemasResponse".to_string(),
                     server_streaming: false,
+                    no_side_effects: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1415,6 +1429,7 @@ mod tests {
                     input_type: "GetSchemaRequest".to_string(),
                     output_type: "Schema".to_string(),
                     server_streaming: false,
+                    no_side_effects: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1432,6 +1447,7 @@ mod tests {
         let table_svc = ServiceInfo {
             name: "TableService".to_string(),
             package: "example.v1".to_string(),
+            connect: false,
             documentation: None,
             methods: vec![
                 MethodMetadata {
@@ -1440,6 +1456,7 @@ mod tests {
                     input_type: "ListTablesRequest".to_string(),
                     output_type: "ListTablesResponse".to_string(),
                     server_streaming: false,
+                    no_side_effects: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1457,6 +1474,7 @@ mod tests {
                     input_type: "GetTableRequest".to_string(),
                     output_type: "Table".to_string(),
                     server_streaming: false,
+                    no_side_effects: false,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),

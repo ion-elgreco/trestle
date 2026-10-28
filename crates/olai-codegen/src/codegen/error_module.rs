@@ -104,6 +104,12 @@ pub(crate) fn generate(
         }
     });
 
+    let from_connect_error = config
+        .rest_client
+        .connect_at_runtime
+        .as_ref()
+        .map(|runtime| from_connect_error(runtime.feature.as_deref()));
+
     let tokens = quote! {
         //! Errors of the generated clients.
 
@@ -262,8 +268,85 @@ pub(crate) fn generate(
                 Err(e) => Error::Http(e),
             }
         }
+
+        #from_connect_error
     };
     format_tokens(tokens)
+}
+
+/// `from_connect_error`: the error of a ConnectRPC call as an [`ApiError`], with the API's own
+/// error code from the `google.rpc.ErrorInfo` detail of the error, when it carries one.
+fn from_connect_error(feature: Option<&str>) -> TokenStream {
+    let cfg = super::client::connect_cfg(feature);
+    quote! {
+        /// The error of a ConnectRPC call: the HTTP status of its code, its message, and the
+        /// error code of the API from its `google.rpc.ErrorInfo` detail, when it has one. A
+        /// procedure that the server does not have (`unimplemented`, without a detail) says so.
+        #cfg
+        pub(crate) fn from_connect_error(error: ::connectrpc::ConnectError) -> Error {
+            let status = error.http_status().as_u16();
+            let details = error
+                .details
+                .iter()
+                .filter_map(|detail| ::serde_json::to_value(detail).ok())
+                .collect();
+            let code = error
+                .details
+                .iter()
+                .find(|detail| detail.type_url == "google.rpc.ErrorInfo")
+                .and_then(|detail| {
+                    detail
+                        .debug
+                        .as_ref()
+                        .and_then(|debug| debug.get("reason")?.as_str().map(str::to_string))
+                        .or_else(|| detail.value.as_deref().and_then(error_info_reason))
+                });
+            let mut message = error
+                .message
+                .clone()
+                .unwrap_or_else(|| error.code.as_str().to_string());
+            if code.is_none() && error.code == ::connectrpc::ErrorCode::Unimplemented {
+                message.push_str(": the server has no such ConnectRPC procedure; use the REST protocol");
+            }
+            Error::Api(ApiError {
+                status,
+                code,
+                message,
+                details,
+                body: error.to_string(),
+            })
+        }
+
+        /// The `reason` (field 1) of a `google.rpc.ErrorInfo`, from the base64 of its protobuf
+        /// bytes, as a Connect error detail carries it. Every field of the message is
+        /// length-delimited.
+        #cfg
+        fn error_info_reason(value: &str) -> Option<String> {
+            use ::base64::Engine as _;
+            let bytes = ::base64::engine::general_purpose::STANDARD_NO_PAD
+                .decode(value.trim_end_matches('='))
+                .ok()?;
+            let mut rest = bytes.as_slice();
+            while let Some((&tag, after)) = rest.split_first() {
+                let mut len = 0usize;
+                let mut after = after;
+                for shift in (0..).step_by(7) {
+                    let (&byte, more) = after.split_first()?;
+                    len |= usize::from(byte & 0x7f) << shift;
+                    after = more;
+                    if byte & 0x80 == 0 {
+                        break;
+                    }
+                }
+                let (field, after) = after.split_at_checked(len)?;
+                if tag == 0x0a {
+                    return String::from_utf8(field.to_vec()).ok();
+                }
+                rest = after;
+            }
+            None
+        }
+    }
 }
 
 /// The `ApiError::error_code` method that reads the code as the configured proto enum.

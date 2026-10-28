@@ -22,8 +22,8 @@ publish = false
 python = ["dep:pyo3", "dep:pyo3-stub-gen"]
 
 [dependencies]
-buffa = { version = "0.7", features = ["json"] }
-buffa-types = { version = "0.7", features = ["json"] }
+buffa = { version = "0.9", features = ["json"] }
+buffa-types = { version = "0.9", features = ["json"] }
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 serde = { version = "1", features = ["derive"] }
@@ -39,7 +39,7 @@ tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
 [build-dependencies]
 olai-codegen = { path = "../../" }
 
-buffa-build = "0.7"
+buffa-build = "0.9"
 protobuf = "3"
 
 [package.metadata.cargo-machete]

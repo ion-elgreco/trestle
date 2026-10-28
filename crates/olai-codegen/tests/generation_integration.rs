@@ -62,6 +62,7 @@ fn rust_config(tmp: &Path) -> CodeGenConfig {
         resource_store_crate_name: "olai_store".into(),
         runtime: olai_codegen::Runtime::Prost,
         transport_type_path: olai_codegen::DEFAULT_TRANSPORT_TYPE_PATH.into(),
+        server: Default::default(),
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
@@ -183,6 +184,7 @@ fn wasm_bindings_and_dts_are_emitted() {
         // serde-native models + the browser transport are the intended pairing for wasm output.
         runtime: olai_codegen::Runtime::Buffa,
         transport_type_path: "olai_http_wasm::WasmClient".into(),
+        server: Default::default(),
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
@@ -622,6 +624,7 @@ fn node_ts_bindings_generated() {
         resource_store_crate_name: "olai_store".into(),
         runtime: olai_codegen::Runtime::Prost,
         transport_type_path: olai_codegen::DEFAULT_TRANSPORT_TYPE_PATH.into(),
+        server: Default::default(),
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,
@@ -689,6 +692,8 @@ fn rest_client_and_python_options_generate_valid_code() {
         path_fields_in_body_methods: vec![],
         json_query_packages: vec![],
         user_agent: Some("example-client".into()),
+        route_table: false,
+        connect_at_runtime: None,
     };
     config.bindings = Some(BindingsConfig {
         aggregate_client_name: "ExampleClient".into(),

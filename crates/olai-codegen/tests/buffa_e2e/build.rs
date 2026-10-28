@@ -55,6 +55,7 @@ fn main() {
         resource_store_crate_name: "olai_store".into(),
         runtime: Runtime::Buffa,
         transport_type_path: olai_codegen::DEFAULT_TRANSPORT_TYPE_PATH.into(),
+        server: Default::default(),
         dual_transport: false,
         client_protocols: olai_codegen::ClientProtocols::default(),
         connect_client_path: None,

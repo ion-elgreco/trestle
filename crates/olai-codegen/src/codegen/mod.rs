@@ -42,6 +42,7 @@ mod bindings;
 mod builder;
 mod client;
 mod config;
+mod connect_bridge;
 mod connect_client;
 mod error_module;
 mod handler;
@@ -50,15 +51,17 @@ pub(crate) mod node;
 mod python;
 mod resource_client;
 mod resources;
+mod routes;
 mod server;
 mod tokens;
 mod transport;
+mod validate;
 mod wasm;
 
 pub use config::{
     BindingsConfig, ClientProtocol, ClientProtocols, CodeGenConfig, CodeGenOutput,
     DEFAULT_TRANSPORT_TYPE_PATH, ErrorModuleConfig, ModelsPath, PyConstructors,
-    PyErrorModuleConfig, PyPackageConfig, PythonOptions, RestClientOptions, Runtime,
+    PyErrorModuleConfig, PyPackageConfig, PythonOptions, RestClientOptions, ServerOptions, RuntimeConnect, Runtime,
 };
 pub(crate) use tokens::{doc_tokens, format_tokens, format_tokens_static};
 pub use transport::REQWEST_TRANSPORT_TYPE_PATH;
@@ -276,6 +279,10 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
                 mod_content.push_str(&json_int64::value_module());
             }
         }
+        if config.rest_client.route_table {
+            mod_content.push_str(&routes::module(&plan, metadata, config));
+        }
+        mod_content.push_str(&validate::module(metadata, config));
         // Route through write_generated_code so the `// @generated` header is prepended like
         // every other emitted file, rather than writing it raw.
         let mut mod_files = GeneratedCode {
@@ -382,7 +389,7 @@ fn generate_common_code(
         generate_extractors_module(&plan.services),
     );
 
-    let module_code = main_module(&plan.services);
+    let module_code = main_module(&plan.services, false);
     files.insert("mod.rs".to_string(), module_code);
 
     Ok(GeneratedCode { files })
@@ -395,6 +402,7 @@ fn generate_server_code(
 ) -> Result<GeneratedCode> {
     let mut files = HashMap::new();
 
+    let connect_template = config.server.connect_service_path_template.as_deref();
     for service in &plan.services {
         let handler = ServiceHandler {
             plan: service,
@@ -405,11 +413,23 @@ fn generate_server_code(
         files.insert(format!("{}/handler.rs", service.base_path), trait_code);
         let server_code = server::generate_server(&handler)?;
         files.insert(format!("{}/server.rs", service.base_path), server_code);
-        let module_code = generate_server_module(service);
+        let bridged = connect_template.filter(|_| service.connect);
+        if let Some(template) = bridged {
+            let bridge_code = connect_bridge::generate(&handler, template)?;
+            files.insert(format!("{}/connect.rs", service.base_path), bridge_code);
+        }
+        let module_code = generate_server_module(
+            service,
+            bridged.is_some(),
+            config.server.axum_feature.as_deref(),
+        );
         files.insert(format!("{}/mod.rs", service.base_path), module_code);
     }
 
-    let module_code = main_module(&plan.services);
+    if connect_template.is_some() {
+        files.insert("connect.rs".to_string(), connect_bridge::root_module());
+    }
+    let module_code = main_module(&plan.services, connect_template.is_some());
     files.insert("mod.rs".to_string(), module_code);
 
     Ok(GeneratedCode { files })
@@ -626,7 +646,10 @@ fn generate_client_code(
     if config.uses_reqwest_transport() {
         files.insert(
             "transport.rs".to_string(),
-            transport::generate(config.rest_client.user_agent.as_deref()),
+            transport::generate(
+                config.rest_client.user_agent.as_deref(),
+                config.rest_client.connect_at_runtime.as_ref(),
+            ),
         );
     }
     if let Some(errors) = &config.rest_client.error_module {
@@ -672,14 +695,21 @@ fn generate_extractors_module(services: &[ServicePlan]) -> String {
     format_tokens_static(quote! { #(#decls)* })
 }
 
-fn generate_server_module(service: &ServicePlan) -> String {
+fn generate_server_module(
+    service: &ServicePlan,
+    connect: bool,
+    axum_feature: Option<&str>,
+) -> String {
     let handler_ident = format_ident!("{}", service.handler_name);
+    let connect_mod = connect.then(|| quote! { pub mod connect; });
+    let gate = axum_feature.map(|feature| quote! { #[cfg(feature = #feature)] });
     let tokens = quote! {
         pub use handler::#handler_ident;
 
         mod handler;
-        #[cfg(feature = "axum")]
+        #gate
         pub mod server;
+        #connect_mod
     };
     format_tokens_static(tokens)
 }
@@ -745,7 +775,7 @@ fn generate_protocol_split_module(protocols: &[ClientProtocol]) -> String {
     format_tokens_static(quote! { #(#mods)* })
 }
 
-pub fn main_module(services: &[ServicePlan]) -> String {
+pub fn main_module(services: &[ServicePlan], connect: bool) -> String {
     let service_modules: Vec<TokenStream> = services
         .iter()
         .map(|s| {
@@ -753,9 +783,11 @@ pub fn main_module(services: &[ServicePlan]) -> String {
             quote! { pub mod #module_name; }
         })
         .collect();
+    let connect_mod = connect.then(|| quote! { pub mod connect; });
 
     let tokens = quote! {
         #(#service_modules)*
+        #connect_mod
     };
     format_tokens_static(tokens)
 }
@@ -871,11 +903,27 @@ fn generate_client_main_module(
         .flat_map(|s| &s.methods)
         .any(MethodPlan::formats_path_values)
         .then(client::encode_path_value_fn);
+    // The protocol of the calls, with `connect_at_runtime`.
+    let protocol = config.rest_client.connect_at_runtime.is_some().then(|| {
+        quote! {
+            /// The protocol of a client's calls: REST, or ConnectRPC in binary protobuf for the
+            /// services that are served over Connect too (`(olai.trestle.v1.connect)`). The
+            /// other services are called over REST whatever the protocol.
+            #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+            pub enum Protocol {
+                #[default]
+                Rest,
+                Connect,
+            }
+        }
+    });
 
     let tokens = quote! {
         #(#service_modules)*
 
         #(#resource_exports)*
+
+        #protocol
 
         #aggregate_module
         #transport_module
@@ -1325,14 +1373,14 @@ impl ServiceHandler<'_> {
     /// *name*, e.g. `TagPoliciesService` → `tag_policies`). Use the package's leaf-before-version
     /// segment so the models import path matches where the proto plugin actually wrote the types.
     /// Falls back to `base_path` when the package is empty or unparsable.
-    fn models_segment(&self) -> String {
+    pub(crate) fn models_segment(&self) -> String {
         package_models_segment(&self.plan.package)
             .map_or_else(|| self.plan.base_path.clone(), str::to_string)
     }
 
     /// The version segment under which this service's generated models live; see
     /// [`package_models_version`].
-    fn models_version(&self) -> String {
+    pub(crate) fn models_version(&self) -> String {
         package_models_version(&self.plan.package).to_string()
     }
 

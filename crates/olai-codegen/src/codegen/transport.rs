@@ -14,8 +14,91 @@ use super::format_tokens_static;
 pub const REQWEST_TRANSPORT_TYPE_PATH: &str = "crate::codegen::transport::HttpClient";
 
 /// The `transport.rs` file of the client output. With `user_agent`, the default transport sends
-/// `<user_agent>/<version of the client crate>` as its `User-Agent`, except in the browser.
-pub(crate) fn generate(user_agent: Option<&str>) -> String {
+/// `<user_agent>/<version of the client crate>` as its `User-Agent`, except in the browser. With
+/// `connect`, the transport sends ConnectRPC requests too (`connectrpc::client::ClientTransport`),
+/// with the same token and `User-Agent`, outside the browser.
+pub(crate) fn generate(user_agent: Option<&str>, connect: Option<&super::RuntimeConnect>) -> String {
+    let connect = connect.map(|runtime| {
+        let cfg = super::client::connect_cfg(runtime.feature.as_deref());
+        quote! {
+            /// What a ConnectRPC request through the transport fails with, before an answer.
+            #cfg
+            #[derive(Debug)]
+            pub enum ConnectTransportError {
+                /// The request body could not be read.
+                Body(::std::boxed::Box<dyn ::std::error::Error + Send + Sync>),
+                /// The token or the `User-Agent` is not a header value.
+                Header(::http::header::InvalidHeaderValue),
+                /// The request could not be built or sent.
+                Http(reqwest::Error),
+            }
+
+            #cfg
+            impl ::std::fmt::Display for ConnectTransportError {
+                fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                    match self {
+                        Self::Body(e) => write!(f, "request body: {e}"),
+                        Self::Header(e) => write!(f, "request header: {e}"),
+                        Self::Http(e) => write!(f, "request failed: {e}"),
+                    }
+                }
+            }
+
+            #cfg
+            impl ::std::error::Error for ConnectTransportError {
+                fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+                    match self {
+                        Self::Body(e) => Some(e.as_ref()),
+                        Self::Header(e) => Some(e),
+                        Self::Http(e) => Some(e),
+                    }
+                }
+            }
+
+            #cfg
+            impl ::connectrpc::client::ClientTransport for HttpClient {
+                type ResponseBody = reqwest::Body;
+                type Error = ConnectTransportError;
+
+                fn send(
+                    &self,
+                    request: ::http::Request<::connectrpc::client::ClientBody>,
+                ) -> ::connectrpc::client::BoxFuture<
+                    'static,
+                    ::std::result::Result<::http::Response<Self::ResponseBody>, Self::Error>,
+                > {
+                    let transport = self.clone();
+                    Box::pin(async move {
+                        let (parts, body) = request.into_parts();
+                        // The body of a unary call is whole already; it comes as a stream.
+                        let bytes = ::http_body_util::BodyExt::collect(body)
+                            .await
+                            .map_err(|e| ConnectTransportError::Body(e.into()))?
+                            .to_bytes();
+                        let mut request =
+                            reqwest::Request::try_from(::http::Request::from_parts(parts, bytes))
+                                .map_err(ConnectTransportError::Http)?;
+                        if let Some(user_agent) = &transport.user_agent {
+                            let value = user_agent.parse().map_err(ConnectTransportError::Header)?;
+                            request.headers_mut().insert(reqwest::header::USER_AGENT, value);
+                        }
+                        if let Some(token) = &transport.token {
+                            let value = format!("Bearer {token}")
+                                .parse()
+                                .map_err(ConnectTransportError::Header)?;
+                            request.headers_mut().insert(reqwest::header::AUTHORIZATION, value);
+                        }
+                        let response = transport
+                            .client
+                            .execute(request)
+                            .await
+                            .map_err(ConnectTransportError::Http)?;
+                        Ok(::http::Response::from(response))
+                    })
+                }
+            }
+        }
+    });
     let (derive, default) = match user_agent {
         None => (quote! { #[derive(Clone, Default)] }, quote! {}),
         Some(product) => {
@@ -124,6 +207,8 @@ pub(crate) fn generate(user_agent: Option<&str>) -> String {
                 }
             }
         }
+
+        #connect
     };
     format_tokens_static(tokens)
 }

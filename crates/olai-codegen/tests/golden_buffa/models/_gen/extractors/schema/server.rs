@@ -10,10 +10,16 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for CreateSchemaRequest {
         req: axum::extract::Request<axum::body::Body>,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let axum::extract::Json(request) = req
-            .extract()
+        let axum::Json(request) = req
+            .extract::<axum::Json<CreateSchemaRequest>, _>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
+        request
+            .validate()
+            .map_err(|e| axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::BAD_REQUEST,
+                e.to_string(),
+            )))?;
         Ok(request)
     }
 }
@@ -36,11 +42,12 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for GetSchemaRequest {
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(GetSchemaRequest {
+        let request = GetSchemaRequest {
             full_name,
             view: buffa::EnumValue::Known(view),
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -62,12 +69,19 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListSchemasRequest {
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(ListSchemasRequest {
+        let request = ListSchemasRequest {
             catalog_name,
             max_results,
             page_token,
             ..Default::default()
-        })
+        };
+        request
+            .validate()
+            .map_err(|e| axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::BAD_REQUEST,
+                e.to_string(),
+            )))?;
+        Ok(request)
     }
 }
 
@@ -83,16 +97,17 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for UpdateSchemaRequest {
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         let body_req = axum::extract::Request::from_parts(parts, body);
-        let axum::extract::Json::<UpdateSchemaRequest>(body) = body_req
+        let axum::Json::<UpdateSchemaRequest>(body) = body_req
             .extract()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         let schema = body.schema;
-        Ok(UpdateSchemaRequest {
+        let request = UpdateSchemaRequest {
             full_name,
             schema,
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -106,9 +121,10 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for DeleteSchemaRequest 
             .extract::<axum::extract::Path<String>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(DeleteSchemaRequest {
+        let request = DeleteSchemaRequest {
             full_name,
             ..Default::default()
-        })
+        };
+        Ok(request)
     }
 }

@@ -146,10 +146,34 @@ pub(crate) fn generate(
             }
         }
     });
+    let runtime_connect = config.rest_client.connect_at_runtime.is_some();
+    let protocol_field = runtime_connect.then(|| {
+        quote! {
+            /// The protocol of the calls; see [`Protocol`](super::Protocol).
+            pub protocol: super::Protocol,
+        }
+    });
+    let protocol_init = runtime_connect.then(|| quote! { , protocol: super::Protocol::Rest });
+    let protocol_methods = runtime_connect.then(|| {
+        quote! {
+            /// The same client, calling the services that are served over ConnectRPC too with
+            /// `protocol`; the other services stay REST.
+            pub fn with_protocol(mut self, protocol: super::Protocol) -> Self {
+                self.protocol = protocol;
+                self
+            }
+
+            /// The protocol of the calls.
+            pub fn protocol(&self) -> super::Protocol {
+                self.protocol
+            }
+        }
+    });
     let convenience_ctors = quote! {
         #token_ctors
         #wasm_ctor
         #user_agent
+        #protocol_methods
     };
 
     let imports = generate_imports(&services, &transport_import);
@@ -168,6 +192,7 @@ pub(crate) fn generate(
             // the protos cannot describe, with the same transport and base URL.
             pub(crate) client: #transport_ident,
             pub(crate) base_url: Url,
+            #protocol_field
         }
 
         impl #aggregate_ident {
@@ -179,7 +204,7 @@ pub(crate) fn generate(
                 if !base_url.path().ends_with('/') {
                     base_url.set_path(&format!("{}/", base_url.path()));
                 }
-                Self { client, base_url }
+                Self { client, base_url #protocol_init }
             }
 
             #convenience_ctors
@@ -206,7 +231,13 @@ fn low_level_client_path(service: &ServiceHandler<'_>) -> TokenStream {
 /// `crate::codegen::catalogs::CatalogServiceClient::new(self.client.clone(), self.base_url.clone())`.
 fn low_level_client_ctor(service: &ServiceHandler<'_>) -> TokenStream {
     let path = low_level_client_path(service);
-    quote! { #path::new(self.client.clone(), self.base_url.clone()) }
+    let protocol = service
+        .config
+        .rest_client
+        .connect_at_runtime
+        .is_some()
+        .then(|| quote! { , self.protocol });
+    quote! { #path::new(self.client.clone(), self.base_url.clone() #protocol) }
 }
 
 /// Emit `use` statements the aggregate needs: cloud client + url, per-service low-level clients,

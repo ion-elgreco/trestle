@@ -144,6 +144,8 @@ pub struct ServicePlan {
     pub base_path: String,
     /// Proto package name (e.g., "unitycatalog.catalogs.v1")
     pub package: String,
+    /// The service is served over ConnectRPC too; see [`ServiceInfo::connect`].
+    pub connect: bool,
     /// Methods to generate for this service
     pub methods: Vec<MethodPlan>,
     /// Resources managed by this service

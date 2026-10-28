@@ -10,8 +10,8 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for CreateCatalogRequest {
         req: axum::extract::Request<axum::body::Body>,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let axum::extract::Json(request) = req
-            .extract()
+        let axum::Json(request) = req
+            .extract::<axum::Json<CreateCatalogRequest>, _>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         Ok(request)
@@ -28,7 +28,8 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for GetCatalogRequest {
             .extract::<axum::extract::Path<String>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(GetCatalogRequest { name })
+        let request = GetCatalogRequest { name };
+        Ok(request)
     }
 }
 
@@ -47,10 +48,11 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ListCatalogsRequest 
             .extract::<axum_extra::extract::Query<QueryParams>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(ListCatalogsRequest {
+        let request = ListCatalogsRequest {
             max_results,
             page_token,
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -66,15 +68,16 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for UpdateCatalogRequest {
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         let body_req = axum::extract::Request::from_parts(parts, body);
-        let axum::extract::Json::<UpdateCatalogRequest>(body) = body_req
+        let axum::Json::<UpdateCatalogRequest>(body) = body_req
             .extract()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         let catalog = body.catalog;
-        Ok(UpdateCatalogRequest {
+        let request = UpdateCatalogRequest {
             name,
             catalog,
-        })
+        };
+        Ok(request)
     }
 }
 
@@ -88,7 +91,8 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for DeleteCatalogRequest
             .extract::<axum::extract::Path<String>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(DeleteCatalogRequest { name })
+        let request = DeleteCatalogRequest { name };
+        Ok(request)
     }
 }
 
@@ -98,8 +102,8 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for GenerateCatalogTokenReque
         req: axum::extract::Request<axum::body::Body>,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let axum::extract::Json(request) = req
-            .extract()
+        let axum::Json(request) = req
+            .extract::<axum::Json<GenerateCatalogTokenRequest>, _>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         Ok(request)
@@ -116,6 +120,7 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for GetCatalogStatusRequ
             .extract::<axum::extract::Path<String>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        Ok(GetCatalogStatusRequest { name })
+        let request = GetCatalogStatusRequest { name };
+        Ok(request)
     }
 }

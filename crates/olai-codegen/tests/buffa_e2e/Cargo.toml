@@ -35,8 +35,8 @@ olai-http = { path = "../../../olai-http" }
 
 # crates.io dependencies (in alphabetical order)
 async-trait = "0.1"
-buffa = { version = "0.7", features = ["json"] }
-buffa-types = "0.7"
+buffa = { version = "0.9", features = ["json"] }
+buffa-types = "0.9"
 futures = "0.3"
 # pyo3 >= 0.28: the generated wrappers use `#[pyclass(..., from_py_object)]`,
 # opt-in only from 0.28 (see `generate_pyo3_impls`).
@@ -53,7 +53,7 @@ url = "2"
 olai-codegen = { path = "../../" }
 
 # crates.io dependencies (in alphabetical order)
-buffa-build = "0.7"
+buffa-build = "0.9"
 protobuf = "3"
 
 # cargo-machete can't see these: they're exercised through code generated at

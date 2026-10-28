@@ -24,6 +24,7 @@ use crate::parsing::types::BaseType;
 /// Generate client code for a service
 pub(crate) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
     let mut method_tokens = Vec::new();
+    let connect = connect_side(service);
 
     for method in service.rest_methods() {
         let full_name = format!(
@@ -33,7 +34,7 @@ pub(crate) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
         let options = &service.config.rest_client;
         let form_body = options.form_encoded_methods.contains(&full_name);
         let path_fields_in_body = options.path_fields_in_body_methods.contains(&full_name);
-        let method_code = client_method(method, form_body, path_fields_in_body)?;
+        let method_code = client_method(method, form_body, path_fields_in_body, connect.as_ref())?;
         method_tokens.push(method_code);
     }
 
@@ -42,6 +43,30 @@ pub(crate) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
     let foreign_models = service.foreign_models_imports();
     let result_path = service.config.client_result_path();
     let (transport_import, transport_ident) = transport_tokens(service.config);
+    // With `connect_at_runtime`, every client carries the protocol of its calls; the services
+    // served over Connect too have a Connect client with the same transport.
+    let runtime_connect = service.config.rest_client.connect_at_runtime.is_some();
+    let protocol_field = runtime_connect.then(|| {
+        quote! {
+            /// The protocol of the calls; see [`Protocol`](super::super::Protocol).
+            pub protocol: super::super::Protocol,
+        }
+    });
+    let protocol_param = runtime_connect.then(|| quote! { , protocol: super::super::Protocol });
+    let protocol_init = runtime_connect.then(|| quote! { , protocol });
+    let connect_client = connect.as_ref().map(|side| {
+        let cfg = &side.cfg;
+        let client = &side.client;
+        quote! {
+            /// The client of the service over ConnectRPC, in binary protobuf, with the same
+            /// transport, token and base URL.
+            #cfg
+            fn connect(&self) -> #client<#transport_ident> {
+                let base = self.base_url.as_str().parse().expect("a URL is a URI");
+                #client::new(self.client.clone(), ::connectrpc::client::ClientConfig::new(base))
+            }
+        }
+    });
     // `encode_path_value` is in the client `mod.rs`: two levels up, three when each protocol has
     // its own subdirectory.
     let encode_import = service
@@ -72,22 +97,70 @@ pub(crate) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
         pub struct #client_ident {
             pub(crate) client: #transport_ident,
             pub(crate) base_url: Url,
+            #protocol_field
         }
 
         impl #client_ident {
             /// Create a new client instance
-            pub fn new(client: #transport_ident, mut base_url: Url) -> Self {
+            pub fn new(client: #transport_ident, mut base_url: Url #protocol_param) -> Self {
                 if !base_url.path().ends_with('/') {
                     base_url.set_path(&format!("{}/", base_url.path()));
                 }
-                Self { client, base_url }
+                Self { client, base_url #protocol_init }
             }
+
+            #connect_client
 
             #(#method_tokens)*
         }
     };
 
     format_tokens(tokens)
+}
+
+/// The `#[cfg]` of the Connect side of the clients, with `connect_at_runtime`: the crate's
+/// feature when it has one, and never `wasm32`.
+pub(crate) fn connect_cfg(feature: Option<&str>) -> TokenStream {
+    match feature {
+        Some(feature) => quote! { #[cfg(all(feature = #feature, not(target_arch = "wasm32")))] },
+        None => quote! { #[cfg(not(target_arch = "wasm32"))] },
+    }
+}
+
+/// The Connect side of a service's client, with `connect_at_runtime` and the service's
+/// `(olai.trestle.v1.connect)`: the `#[cfg]` of its code and the path of connect-rust's client of
+/// the service.
+pub(crate) struct ConnectSide {
+    pub(crate) cfg: TokenStream,
+    pub(crate) client: syn::Path,
+}
+
+pub(crate) fn connect_side(service: &ServiceHandler<'_>) -> Option<ConnectSide> {
+    let runtime = service.config.rest_client.connect_at_runtime.as_ref()?;
+    if !service.plan.connect {
+        return None;
+    }
+    let mut client = crate::codegen::config::ModelsPath::from_template(&runtime.client_path_template)
+        .resolve(&service.models_segment(), &service.models_version());
+    client
+        .segments
+        .push(format_ident!("{}Client", service.plan.service_name).into());
+    Some(ConnectSide {
+        cfg: connect_cfg(runtime.feature.as_deref()),
+        client,
+    })
+}
+
+/// Whether the method is called over Connect when the client prefers it: a unary call with a
+/// JSON body or none, answered with one message or nothing. The others stay REST: raw bodies,
+/// request headers, streams, and the existence checks (`HEAD`).
+fn over_connect(method: &MethodHandler<'_>) -> bool {
+    method.input_type().is_some()
+        && method.plan.raw_request_body.is_none()
+        && method.plan.raw_response_body.is_none()
+        && method.plan.request_headers.is_empty()
+        && !method.plan.metadata.server_streaming
+        && !method.is_existence_check()
 }
 
 /// The transport import + the identifier generated client code refers to it by.
@@ -137,6 +210,7 @@ pub fn client_method(
     method: MethodHandler<'_>,
     form_body: bool,
     path_fields_in_body: bool,
+    connect: Option<&ConnectSide>,
 ) -> Result<TokenStream> {
     let doc_attrs = doc_tokens(method.plan.metadata.documentation.as_deref());
     let method_name = method.plan.base_method_ident();
@@ -147,8 +221,10 @@ pub fn client_method(
     let query_handling = generate_query_parameters(&method);
     let error_module = method.config.client_error_module();
     let result_type = method.result_type();
+    let connect = connect.filter(|_| over_connect(&method));
     // A request with no path value, query parameter or body is not read.
-    let request_ident = if method.plan.formats_path_values()
+    let request_ident = if connect.is_some()
+        || method.plan.formats_path_values()
         || has_query_params
         || method.plan.has_request_body
         || !method.plan.request_headers.is_empty()
@@ -157,6 +233,46 @@ pub fn client_method(
     } else {
         format_ident!("_request")
     };
+    // Over Connect, when the client prefers it: the call of connect-rust's client, with the
+    // request cloned (it takes it by value) and the answer taken as the owned message.
+    let over_connect_name = format_ident!("{}_over_connect", method_name);
+    let connect_branch = connect.map(|side| {
+        let cfg = &side.cfg;
+        quote! {
+            #cfg
+            {
+                if self.protocol == super::super::Protocol::Connect {
+                    return self.#over_connect_name(request).await;
+                }
+            }
+        }
+    });
+    let connect_fn = connect.map(|side| {
+        let cfg = &side.cfg;
+        let call = match method.output_type() {
+            Some(_) => quote! {
+                let response = self
+                    .connect()
+                    .#method_name(request.clone())
+                    .await
+                    .map_err(#error_module::from_connect_error)?;
+                Ok(response.into_owned())
+            },
+            None => quote! {
+                self.connect()
+                    .#method_name(request.clone())
+                    .await
+                    .map_err(#error_module::from_connect_error)?;
+                Ok(())
+            },
+        };
+        quote! {
+            #cfg
+            async fn #over_connect_name(&self, request: &#input_type_ident) -> Result<#result_type> {
+                #call
+            }
+        }
+    });
 
     // The path values are in the URL, so the body leaves them out: it is a copy of the request
     // with those fields at their defaults, which the JSON and form serializers skip.
@@ -236,6 +352,7 @@ pub fn client_method(
     Ok(quote! {
         #doc_attrs
         pub async fn #method_name(&self, #request_ident: &#input_type_ident) -> Result<#result_type> {
+            #connect_branch
             #url_formatting
             #query_handling
             #body_copy
@@ -246,6 +363,8 @@ pub fn client_method(
             }
             #read_response
         }
+
+        #connect_fn
     })
 }
 

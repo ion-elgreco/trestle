@@ -59,7 +59,7 @@ pub use codegen::{
     BindingsConfig, ClientProtocol, ClientProtocols, CodeGenConfig, CodeGenOutput,
     DEFAULT_TRANSPORT_TYPE_PATH, ErrorModuleConfig, GeneratedCode, PyConstructors,
     PyErrorModuleConfig, PyPackageConfig, PythonOptions, REQWEST_TRANSPORT_TYPE_PATH,
-    RestClientOptions, Runtime, generate_code, generate_models_mod,
+    RestClientOptions, ServerOptions, RuntimeConnect, Runtime, generate_code, generate_models_mod,
 };
 
 pub use analysis::{
