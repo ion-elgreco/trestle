@@ -45,6 +45,19 @@ where
     Ok(axum::Json(result))
 }
 
+pub async fn peek_tag_assignment<T, Cx>(
+    State(handler): State<T>,
+    context: Cx,
+    request: GetTagAssignmentRequest,
+) -> Result<axum::Json<TagAssignment>>
+where
+    T: TagAssignmentHandler<Cx> + Clone + Send + Sync + 'static,
+    Cx: axum::extract::FromRequestParts<T> + Send,
+{
+    let result = handler.peek_tag_assignment(request, context).await?;
+    Ok(axum::Json(result))
+}
+
 pub async fn delete_tag_assignment<T, Cx>(
     State(handler): State<T>,
     context: Cx,
@@ -88,6 +101,10 @@ where
             "/entities/{entity_type}/{entity_name}/tags/{tag_key}",
             axum::routing::get(get_tag_assignment::<T, Cx>)
                 .delete(delete_tag_assignment::<T, Cx>),
+        )
+        .route(
+            "/entities/{entity_type}/{entity_name}/tags/{tag_key}:peek",
+            axum::routing::get(peek_tag_assignment::<T, Cx>),
         )
         .route(
             "/entities/{entity_type}/{entity_name}/tags/{tag_key}:touch",

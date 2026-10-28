@@ -118,6 +118,40 @@ impl IntoFuture for GetTagAssignmentBuilder {
 }
 
 /// Builder for tag assignment
+pub struct PeekTagAssignmentBuilder {
+    client: TagAssignmentClient,
+    request: GetTagAssignmentRequest,
+}
+
+impl PeekTagAssignmentBuilder {
+    /// Create a new builder instance.
+    /// Obtain via the corresponding method on `TagAssignmentClient`.
+    pub(crate) fn new(
+        client: TagAssignmentClient,
+        entity_type: impl Into<String>,
+        entity_name: impl Into<String>,
+        tag_key: impl Into<String>,
+    ) -> Self {
+        let request = GetTagAssignmentRequest {
+            entity_type: entity_type.into(),
+            entity_name: entity_name.into(),
+            tag_key: tag_key.into(),
+        };
+        Self { client, request }
+    }
+}
+
+impl IntoFuture for PeekTagAssignmentBuilder {
+    type Output = Result<TagAssignment>;
+    type IntoFuture = BoxFut<'static, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        let client = self.client;
+        let request = self.request;
+        Box::pin(async move { client.peek_tag_assignment(&request).await })
+    }
+}
+
+/// Builder for tag assignment
 pub struct DeleteTagAssignmentBuilder {
     client: TagAssignmentClient,
     request: DeleteTagAssignmentRequest,

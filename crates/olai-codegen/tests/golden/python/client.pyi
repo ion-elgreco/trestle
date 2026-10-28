@@ -338,6 +338,22 @@ class ExampleClient():
             The requested resource
         """
         ...
+    def peek_tag_assignment(
+
+            self,
+            entity_type: str,
+            entity_name: str,
+            tag_key: str
+        ) -> TagAssignment:
+        """
+        A second read of the same request message, read the same way: it shares the extractor of
+        `GetTagAssignment`.
+
+
+        Returns:
+            The requested resource
+        """
+        ...
     def touch_tag_assignment(
 
             self,

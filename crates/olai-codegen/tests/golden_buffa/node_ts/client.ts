@@ -294,6 +294,16 @@ export class ExampleClient {
   }
 
   /**
+     * A second read of the same request message, read the same way: it shares the extractor of
+     * `GetTagAssignment`.
+     */
+  async peekTagAssignment(entityType: string, entityName: string, tagKey: string): Promise<TagAssignment> {
+    try {
+      return fromBinary(TagAssignmentSchema, await this.inner.peekTagAssignment(entityType, entityName, tagKey));
+    } catch (e) { throw parseNativeError(e); }
+  }
+
+  /**
      * Delete a single assignment. Composite key path params.
      */
   async deleteTagAssignment(entityType: string, entityName: string, tagKey: string): Promise<DeleteTagAssignmentResponse> {

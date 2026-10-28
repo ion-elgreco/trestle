@@ -36,6 +36,14 @@ service TagAssignmentsService {
     option (gnostic.openapi.v3.operation) = {operation_id: "FetchTagAssignment"};
   }
 
+  // A second read of the same request message, read the same way: it shares the extractor of
+  // `GetTagAssignment`.
+  rpc PeekTagAssignment(GetTagAssignmentRequest) returns (TagAssignment) {
+    option (google.api.http) = {
+      get: "/entities/{entity_type}/{entity_name}/tags/{tag_key}:peek"
+    };
+  }
+
   // Delete a single assignment. Composite key path params.
   rpc DeleteTagAssignment(DeleteTagAssignmentRequest) returns (DeleteTagAssignmentResponse) {
     option (google.api.http) = {

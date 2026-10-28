@@ -289,6 +289,25 @@ impl ExampleClient {
         )
     }
 
+    /// A second read of the same request message, read the same way: it shares the extractor of
+    /// `GetTagAssignment`.
+    pub fn peek_tag_assignment(
+        &self,
+        entity_type: impl Into<String>,
+        entity_name: impl Into<String>,
+        tag_key: impl Into<String>,
+    ) -> PeekTagAssignmentBuilder {
+        PeekTagAssignmentBuilder::new(
+            crate::codegen::tag_assignments::TagAssignmentClient::new(
+                self.client.clone(),
+                self.base_url.clone(),
+            ),
+            entity_type,
+            entity_name,
+            tag_key,
+        )
+    }
+
     /// Delete a single assignment. Composite key path params.
     pub fn delete_tag_assignment(
         &self,

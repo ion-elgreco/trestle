@@ -42,7 +42,7 @@ fn test_parses_services_and_methods() {
         .services
         .get("TagAssignmentsService")
         .expect("TagAssignmentsService exists");
-    assert_eq!(tags.methods.len(), 5); // List/Create/Get/Delete + custom Touch (returns Empty)
+    assert_eq!(tags.methods.len(), 6); // List/Create/Get/Peek/Delete + custom Touch (returns Empty)
 }
 
 #[test]

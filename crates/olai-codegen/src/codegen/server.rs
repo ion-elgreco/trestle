@@ -78,8 +78,12 @@ impl Extractors {
 pub(super) fn generate_common(service: &ServiceHandler<'_>) -> crate::error::Result<String> {
     let extractors = Extractors::of(service.config);
     let methods = server_methods(service);
+    // One extractor per request message: the methods that share a message read it the same
+    // way (`server_methods`).
+    let mut extracted = std::collections::HashSet::new();
     let extractor_impls = methods
         .iter()
+        .filter(|method| extracted.insert(method.plan.metadata.input_type.clone()))
         .map(|method| from_request_extractor(method, &extractors))
         .collect_vec();
     let mod_path = service.models_path_crate();
@@ -243,12 +247,16 @@ fn validation(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStrea
     }
 }
 
-/// The routed methods that the server emitter supports: an extractor, a route and a handler
-/// method each. Left out, for the app to write by hand: a method that sends or reads a raw body
+/// The routed methods that the server emitter supports: a route and a handler method each, and
+/// an extractor per request message. Methods that share a request message share its extractor
+/// when they read the message the same way (the same path parameters, query, headers and
+/// body). Left out, for the app to write by hand: a method that sends or reads a raw body
 /// (`(olai.trestle.v1.raw_body)`), and a method whose request message another method of the
-/// service already extracts (a message has one extractor).
+/// service reads in another way.
 pub(super) fn server_methods<'a>(service: &'a ServiceHandler<'a>) -> Vec<MethodHandler<'a>> {
-    let mut extracted: Vec<String> = Vec::new();
+    let extractors = Extractors::of(service.config);
+    // The extractor of each request message, by message.
+    let mut extracted: Vec<(String, String)> = Vec::new();
     service
         .rest_methods()
         .filter(|method| {
@@ -256,15 +264,21 @@ pub(super) fn server_methods<'a>(service: &'a ServiceHandler<'a>) -> Vec<MethodH
                 return false;
             }
             let input = &method.plan.metadata.input_type;
-            if extracted.contains(input) {
-                tracing::warn!(
-                    "no server route for `{}`: another method extracts `{input}` already",
-                    method.plan.handler_function_name
-                );
-                return false;
+            let extractor = from_request_extractor(method, &extractors).to_string();
+            match extracted.iter().find(|(message, _)| message == input) {
+                Some((_, same)) if *same == extractor => true,
+                Some(_) => {
+                    tracing::warn!(
+                        "no server route for `{}`: another method reads `{input}` in another way",
+                        method.plan.handler_function_name
+                    );
+                    false
+                }
+                None => {
+                    extracted.push((input.clone(), extractor));
+                    true
+                }
             }
-            extracted.push(input.clone());
-            true
         })
         .collect()
 }

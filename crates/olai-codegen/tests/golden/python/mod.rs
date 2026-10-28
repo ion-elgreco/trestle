@@ -218,6 +218,23 @@ impl PyExampleClient {
     }
 
     #[pyo3(signature = (entity_type, entity_name, tag_key))]
+    pub fn peek_tag_assignment(
+        &self,
+        py: Python,
+        entity_type: String,
+        entity_name: String,
+        tag_key: String,
+    ) -> PyExampleResult<PyTagAssignment> {
+        let request = self.client.peek_tag_assignment(entity_type, entity_name, tag_key);
+        let runtime = get_runtime(py)?;
+        py.detach(|| {
+            #[allow(clippy::let_unit_value)]
+            let result = runtime.block_on(request.into_future())?;
+            Ok::<_, PyExampleError>(PyTagAssignment::from(result))
+        })
+    }
+
+    #[pyo3(signature = (entity_type, entity_name, tag_key))]
     pub fn delete_tag_assignment(
         &self,
         py: Python,

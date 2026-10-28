@@ -40,6 +40,13 @@ pub trait TagAssignmentHandler<Cx = crate::Context>: Send + Sync + 'static {
         request: GetTagAssignmentRequest,
         context: Cx,
     ) -> Result<TagAssignment>;
+    /// A second read of the same request message, read the same way: it shares the extractor of
+    /// `GetTagAssignment`.
+    async fn peek_tag_assignment(
+        &self,
+        request: GetTagAssignmentRequest,
+        context: Cx,
+    ) -> Result<TagAssignment>;
     /// Delete a single assignment. Composite key path params.
     async fn delete_tag_assignment(
         &self,

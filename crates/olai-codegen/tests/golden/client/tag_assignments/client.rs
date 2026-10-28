@@ -83,6 +83,26 @@ impl TagAssignmentClient {
         Ok(serde_json::from_slice(&result)?)
     }
 
+    /// A second read of the same request message, read the same way: it shares the extractor of
+    /// `GetTagAssignment`.
+    pub async fn peek_tag_assignment(
+        &self,
+        request: &GetTagAssignmentRequest,
+    ) -> Result<TagAssignment> {
+        let formatted_path = format!(
+            "entities/{}/{}/tags/{}:peek", encode_path_value(& request.entity_type,
+            false), encode_path_value(& request.entity_name, false), encode_path_value(&
+            request.tag_key, false)
+        );
+        let url = self.base_url.join(&formatted_path)?;
+        let response = self.client.get(url).send().await?;
+        if !response.status().is_success() {
+            return Err(crate::error::parse_error_response(response).await);
+        }
+        let result = response.bytes().await?;
+        Ok(serde_json::from_slice(&result)?)
+    }
+
     /// Delete a single assignment. Composite key path params.
     pub async fn delete_tag_assignment(
         &self,

@@ -204,6 +204,17 @@ impl NapiExampleClient {
     }
 
     #[napi(catch_unwind)]
+    pub async fn peek_tag_assignment(
+        &self,
+        entity_type: String,
+        entity_name: String,
+        tag_key: String,
+    ) -> napi::Result<Buffer> {
+        let request = self.client.peek_tag_assignment(entity_type, entity_name, tag_key);
+        request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
+    }
+
+    #[napi(catch_unwind)]
     pub async fn delete_tag_assignment(
         &self,
         entity_type: String,
