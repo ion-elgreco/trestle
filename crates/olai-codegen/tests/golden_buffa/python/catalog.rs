@@ -66,6 +66,22 @@ impl PyCatalogClient {
             Ok::<_, PyExampleError>(PyCatalogStatus::from(result))
         })
     }
+
+    pub fn stream_catalog_events(
+        &self,
+        py: Python,
+    ) -> PyExampleResult<Vec<PyCatalogEvent>> {
+        let request = self.client.stream_catalog_events();
+        let runtime = get_runtime(py)?;
+        py.detach(|| {
+            #[allow(clippy::let_unit_value)]
+            let result = runtime.block_on(request.into_future())?;
+            Ok::<
+                _,
+                PyExampleError,
+            >(result.into_iter().map(PyCatalogEvent::from).collect::<Vec<_>>())
+        })
+    }
 }
 
 impl PyCatalogClient {

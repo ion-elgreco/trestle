@@ -51,6 +51,12 @@ impl CatalogClient {
         GetCatalogStatusBuilder::new(self.client.clone(), &self.catalog_name)
     }
 
+    /// Stream the events of a catalog: over REST an NDJSON answer, one line per event, with the
+    /// version of the catalog in the `Catalog-Version` header.
+    pub fn stream_catalog_events(&self) -> StreamCatalogEventsBuilder {
+        StreamCatalogEventsBuilder::new(self.client.clone(), &self.catalog_name)
+    }
+
     /// Access a `schema` within this resource.
     pub fn schema(
         &self,

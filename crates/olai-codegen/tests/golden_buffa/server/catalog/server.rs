@@ -104,6 +104,51 @@ where
     Ok((headers, axum::Json(result)))
 }
 
+pub async fn stream_catalog_events<T, Cx>(
+    State(handler): State<T>,
+    context: Cx,
+    request: StreamCatalogEventsRequest,
+) -> Result<axum::response::Response>
+where
+    T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
+    Cx: axum::extract::FromRequestParts<T> + Send,
+{
+    let mut stream = handler.stream_catalog_events(request, context).await?;
+    let first = ::futures::StreamExt::next(&mut stream).await.transpose()?;
+    let mut headers = axum::http::HeaderMap::new();
+    headers
+        .insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/x-ndjson"),
+        );
+    if let Some(result) = &first {
+        if let Ok(value) = axum::http::HeaderValue::from_str(
+            &result.version.to_string(),
+        ) {
+            headers.insert("catalog-version", value);
+        }
+    }
+    let lines = ::futures::StreamExt::map(
+        ::futures::StreamExt::chain(::futures::stream::iter(first.map(Ok)), stream),
+        |message| -> ::core::result::Result<axum::body::Bytes, axum::BoxError> {
+            match message {
+                Ok(message) => {
+                    let mut line = serde_json::to_vec(&message)?;
+                    line.push(b'\n');
+                    Ok(line.into())
+                }
+                Err(_) => Err("the stream failed".into()),
+            }
+        },
+    );
+    Ok(
+        axum::response::IntoResponse::into_response((
+            headers,
+            axum::body::Body::from_stream(lines),
+        )),
+    )
+}
+
 /// The routes of the service with their handlers, for an app to merge: the app's
 /// state (`T`) implements the handler trait, and `Cx` is the context of its requests.
 pub fn router<T, Cx>() -> axum::Router<T>
@@ -126,5 +171,9 @@ where
         .route(
             "/catalogs/{name}/status",
             axum::routing::get(get_catalog_status::<T, Cx>),
+        )
+        .route(
+            "/catalogs/{name}/events",
+            axum::routing::get(stream_catalog_events::<T, Cx>),
         )
 }

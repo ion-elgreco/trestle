@@ -268,3 +268,31 @@ impl IntoFuture for GetCatalogStatusBuilder {
         Box::pin(async move { client.get_catalog_status(&request).await })
     }
 }
+
+/// Builder for catalog events
+pub struct StreamCatalogEventsBuilder {
+    client: CatalogServiceClient,
+    request: StreamCatalogEventsRequest,
+}
+
+impl StreamCatalogEventsBuilder {
+    /// Create a new builder instance.
+    /// Obtain via the corresponding method on `CatalogServiceClient`.
+    pub(crate) fn new(client: CatalogServiceClient, name: impl Into<String>) -> Self {
+        let request = StreamCatalogEventsRequest {
+            name: name.into(),
+            ..Default::default()
+        };
+        Self { client, request }
+    }
+}
+
+impl IntoFuture for StreamCatalogEventsBuilder {
+    type Output = Result<Vec<CatalogEvent>>;
+    type IntoFuture = BoxFut<'static, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        let client = self.client;
+        let request = self.request;
+        Box::pin(async move { client.stream_catalog_events(&request).await })
+    }
+}

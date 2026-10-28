@@ -29,6 +29,15 @@ class Catalog():
         ) -> None:
         ...
 
+class CatalogEvent():
+    """An event of a catalog."""
+    kind: str
+    version: int
+    """The version of the catalog, in the `Catalog-Version` header of the answer."""
+
+    def __init__(self, kind: Optional[str] = None, version: Optional[int] = None) -> None:
+        ...
+
 class CatalogStatus():
     etag: str
     """The entity tag, in the `ETag` header."""

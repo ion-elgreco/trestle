@@ -54,6 +54,12 @@ service CatalogService {
   rpc GetCatalogStatus(GetCatalogStatusRequest) returns (CatalogStatus) {
     option (google.api.http) = {get: "/catalogs/{name}/status"};
   }
+
+  // Stream the events of a catalog: over REST an NDJSON answer, one line per event, with the
+  // version of the catalog in the `Catalog-Version` header.
+  rpc StreamCatalogEvents(StreamCatalogEventsRequest) returns (stream CatalogEvent) {
+    option (google.api.http) = {get: "/catalogs/{name}/events"};
+  }
 }
 
 message CreateCatalogRequest {
@@ -103,4 +109,15 @@ message CatalogStatus {
   string state = 1;
   // The entity tag, in the `ETag` header.
   string etag = 2 [(olai.trestle.v1.response_header) = "ETag"];
+}
+
+message StreamCatalogEventsRequest {
+  string name = 1;
+}
+
+// An event of a catalog.
+message CatalogEvent {
+  string kind = 1;
+  // The version of the catalog, in the `Catalog-Version` header of the answer.
+  int64 version = 2 [(olai.trestle.v1.response_header) = "Catalog-Version"];
 }

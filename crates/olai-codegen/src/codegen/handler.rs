@@ -117,6 +117,18 @@ pub fn handler_trait_method(
 
     if method.plan.has_response {
         let output_type = method.output_type();
+        if method.plan.metadata.server_streaming {
+            // The messages of a server stream, one by one: the REST door writes them as NDJSON
+            // lines, the Connect door as a stream.
+            return quote! {
+                #doc_attrs
+                async fn #method_name(
+                    &self,
+                    request: #input_type,
+                    context: #cx_ident,
+                ) -> Result<::futures::stream::BoxStream<'static, Result<#output_type>>>;
+            };
+        }
         quote! {
             #doc_attrs
             async fn #method_name(

@@ -57,4 +57,11 @@ pub trait CatalogHandler<Cx = crate::Context>: Send + Sync + 'static {
         request: GetCatalogStatusRequest,
         context: Cx,
     ) -> Result<CatalogStatus>;
+    /// Stream the events of a catalog: over REST an NDJSON answer, one line per event, with the
+    /// version of the catalog in the `Catalog-Version` header.
+    async fn stream_catalog_events(
+        &self,
+        request: StreamCatalogEventsRequest,
+        context: Cx,
+    ) -> Result<::futures::stream::BoxStream<'static, Result<CatalogEvent>>>;
 }

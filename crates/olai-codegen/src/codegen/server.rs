@@ -333,39 +333,84 @@ fn axum_route_handler_impl(
             .into_iter()
             .map(|field| header_set(method, field))
             .collect::<crate::error::Result<Vec<_>>>()?;
-        // The answer: the status when it is not 200, the headers when there are some, and the
-        // JSON body.
-        let mut types = Vec::new();
-        let mut values = Vec::new();
-        if let Some(status) = &status {
-            types.push(quote! { axum::http::StatusCode });
-            values.push(status.clone());
-        }
-        let headers = if header_sets.is_empty() {
-            quote! {}
+        if method.plan.metadata.server_streaming {
+            // A server stream over REST: an NDJSON body, one line per message. The status, and
+            // the headers that come from the first message, go out before the body; an error
+            // before the first message is the answer, one after it ends the body.
+            let headers = (!header_sets.is_empty()).then(|| {
+                quote! {
+                    if let Some(result) = &first {
+                        #(#header_sets)*
+                    }
+                }
+            });
+            let status = status.map(|status| quote! { #status, });
+            (
+                quote! { axum::response::Response },
+                quote! {
+                    let mut stream = handler.#handler_method(request, context).await?;
+                    let first = ::futures::StreamExt::next(&mut stream).await.transpose()?;
+                    let mut headers = axum::http::HeaderMap::new();
+                    headers.insert(
+                        axum::http::header::CONTENT_TYPE,
+                        axum::http::HeaderValue::from_static("application/x-ndjson"),
+                    );
+                    #headers
+                    let lines = ::futures::StreamExt::map(
+                        ::futures::StreamExt::chain(::futures::stream::iter(first.map(Ok)), stream),
+                        |message| -> ::core::result::Result<axum::body::Bytes, axum::BoxError> {
+                            match message {
+                                Ok(message) => {
+                                    let mut line = serde_json::to_vec(&message)?;
+                                    line.push(b'\n');
+                                    Ok(line.into())
+                                }
+                                Err(_) => Err("the stream failed".into()),
+                            }
+                        },
+                    );
+                    Ok(axum::response::IntoResponse::into_response((
+                        #status
+                        headers,
+                        axum::body::Body::from_stream(lines),
+                    )))
+                },
+            )
         } else {
-            types.push(quote! { axum::http::HeaderMap });
-            values.push(quote! { headers });
-            quote! {
-                let mut headers = axum::http::HeaderMap::new();
-                #(#header_sets)*
+            // The answer: the status when it is not 200, the headers when there are some, and
+            // the JSON body.
+            let mut types = Vec::new();
+            let mut values = Vec::new();
+            if let Some(status) = &status {
+                types.push(quote! { axum::http::StatusCode });
+                values.push(status.clone());
             }
-        };
-        types.push(quote! { #json<#output_type> });
-        values.push(quote! { #json(result) });
-        let (output, answer) = if types.len() == 1 {
-            (types.remove(0), values.remove(0))
-        } else {
-            (quote! { (#(#types),*) }, quote! { (#(#values),*) })
-        };
-        (
-            output,
-            quote! {
-                let result = handler.#handler_method(request, context).await?;
-                #headers
-                Ok(#answer)
-            },
-        )
+            let headers = if header_sets.is_empty() {
+                quote! {}
+            } else {
+                types.push(quote! { axum::http::HeaderMap });
+                values.push(quote! { headers });
+                quote! {
+                    let mut headers = axum::http::HeaderMap::new();
+                    #(#header_sets)*
+                }
+            };
+            types.push(quote! { #json<#output_type> });
+            values.push(quote! { #json(result) });
+            let (output, answer) = if types.len() == 1 {
+                (types.remove(0), values.remove(0))
+            } else {
+                (quote! { (#(#types),*) }, quote! { (#(#values),*) })
+            };
+            (
+                output,
+                quote! {
+                    let result = handler.#handler_method(request, context).await?;
+                    #headers
+                    Ok(#answer)
+                },
+            )
+        }
     } else {
         let (output, answer) = match (&status, empty_response) {
             // A 204 answer has no body, not even the empty one.

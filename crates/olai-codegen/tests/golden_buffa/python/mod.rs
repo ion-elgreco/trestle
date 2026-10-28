@@ -294,6 +294,7 @@ pub fn register(
     module.add_class::<PyCatalogType>()?;
     module.add_class::<PyAzureConfig>()?;
     module.add_class::<PyCatalog>()?;
+    module.add_class::<PyCatalogEvent>()?;
     module.add_class::<PyCatalogStatus>()?;
     module.add_class::<PyCatalogToken>()?;
     module.add_class::<PyCreateCatalogRequest>()?;
@@ -309,6 +310,7 @@ pub fn register(
     module.add_class::<PyListCatalogsResponse>()?;
     module.add_class::<PyS3Config>()?;
     module.add_class::<PyStorageConfig>()?;
+    module.add_class::<PyStreamCatalogEventsRequest>()?;
     module.add_class::<PyUpdateCatalogRequest>()?;
     module.add_class::<PyCatalogClient>()?;
     module.add_class::<PyGetSchemaRequestView>()?;

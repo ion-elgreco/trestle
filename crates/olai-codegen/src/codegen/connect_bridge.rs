@@ -86,6 +86,21 @@ pub(super) fn generate(service: &ServiceHandler<'_>, template: &str) -> Result<S
                 }
             });
             let (output, call) = match method.output_type() {
+                // A server stream: the handler's stream, with its errors as Connect errors.
+                Some(output) if method.plan.metadata.server_streaming => (
+                    quote! { ::connectrpc::ServiceStream<#output> },
+                    quote! {
+                        let stream = self
+                            .handler
+                            .#name(request, context)
+                            .await
+                            .map_err(::core::convert::Into::<::connectrpc::ConnectError>::into)?;
+                        let stream = ::futures::StreamExt::map(stream, |message| {
+                            message.map_err(::core::convert::Into::<::connectrpc::ConnectError>::into)
+                        });
+                        ::connectrpc::Response::<::connectrpc::ServiceStream<#output>>::stream_ok(stream)
+                    },
+                ),
                 Some(output) => (
                     quote! { #output },
                     quote! {

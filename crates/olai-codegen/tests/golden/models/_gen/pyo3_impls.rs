@@ -316,6 +316,67 @@ impl ::core::convert::From<PyCatalog> for super::catalog::v1::Catalog {
     }
 }
 
+/// An event of a catalog.
+#[::pyo3::pyclass(name = "CatalogEvent", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PyCatalogEvent(pub super::catalog::v1::CatalogEvent);
+#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
+#[::pyo3::pymethods]
+impl PyCatalogEvent {
+    #[new]
+    #[pyo3(signature = (kind = None, version = None))]
+    fn new(
+        kind: ::core::option::Option<::std::string::String>,
+        version: ::core::option::Option<i64>,
+    ) -> Self {
+        let mut inner = <super::catalog::v1::CatalogEvent as ::core::default::Default>::default();
+        if let ::core::option::Option::Some(value) = kind {
+            inner.kind = value;
+        }
+        if let ::core::option::Option::Some(value) = version {
+            inner.version = value;
+        }
+        Self(inner)
+    }
+
+    #[getter]
+    fn kind(&self) -> ::std::string::String {
+        self.0.kind.clone()
+    }
+
+    /// The version of the catalog, in the `Catalog-Version` header of the answer.
+    #[getter]
+    fn version(&self) -> i64 {
+        self.0.version
+    }
+
+    #[setter(kind)]
+    fn set_kind(&mut self, value: ::std::string::String) {
+        self.0.kind = value;
+    }
+
+    #[setter(version)]
+    fn set_version(&mut self, value: i64) {
+        self.0.version = value;
+    }
+
+    fn __repr__(&self) -> ::std::string::String {
+        ::std::format!("{:?}", self.0)
+    }
+}
+
+impl ::core::convert::From<super::catalog::v1::CatalogEvent> for PyCatalogEvent {
+    fn from(value: super::catalog::v1::CatalogEvent) -> Self {
+        Self(value)
+    }
+}
+
+impl ::core::convert::From<PyCatalogEvent> for super::catalog::v1::CatalogEvent {
+    fn from(value: PyCatalogEvent) -> Self {
+        value.0
+    }
+}
+
 #[::pyo3::pyclass(name = "CatalogStatus", eq, from_py_object)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalogStatus(pub super::catalog::v1::CatalogStatus);
@@ -1127,6 +1188,53 @@ impl ::core::convert::From<super::catalog::v1::StorageConfig> for PyStorageConfi
 
 impl ::core::convert::From<PyStorageConfig> for super::catalog::v1::StorageConfig {
     fn from(value: PyStorageConfig) -> Self {
+        value.0
+    }
+}
+
+#[::pyo3::pyclass(name = "StreamCatalogEventsRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PyStreamCatalogEventsRequest(
+    pub super::catalog::v1::StreamCatalogEventsRequest,
+);
+#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
+#[::pyo3::pymethods]
+impl PyStreamCatalogEventsRequest {
+    #[new]
+    #[pyo3(signature = (name = None))]
+    fn new(name: ::core::option::Option<::std::string::String>) -> Self {
+        let mut inner = <super::catalog::v1::StreamCatalogEventsRequest as ::core::default::Default>::default();
+        if let ::core::option::Option::Some(value) = name {
+            inner.name = value;
+        }
+        Self(inner)
+    }
+
+    #[getter]
+    fn name(&self) -> ::std::string::String {
+        self.0.name.clone()
+    }
+
+    #[setter(name)]
+    fn set_name(&mut self, value: ::std::string::String) {
+        self.0.name = value;
+    }
+
+    fn __repr__(&self) -> ::std::string::String {
+        ::std::format!("{:?}", self.0)
+    }
+}
+
+impl ::core::convert::From<super::catalog::v1::StreamCatalogEventsRequest>
+for PyStreamCatalogEventsRequest {
+    fn from(value: super::catalog::v1::StreamCatalogEventsRequest) -> Self {
+        Self(value)
+    }
+}
+
+impl ::core::convert::From<PyStreamCatalogEventsRequest>
+for super::catalog::v1::StreamCatalogEventsRequest {
+    fn from(value: PyStreamCatalogEventsRequest) -> Self {
         value.0
     }
 }

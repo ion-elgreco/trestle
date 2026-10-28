@@ -42,6 +42,12 @@ impl NapiCatalogClient {
         let request = self.client.get_catalog_status().with_if_none_match(if_none_match);
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
+    #[napi(catch_unwind)]
+    pub async fn stream_catalog_events(&self) -> napi::Result<Buffer> {
+        let request = self.client.stream_catalog_events();
+        request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
+    }
 }
 
 impl NapiCatalogClient {

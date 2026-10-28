@@ -21,7 +21,7 @@ fn test_parses_services_and_methods() {
         .services
         .get("CatalogService")
         .expect("CatalogService exists");
-    assert_eq!(catalog.methods.len(), 7); // Create/Get/List/Update/Delete + custom GenerateCatalogToken + custom GetCatalogStatus
+    assert_eq!(catalog.methods.len(), 8); // Create/Get/List/Update/Delete + custom GenerateCatalogToken + custom GetCatalogStatus + StreamCatalogEvents
 
     // Nested resource-scoped child of Catalog.
     let schema = meta

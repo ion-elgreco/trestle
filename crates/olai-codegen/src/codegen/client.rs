@@ -392,29 +392,41 @@ fn read_output(
     };
 
     let header_fields = method.response_header_fields();
-    if method.plan.metadata.server_streaming {
-        if !header_fields.is_empty() {
-            return Err(crate::Error::Build(format!(
-                "method `{}` streams its output, so its output fields cannot come from response headers",
-                method.plan.handler_function_name
-            )));
-        }
-        let parse_line = from_slice(quote! { line });
-        return Ok(quote! {
-            let result = response.bytes().await?;
-            #options
-            result
-                .split(|byte| *byte == b'\n')
-                .filter(|line| !line.trim_ascii().is_empty())
-                .map(|line| -> Result<#output_type> { Ok(#parse_line?) })
-                .collect()
-        });
-    }
-
     let assignments = header_fields
         .iter()
         .map(|field| header_assignment(method, field))
         .collect::<Result<Vec<_>>>()?;
+    if method.plan.metadata.server_streaming {
+        // The lines of the NDJSON body; the output fields in response headers are set on every
+        // message, as the headers are those of the whole answer.
+        let parse_line = from_slice(quote! { line });
+        if assignments.is_empty() {
+            return Ok(quote! {
+                let result = response.bytes().await?;
+                #options
+                result
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.trim_ascii().is_empty())
+                    .map(|line| -> Result<#output_type> { Ok(#parse_line?) })
+                    .collect()
+            });
+        }
+        return Ok(quote! {
+            let headers = response.headers().clone();
+            let result = response.bytes().await?;
+            #options
+            let mut outputs = result
+                .split(|byte| *byte == b'\n')
+                .filter(|line| !line.trim_ascii().is_empty())
+                .map(|line| -> Result<#output_type> { Ok(#parse_line?) })
+                .collect::<Result<Vec<#output_type>>>()?;
+            for output in &mut outputs {
+                #(#assignments)*
+            }
+            Ok(outputs)
+        });
+    }
+
     if let Some(field) = &method.plan.raw_response_body {
         let field_ident = crate::utils::field_ident(field);
         if assignments.is_empty() {

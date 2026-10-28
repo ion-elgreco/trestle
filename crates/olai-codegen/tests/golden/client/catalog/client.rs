@@ -147,4 +147,37 @@ impl CatalogServiceClient {
         }
         Ok(output)
     }
+
+    /// Stream the events of a catalog: over REST an NDJSON answer, one line per event, with the
+    /// version of the catalog in the `Catalog-Version` header.
+    pub async fn stream_catalog_events(
+        &self,
+        request: &StreamCatalogEventsRequest,
+    ) -> Result<Vec<CatalogEvent>> {
+        let formatted_path = format!(
+            "catalogs/{}/events", encode_path_value(& request.name, false)
+        );
+        let url = self.base_url.join(&formatted_path)?;
+        let response = self.client.get(url).send().await?;
+        if !response.status().is_success() {
+            return Err(crate::error::parse_error_response(response).await);
+        }
+        let headers = response.headers().clone();
+        let result = response.bytes().await?;
+        let mut outputs = result
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.trim_ascii().is_empty())
+            .map(|line| -> Result<CatalogEvent> { Ok(serde_json::from_slice(line)?) })
+            .collect::<Result<Vec<CatalogEvent>>>()?;
+        for output in &mut outputs {
+            if let Some(value) = headers
+                .get("Catalog-Version")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse().ok())
+            {
+                output.version = value;
+            }
+        }
+        Ok(outputs)
+    }
 }
