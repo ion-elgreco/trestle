@@ -123,6 +123,11 @@ function parseNativeError(e: unknown): never {
 
 // ── end ExampleError error hierarchy ─────────────────────────────────────────────────────
 
+export interface GetCatalogStatusOptions {
+  /** The entity tag of the status the caller has, in the `If-None-Match` header. */
+  ifNoneMatch?: string;
+}
+
 export class CatalogClient {
   private readonly inner: NativeCatalogClient;
 
@@ -186,6 +191,9 @@ export class ExampleClient {
     this.inner = NativeClient.fromUrl(url, token);
   }
 
+  /**
+     * A create answers 201.
+     */
   async createCatalog(): Promise<Catalog> {
     try {
       return fromBinary(CatalogSchema, await this.inner.createCatalog());

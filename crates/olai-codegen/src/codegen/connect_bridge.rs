@@ -69,10 +69,15 @@ pub(super) fn generate(service: &ServiceHandler<'_>, template: &str) -> Result<S
     };
 
     let server_methods = super::server::server_methods(service);
-    let methods: Vec<TokenStream> = server_methods.iter().map(|method| {
-        let name = method.plan.base_method_ident();
-        let input = method.input_type();
-        let validation = has_required_fields(service.metadata, &method.plan.metadata.input_type)
+    let methods: Vec<TokenStream> = server_methods
+        .iter()
+        .map(|method| {
+            let name = method.plan.base_method_ident();
+            let input = method.input_type();
+            let validation = has_required_fields(
+                service.metadata,
+                &method.plan.metadata.input_type,
+            )
             .then(|| {
                 quote! {
                     request
@@ -80,45 +85,46 @@ pub(super) fn generate(service: &ServiceHandler<'_>, template: &str) -> Result<S
                         .map_err(|e| ::connectrpc::ConnectError::invalid_argument(e.to_string()))?;
                 }
             });
-        let (output, call) = match method.output_type() {
-            Some(output) => (
-                quote! { #output },
-                quote! {
-                    let answer = self
-                        .handler
-                        .#name(request, context)
-                        .await
-                        .map_err(::core::convert::Into::<::connectrpc::ConnectError>::into)?;
-                    ::core::result::Result::Ok(::connectrpc::Response::new(answer))
-                },
-            ),
-            None => (
-                quote! { ::buffa_types::google::protobuf::Empty },
-                quote! {
-                    self.handler
-                        .#name(request, context)
-                        .await
-                        .map_err(::core::convert::Into::<::connectrpc::ConnectError>::into)?;
-                    ::core::result::Result::Ok(::connectrpc::Response::new(
-                        ::core::default::Default::default(),
-                    ))
-                },
-            ),
-        };
-        quote! {
-            #[allow(refining_impl_trait)]
-            async fn #name(
-                &self,
-                ctx: ::connectrpc::RequestContext,
-                request: ::connectrpc::ServiceRequest<'_, #input>,
-            ) -> ::connectrpc::ServiceResult<#output> {
-                let context = Cx::from_request_context(&ctx)?;
-                let request = request.to_owned_message();
-                #validation
-                #call
+            let (output, call) = match method.output_type() {
+                Some(output) => (
+                    quote! { #output },
+                    quote! {
+                        let answer = self
+                            .handler
+                            .#name(request, context)
+                            .await
+                            .map_err(::core::convert::Into::<::connectrpc::ConnectError>::into)?;
+                        ::core::result::Result::Ok(::connectrpc::Response::new(answer))
+                    },
+                ),
+                None => (
+                    quote! { ::buffa_types::google::protobuf::Empty },
+                    quote! {
+                        self.handler
+                            .#name(request, context)
+                            .await
+                            .map_err(::core::convert::Into::<::connectrpc::ConnectError>::into)?;
+                        ::core::result::Result::Ok(::connectrpc::Response::new(
+                            ::core::default::Default::default(),
+                        ))
+                    },
+                ),
+            };
+            quote! {
+                #[allow(refining_impl_trait)]
+                async fn #name(
+                    &self,
+                    ctx: ::connectrpc::RequestContext,
+                    request: ::connectrpc::ServiceRequest<'_, #input>,
+                ) -> ::connectrpc::ServiceResult<#output> {
+                    let context = Cx::from_request_context(&ctx)?;
+                    let request = request.to_owned_message();
+                    #validation
+                    #call
+                }
             }
-        }
-    }).collect();
+        })
+        .collect();
 
     let reads: Vec<String> = server_methods
         .iter()

@@ -70,6 +70,7 @@ fn connect_metadata() -> CodeGenMetadata {
         output_type: "Thing".to_string(),
         server_streaming: false,
         no_side_effects: false,
+        response_status: None,
         operation: None,
         http_rule: Default::default(),
         http_pattern: HttpPattern::default(),

@@ -836,6 +836,7 @@ mod tests {
             output_type: "Catalog".to_string(),
             server_streaming: false,
             no_side_effects: false,
+            response_status: None,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -888,6 +889,7 @@ mod tests {
             output_type: "Catalog".to_string(),
             server_streaming: false,
             no_side_effects: false,
+            response_status: None,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -922,6 +924,7 @@ mod tests {
             output_type: "".to_string(),
             server_streaming: false,
             no_side_effects: false,
+            response_status: None,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -972,6 +975,7 @@ mod tests {
             output_type: "DoThingResponse".to_string(),
             server_streaming: false,
             no_side_effects: false,
+            response_status: None,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -1033,6 +1037,7 @@ mod tests {
             output_type: "MakeResp".to_string(),
             server_streaming: false,
             no_side_effects: false,
+            response_status: None,
             operation: None,
             http_rule: HttpRule::default(),
             http_pattern: HttpPattern::default(),
@@ -1099,6 +1104,7 @@ mod tests {
             output_type: "".to_string(),
             server_streaming: false,
             no_side_effects: false,
+            response_status: None,
             operation: None,
             http_rule: HttpRule {
                 selector: "".to_string(),
@@ -1367,6 +1373,7 @@ mod tests {
                     output_type: "ListCatalogsResponse".to_string(),
                     server_streaming: false,
                     no_side_effects: false,
+                    response_status: None,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1385,6 +1392,7 @@ mod tests {
                     output_type: "Catalog".to_string(),
                     server_streaming: false,
                     no_side_effects: false,
+                    response_status: None,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1412,6 +1420,7 @@ mod tests {
                     output_type: "ListSchemasResponse".to_string(),
                     server_streaming: false,
                     no_side_effects: false,
+                    response_status: None,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1430,6 +1439,7 @@ mod tests {
                     output_type: "Schema".to_string(),
                     server_streaming: false,
                     no_side_effects: false,
+                    response_status: None,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1457,6 +1467,7 @@ mod tests {
                     output_type: "ListTablesResponse".to_string(),
                     server_streaming: false,
                     no_side_effects: false,
+                    response_status: None,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),
@@ -1475,6 +1486,7 @@ mod tests {
                     output_type: "Table".to_string(),
                     server_streaming: false,
                     no_side_effects: false,
+                    response_status: None,
                     operation: None,
                     http_rule: HttpRule {
                         selector: "".to_string(),

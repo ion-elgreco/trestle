@@ -332,11 +332,17 @@ pub struct PyCatalogStatus(pub super::catalog::v1::CatalogStatus);
 #[::pyo3::pymethods]
 impl PyCatalogStatus {
     #[new]
-    #[pyo3(signature = (state = None))]
-    fn new(state: ::core::option::Option<::std::string::String>) -> Self {
+    #[pyo3(signature = (state = None, etag = None))]
+    fn new(
+        state: ::core::option::Option<::std::string::String>,
+        etag: ::core::option::Option<::std::string::String>,
+    ) -> Self {
         let mut inner = <super::catalog::v1::CatalogStatus as ::core::default::Default>::default();
         if let ::core::option::Option::Some(value) = state {
             inner.state = value;
+        }
+        if let ::core::option::Option::Some(value) = etag {
+            inner.etag = value;
         }
         Self(inner)
     }
@@ -346,9 +352,20 @@ impl PyCatalogStatus {
         self.0.state.clone()
     }
 
+    /// The entity tag, in the `ETag` header.
+    #[getter]
+    fn etag(&self) -> ::std::string::String {
+        self.0.etag.clone()
+    }
+
     #[setter(state)]
     fn set_state(&mut self, value: ::std::string::String) {
         self.0.state = value;
+    }
+
+    #[setter(etag)]
+    fn set_etag(&mut self, value: ::std::string::String) {
+        self.0.etag = value;
     }
 
     fn __repr__(&self) -> ::std::string::String {
@@ -635,11 +652,18 @@ pub struct PyGetCatalogStatusRequest(pub super::catalog::v1::GetCatalogStatusReq
 #[::pyo3::pymethods]
 impl PyGetCatalogStatusRequest {
     #[new]
-    #[pyo3(signature = (name = None))]
-    fn new(name: ::core::option::Option<::std::string::String>) -> Self {
+    #[pyo3(signature = (name = None, if_none_match = None))]
+    fn new(
+        name: ::core::option::Option<::std::string::String>,
+        if_none_match: ::core::option::Option<::std::string::String>,
+    ) -> Self {
         let mut inner = <super::catalog::v1::GetCatalogStatusRequest as ::core::default::Default>::default();
         if let ::core::option::Option::Some(value) = name {
             inner.name = value;
+        }
+        {
+            let value = if_none_match;
+            inner.if_none_match = value;
         }
         Self(inner)
     }
@@ -649,9 +673,23 @@ impl PyGetCatalogStatusRequest {
         self.0.name.clone()
     }
 
+    /// The entity tag of the status the caller has, in the `If-None-Match` header.
+    #[getter]
+    fn if_none_match(&self) -> ::core::option::Option<::std::string::String> {
+        self.0.if_none_match.clone()
+    }
+
     #[setter(name)]
     fn set_name(&mut self, value: ::std::string::String) {
         self.0.name = value;
+    }
+
+    #[setter(if_none_match)]
+    fn set_if_none_match(
+        &mut self,
+        value: ::core::option::Option<::std::string::String>,
+    ) {
+        self.0.if_none_match = value;
     }
 
     fn __repr__(&self) -> ::std::string::String {

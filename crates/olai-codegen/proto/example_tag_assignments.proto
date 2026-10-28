@@ -4,6 +4,7 @@ package example.tags.v1;
 import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 import "gnostic/openapi/v3/annotations.proto";
+import "olai/trestle/v1/annotations.proto";
 
 // Tag-assignment-shaped API: a resource-less service (no `google.api.resource`)
 // keyed by a composite path `(entity_type, entity_name, tag_key)`. Exercises the
@@ -49,6 +50,7 @@ service TagAssignmentsService {
       post: "/entities/{entity_type}/{entity_name}/tags/{tag_key}:touch"
       body: "*"
     };
+    option (olai.trestle.v1.response_status) = 204;
   }
 }
 

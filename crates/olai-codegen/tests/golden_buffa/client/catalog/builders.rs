@@ -248,6 +248,15 @@ impl GetCatalogStatusBuilder {
         };
         Self { client, request }
     }
+
+    /// The entity tag of the status the caller has, in the `If-None-Match` header.
+    pub fn with_if_none_match(
+        mut self,
+        if_none_match: impl Into<Option<String>>,
+    ) -> Self {
+        self.request.if_none_match = if_none_match.into();
+        self
+    }
 }
 
 impl IntoFuture for GetCatalogStatusBuilder {

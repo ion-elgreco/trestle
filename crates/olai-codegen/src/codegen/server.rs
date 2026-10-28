@@ -26,6 +26,7 @@ use crate::{
     Error,
     analysis::{MethodPlan, RequestParam},
     codegen::{CodeGenConfig, MethodHandler, Runtime, ServiceHandler},
+    parsing::MessageField,
     parsing::http::HttpPattern,
     parsing::types::{BaseType, RenderContext},
 };
@@ -73,8 +74,7 @@ impl Extractors {
 /// - FromRequestParts extractor implementations for path/query parameters
 /// - FromRequest extractor implementations for JSON body
 ///
-/// A method with a raw body or a request header field gets no extractor: the server emitter refuses
-/// it.
+/// A method with a raw body gets no extractor: the server emitter leaves it to the app.
 pub(super) fn generate_common(service: &ServiceHandler<'_>) -> crate::error::Result<String> {
     let extractors = Extractors::of(service.config);
     let methods = server_methods(service);
@@ -131,7 +131,7 @@ pub(super) fn generate_server(service: &ServiceHandler<'_>) -> crate::error::Res
                 empty_response.as_ref(),
             )
         })
-        .collect_vec();
+        .collect::<crate::error::Result<Vec<_>>>()?;
     let router = router_fn(service, &methods)?;
 
     let mod_path = service.models_path();
@@ -245,18 +245,14 @@ fn validation(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStrea
 
 /// The routed methods that the server emitter supports: an extractor, a route and a handler
 /// method each. Left out, for the app to write by hand: a method that sends or reads a raw body
-/// (`(olai.trestle.v1.raw_body)`) or has a field in a request header
-/// (`(olai.trestle.v1.request_header)`), and a method whose request message another method of
-/// the service already extracts (a message has one extractor).
+/// (`(olai.trestle.v1.raw_body)`), and a method whose request message another method of the
+/// service already extracts (a message has one extractor).
 pub(super) fn server_methods<'a>(service: &'a ServiceHandler<'a>) -> Vec<MethodHandler<'a>> {
     let mut extracted: Vec<String> = Vec::new();
     service
         .rest_methods()
         .filter(|method| {
-            if method.plan.raw_request_body.is_some()
-                || method.plan.raw_response_body.is_some()
-                || !method.plan.request_headers.is_empty()
-            {
+            if method.plan.raw_request_body.is_some() || method.plan.raw_response_body.is_some() {
                 return false;
             }
             let input = &method.plan.metadata.input_type;
@@ -292,57 +288,211 @@ fn from_request_extractor(method: &MethodHandler<'_>, extractors: &Extractors) -
     }
 }
 
-/// Generate route handler function
+/// Generate route handler function: the request through the handler trait, its answer as JSON
+/// with the status of `(olai.trestle.v1.response_status)`, and the output fields that go in
+/// response headers (`(olai.trestle.v1.response_header)`) set on the answer.
 fn axum_route_handler_impl(
     method: &MethodHandler<'_>,
     handler_trait: &str,
     extractors: &Extractors,
     empty_response: Option<&Path>,
-) -> TokenStream {
+) -> crate::error::Result<TokenStream> {
     let handler_method = format_ident!("{}", method.plan.handler_function_name);
     let input_type = method.input_type();
     let handler_trait_ident = format_ident!("{}", handler_trait);
     let json = &extractors.json;
+    let response_status = method.plan.metadata.response_status;
+    let status = response_status
+        .map(|status| status_code(method, status))
+        .transpose()?;
 
-    if method.plan.has_response {
-        let output_type = method.output_type();
-        quote! {
-            pub async fn #handler_method<T, Cx>(
-                State(handler): State<T>,
-                context: Cx,
-                request: #input_type,
-            ) -> Result<#json<#output_type>>
-            where
-                T: #handler_trait_ident<Cx> + Clone + Send + Sync + 'static,
-                Cx: axum::extract::FromRequestParts<T> + Send,
-            {
-                let result = handler.#handler_method(request, context).await?;
-                Ok(#json(result))
-            }
+    let (output, body) = if method.plan.has_response {
+        if response_status == Some(204) {
+            return Err(Error::Build(format!(
+                "method `{}` answers 204 (no content), so it cannot have an output",
+                method.plan.handler_function_name
+            )));
         }
+        let output_type = method.output_type();
+        let header_sets = method
+            .response_header_fields()
+            .into_iter()
+            .map(|field| header_set(method, field))
+            .collect::<crate::error::Result<Vec<_>>>()?;
+        // The answer: the status when it is not 200, the headers when there are some, and the
+        // JSON body.
+        let mut types = Vec::new();
+        let mut values = Vec::new();
+        if let Some(status) = &status {
+            types.push(quote! { axum::http::StatusCode });
+            values.push(status.clone());
+        }
+        let headers = if header_sets.is_empty() {
+            quote! {}
+        } else {
+            types.push(quote! { axum::http::HeaderMap });
+            values.push(quote! { headers });
+            quote! {
+                let mut headers = axum::http::HeaderMap::new();
+                #(#header_sets)*
+            }
+        };
+        types.push(quote! { #json<#output_type> });
+        values.push(quote! { #json(result) });
+        let (output, answer) = if types.len() == 1 {
+            (types.remove(0), values.remove(0))
+        } else {
+            (quote! { (#(#types),*) }, quote! { (#(#values),*) })
+        };
+        (
+            output,
+            quote! {
+                let result = handler.#handler_method(request, context).await?;
+                #headers
+                Ok(#answer)
+            },
+        )
     } else {
-        let (output, answer) = match empty_response {
-            Some(empty) => (
+        let (output, answer) = match (&status, empty_response) {
+            // A 204 answer has no body, not even the empty one.
+            (Some(status), Some(empty)) if response_status != Some(204) => (
+                quote! { (axum::http::StatusCode, #empty) },
+                quote! { (#status, ::core::default::Default::default()) },
+            ),
+            (Some(status), _) => (quote! { axum::http::StatusCode }, quote! { #status }),
+            (None, Some(empty)) => (
                 quote! { #empty },
                 quote! { ::core::default::Default::default() },
             ),
-            None => (quote! { () }, quote! { () }),
+            (None, None) => (quote! { () }, quote! { () }),
         };
-        quote! {
-            pub async fn #handler_method<T, Cx>(
-                State(handler): State<T>,
-                context: Cx,
-                request: #input_type,
-            ) -> Result<#output>
-            where
-                T: #handler_trait_ident<Cx> + Clone + Send + Sync + 'static,
-                Cx: axum::extract::FromRequestParts<T> + Send,
-            {
+        (
+            output,
+            quote! {
                 handler.#handler_method(request, context).await?;
                 Ok(#answer)
+            },
+        )
+    };
+    Ok(quote! {
+        pub async fn #handler_method<T, Cx>(
+            State(handler): State<T>,
+            context: Cx,
+            request: #input_type,
+        ) -> Result<#output>
+        where
+            T: #handler_trait_ident<Cx> + Clone + Send + Sync + 'static,
+            Cx: axum::extract::FromRequestParts<T> + Send,
+        {
+            #body
+        }
+    })
+}
+
+/// The `StatusCode` of a `(olai.trestle.v1.response_status)`.
+fn status_code(method: &MethodHandler<'_>, status: u16) -> crate::error::Result<TokenStream> {
+    let name = match status {
+        200 => Some("OK"),
+        201 => Some("CREATED"),
+        202 => Some("ACCEPTED"),
+        204 => Some("NO_CONTENT"),
+        100..=599 => None,
+        _ => {
+            return Err(Error::Build(format!(
+                "method `{}`: `{status}` is not an HTTP status",
+                method.plan.handler_function_name
+            )));
+        }
+    };
+    Ok(match name {
+        Some(name) => {
+            let name = format_ident!("{name}");
+            quote! { axum::http::StatusCode::#name }
+        }
+        None => quote! { axum::http::StatusCode::from_u16(#status).expect("an HTTP status") },
+    })
+}
+
+/// The statement that puts the output field `field` in its response header: a string when it
+/// is there and not empty, a number or a bool as text.
+fn header_set(
+    method: &MethodHandler<'_>,
+    field: &MessageField,
+) -> crate::error::Result<TokenStream> {
+    let ident = crate::utils::field_ident(&field.name);
+    let header = field
+        .response_header
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let ty = &field.unified_type;
+    let is_string = match ty.base_type {
+        BaseType::String => true,
+        BaseType::Int32
+        | BaseType::Int64
+        | BaseType::Bool
+        | BaseType::Float32
+        | BaseType::Float64 => false,
+        _ => {
+            return Err(Error::Build(format!(
+                "field `{}` of the output of `{}` goes in a response header, so it must be a string, number or bool",
+                field.name, method.plan.handler_function_name
+            )));
+        }
+    };
+    if ty.is_repeated {
+        return Err(Error::Build(format!(
+            "field `{}` of the output of `{}` goes in a response header, so it cannot be repeated",
+            field.name, method.plan.handler_function_name
+        )));
+    }
+    let set = if is_string {
+        quote! {
+            if let Ok(value) = axum::http::HeaderValue::from_str(value) {
+                headers.insert(#header, value);
             }
         }
-    }
+    } else {
+        quote! {
+            if let Ok(value) = axum::http::HeaderValue::from_str(&value.to_string()) {
+                headers.insert(#header, value);
+            }
+        }
+    };
+    Ok(match (ty.is_optional, is_string) {
+        (true, true) => quote! { if let Some(value) = &result.#ident { #set } },
+        (false, true) => quote! {
+            let value = &result.#ident;
+            if !value.is_empty() { #set }
+        },
+        (true, false) => quote! { if let Some(value) = result.#ident { #set } },
+        (false, false) => quote! {
+            let value = result.#ident;
+            #set
+        },
+    })
+}
+
+/// The request fields in request headers (`(olai.trestle.v1.request_header)`), read from the
+/// parts: a missing header is `None`, or empty for a field that is not `optional` (a `REQUIRED`
+/// one fails `validate()`).
+fn header_extractions(method: &MethodHandler<'_>) -> TokenStream {
+    let reads = method.plan.request_headers.iter().map(|(field, header)| {
+        let ident = crate::utils::field_ident(field);
+        let value = quote! {
+            parts
+                .headers
+                .get(#header)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string)
+        };
+        if method.plan.request_header_is_optional(field) {
+            quote! { let #ident = #value; }
+        } else {
+            quote! { let #ident = #value.unwrap_or_default(); }
+        }
+    });
+    quote! { #(#reads)* }
 }
 
 /// Generate FromRequestParts implementation for path/query parameters
@@ -350,6 +500,7 @@ fn from_request_parts_impl(method: &MethodHandler<'_>, extractors: &Extractors) 
     let input_type = method.input_type();
     let path_extractions = path_extractions(method, extractors);
     let query_extractions = query_extractions(method, extractors);
+    let header_extractions = header_extractions(method);
     let field_assignments = field_assignments(method.plan, method.config.runtime);
     let validation = validation(method, extractors);
     // A request without path or query parameters reads nothing from the parts.
@@ -369,6 +520,7 @@ fn from_request_parts_impl(method: &MethodHandler<'_>, extractors: &Extractors) 
             ) -> Result<Self, Self::Rejection> {
                 #path_extractions
                 #query_extractions
+                #header_extractions
 
                 let request = #input_type {
                     #field_assignments
@@ -419,14 +571,18 @@ fn from_request_impl(method: &MethodHandler<'_>, extractors: &Extractors) -> Tok
 }
 
 /// Generate hybrid FromRequest implementation for methods with path/query + body
-fn generate_hybrid_request_impl(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStream {
+fn generate_hybrid_request_impl(
+    method: &MethodHandler<'_>,
+    extractors: &Extractors,
+) -> TokenStream {
     // Only reached when is_hybrid == true (caller checked path/query params exist),
     // which requires a non-Empty input message, so input_type() is always Some here.
     let input_type = method.input_type().unwrap();
     let path_extractions = path_extractions(method, extractors);
     let query_extractions = query_extractions(method, extractors);
+    let header_extractions = header_extractions(method);
     // Oneof fields deserialize from JSON like any other field, so no special treatment needed.
-    let body_extractions = generate_body_extractions_tokens(method.plan, &input_type, extractors);
+    let body_extractions = generate_body_extractions_tokens(method, &input_type, extractors);
     let field_assignments = field_assignments(method.plan, method.config.runtime);
     let validation = validation(method, extractors);
 
@@ -450,6 +606,7 @@ fn generate_hybrid_request_impl(method: &MethodHandler<'_>, extractors: &Extract
                 let (mut parts, #body_binding) = req.into_parts();
                 #path_extractions
                 #query_extractions
+                #header_extractions
 
                 // Extract body fields (only when the request has a body).
                 #body_extractions
@@ -464,17 +621,50 @@ fn generate_hybrid_request_impl(method: &MethodHandler<'_>, extractors: &Extract
     }
 }
 
-/// Generate body parameter extractions as TokenStream
+/// Generate body parameter extractions as TokenStream. The body is the request message without
+/// its path and query fields, or the field that the HTTP rule names (`body: "field"`).
 fn generate_body_extractions_tokens(
-    method: &MethodPlan,
+    method: &MethodHandler<'_>,
     response_type: &Ident,
     extractors: &Extractors,
 ) -> TokenStream {
-    let body_fields = method.body_fields().collect_vec();
+    let body_fields = method.plan.body_fields().collect_vec();
     if body_fields.is_empty() {
-        quote! {}
+        return quote! {};
+    }
+    let json = &extractors.json;
+    let named = method
+        .plan
+        .named_body()
+        .and_then(|name| body_fields.iter().find(|field| field.name == name));
+    if let Some(field) = named {
+        // The body is the field itself, parsed as its type; the other body fields (oneofs) are
+        // not in it.
+        let ident = crate::utils::field_ident(&field.name);
+        let field_type = method.field_type(
+            &crate::parsing::types::UnifiedType {
+                is_optional: false,
+                ..field.field_type.clone()
+            },
+            RenderContext::Extractor,
+        );
+        let others = body_fields
+            .iter()
+            .filter(|other| other.name != field.name)
+            .map(|other| {
+                let ident = crate::utils::field_ident(&other.name);
+                quote! { let #ident = ::core::default::Default::default(); }
+            });
+        quote! {
+            let body_req = axum::extract::Request::from_parts(parts, body);
+            let #json::<#field_type>(body) = body_req
+                .extract()
+                .await
+                .map_err(axum::response::IntoResponse::into_response)?;
+            let #ident = body.into();
+            #(#others)*
+        }
     } else {
-        let json = &extractors.json;
         let field_names: Vec<_> = body_fields
             .iter()
             .map(|f| format_ident!("{}", f.name))
@@ -534,9 +724,10 @@ fn path_extractions(method: &MethodHandler<'_>, extractors: &Extractors) -> Toke
     }
 }
 
-/// Generate query parameter extractions as TokenStream
+/// Generate query parameter extractions as TokenStream: the query parameters in the URL, not
+/// the ones in request headers.
 fn query_extractions(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStream {
-    let params = method.plan.query_parameters().collect_vec();
+    let params = method.plan.url_query_parameters().collect_vec();
     if params.is_empty() {
         quote! {}
     } else {
@@ -636,6 +827,7 @@ mod tests {
                 output_type: "ListThingsResponse".to_string(),
                 server_streaming: false,
                 no_side_effects: false,
+                response_status: None,
                 operation: None,
                 http_rule: HttpRule {
                     selector: "".to_string(),

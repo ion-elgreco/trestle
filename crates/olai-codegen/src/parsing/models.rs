@@ -174,6 +174,9 @@ pub struct MethodMetadata {
     /// `option idempotency_level = NO_SIDE_EFFECTS`: a read. Over Connect it may be a GET, and
     /// a server need not record it as a change.
     pub no_side_effects: bool,
+    /// `(olai.trestle.v1.response_status)`: the HTTP status of the REST answer when it is not
+    /// 200, such as 201 or 204. A 204 answer has no body.
+    pub response_status: Option<u16>,
 }
 
 impl MethodMetadata {
@@ -227,6 +230,7 @@ mod tests {
             output_type: ".test.TestResponse".to_string(),
             server_streaming: false,
             no_side_effects: false,
+            response_status: None,
             operation: None,
             http_pattern: crate::parsing::http::HttpPattern::parse("/test"),
             http_rule,

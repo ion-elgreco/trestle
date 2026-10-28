@@ -283,6 +283,21 @@ impl MethodPlan {
         })
     }
 
+    /// Whether the request field `field`, in a request header, is an `Option`.
+    pub fn request_header_is_optional(&self, field: &str) -> bool {
+        self.query_parameters()
+            .any(|param| param.name == field && param.field_type.is_optional)
+    }
+
+    /// The request field that is the whole request body, when the HTTP rule names one
+    /// (`body: "field"`) and it is not a raw body.
+    pub fn named_body(&self) -> Option<&str> {
+        match self.metadata.http_rule.body.as_str() {
+            "" | "*" => None,
+            name => Some(name).filter(|name| self.raw_request_body.as_deref() != Some(name)),
+        }
+    }
+
     pub fn query_parameters(&self) -> impl Iterator<Item = &QueryParam> {
         self.parameters.iter().filter_map(|param| match param {
             RequestParam::Query(query_param) => Some(query_param),

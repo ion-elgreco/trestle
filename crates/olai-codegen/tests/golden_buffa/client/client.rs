@@ -73,6 +73,7 @@ impl ExampleClient {
         )
     }
 
+    /// A create answers 201.
     pub fn create_catalog(&self) -> CreateCatalogBuilder {
         CreateCatalogBuilder::new(
             crate::codegen::catalog::CatalogServiceClient::new(

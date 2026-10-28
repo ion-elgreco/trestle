@@ -23,6 +23,7 @@ impl CatalogServiceClient {
         Self { client, base_url }
     }
 
+    /// A create answers 201.
     pub async fn create_catalog(
         &self,
         request: &CreateCatalogRequest,
@@ -126,11 +127,24 @@ impl CatalogServiceClient {
             "catalogs/{}/status", encode_path_value(& request.name, false)
         );
         let url = self.base_url.join(&formatted_path)?;
-        let response = self.client.get(url).send().await?;
+        let mut builder = self.client.get(url);
+        if let Some(ref value) = request.if_none_match {
+            builder = builder.header("If-None-Match", value.as_str());
+        }
+        let response = builder.send().await?;
         if !response.status().is_success() {
             return Err(crate::error::parse_error_response(response).await);
         }
+        let headers = response.headers().clone();
         let result = response.bytes().await?;
-        Ok(serde_json::from_slice(&result)?)
+        let mut output: CatalogStatus = if result.trim_ascii().is_empty() {
+            Default::default()
+        } else {
+            serde_json::from_slice(&result)?
+        };
+        if let Some(value) = headers.get("ETag").and_then(|value| value.to_str().ok()) {
+            output.etag = value.to_string();
+        }
+        Ok(output)
     }
 }

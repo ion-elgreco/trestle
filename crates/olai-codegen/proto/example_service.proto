@@ -4,6 +4,7 @@ package example.catalog.v1;
 import "example_models.proto";
 import "google/api/annotations.proto";
 import "google/api/resource.proto";
+import "olai/trestle/v1/annotations.proto";
 
 option (google.api.resource_definition) = {
   type: "example.io/Catalog"
@@ -13,11 +14,13 @@ option (google.api.resource_definition) = {
 };
 
 service CatalogService {
+  // A create answers 201.
   rpc CreateCatalog(CreateCatalogRequest) returns (Catalog) {
     option (google.api.http) = {
       post: "/catalogs"
       body: "*"
     };
+    option (olai.trestle.v1.response_status) = 201;
   }
   rpc GetCatalog(GetCatalogRequest) returns (Catalog) {
     option (google.api.http) = {get: "/catalogs/{name}"};
@@ -92,8 +95,12 @@ message CatalogToken {
 
 message GetCatalogStatusRequest {
   string name = 1;
+  // The entity tag of the status the caller has, in the `If-None-Match` header.
+  optional string if_none_match = 2 [(olai.trestle.v1.request_header) = "If-None-Match"];
 }
 
 message CatalogStatus {
   string state = 1;
+  // The entity tag, in the `ETag` header.
+  string etag = 2 [(olai.trestle.v1.response_header) = "ETag"];
 }

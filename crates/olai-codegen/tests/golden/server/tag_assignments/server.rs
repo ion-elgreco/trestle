@@ -62,13 +62,13 @@ pub async fn touch_tag_assignment<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: TouchTagAssignmentRequest,
-) -> Result<()>
+) -> Result<axum::http::StatusCode>
 where
     T: TagAssignmentHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
 {
     handler.touch_tag_assignment(request, context).await?;
-    Ok(())
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 /// The routes of the service with their handlers, for an app to merge: the app's

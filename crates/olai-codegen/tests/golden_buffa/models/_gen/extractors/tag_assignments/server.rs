@@ -46,11 +46,11 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for CreateTagAssignmentReques
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
         let body_req = axum::extract::Request::from_parts(parts, body);
-        let axum::Json::<CreateTagAssignmentRequest>(body) = body_req
+        let axum::Json::<TagAssignment>(body) = body_req
             .extract()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        let tag = body.tag;
+        let tag = body.into();
         let request = CreateTagAssignmentRequest {
             entity_type,
             entity_name,

@@ -10,13 +10,13 @@ pub async fn create_catalog<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: CreateCatalogRequest,
-) -> Result<axum::Json<Catalog>>
+) -> Result<(axum::http::StatusCode, axum::Json<Catalog>)>
 where
     T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
 {
     let result = handler.create_catalog(request, context).await?;
-    Ok(axum::Json(result))
+    Ok((axum::http::StatusCode::CREATED, axum::Json(result)))
 }
 
 pub async fn get_catalog<T, Cx>(
@@ -88,13 +88,20 @@ pub async fn get_catalog_status<T, Cx>(
     State(handler): State<T>,
     context: Cx,
     request: GetCatalogStatusRequest,
-) -> Result<axum::Json<CatalogStatus>>
+) -> Result<(axum::http::HeaderMap, axum::Json<CatalogStatus>)>
 where
     T: CatalogHandler<Cx> + Clone + Send + Sync + 'static,
     Cx: axum::extract::FromRequestParts<T> + Send,
 {
     let result = handler.get_catalog_status(request, context).await?;
-    Ok(axum::Json(result))
+    let mut headers = axum::http::HeaderMap::new();
+    let value = &result.etag;
+    if !value.is_empty() {
+        if let Ok(value) = axum::http::HeaderValue::from_str(value) {
+            headers.insert("etag", value);
+        }
+    }
+    Ok((headers, axum::Json(result)))
 }
 
 /// The routes of the service with their handlers, for an app to merge: the app's

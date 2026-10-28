@@ -52,8 +52,13 @@ impl PyCatalogClient {
         })
     }
 
-    pub fn get_catalog_status(&self, py: Python) -> PyExampleResult<PyCatalogStatus> {
-        let request = self.client.get_catalog_status();
+    #[pyo3(signature = (if_none_match = None))]
+    pub fn get_catalog_status(
+        &self,
+        py: Python,
+        if_none_match: Option<String>,
+    ) -> PyExampleResult<PyCatalogStatus> {
+        let request = self.client.get_catalog_status().with_if_none_match(if_none_match);
         let runtime = get_runtime(py)?;
         py.detach(|| {
             #[allow(clippy::let_unit_value)]

@@ -234,8 +234,18 @@ impl GetCatalogStatusBuilder {
     pub(crate) fn new(client: CatalogServiceClient, name: impl Into<String>) -> Self {
         let request = GetCatalogStatusRequest {
             name: name.into(),
+            ..Default::default()
         };
         Self { client, request }
+    }
+
+    /// The entity tag of the status the caller has, in the `If-None-Match` header.
+    pub fn with_if_none_match(
+        mut self,
+        if_none_match: impl Into<Option<String>>,
+    ) -> Self {
+        self.request.if_none_match = if_none_match.into();
+        self
     }
 }
 

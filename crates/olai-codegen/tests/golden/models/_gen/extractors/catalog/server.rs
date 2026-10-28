@@ -120,7 +120,15 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for GetCatalogStatusRequ
             .extract::<axum::extract::Path<String>>()
             .await
             .map_err(axum::response::IntoResponse::into_response)?;
-        let request = GetCatalogStatusRequest { name };
+        let if_none_match = parts
+            .headers
+            .get("If-None-Match")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let request = GetCatalogStatusRequest {
+            name,
+            if_none_match,
+        };
         Ok(request)
     }
 }

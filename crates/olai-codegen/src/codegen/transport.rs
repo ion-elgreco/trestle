@@ -17,7 +17,10 @@ pub const REQWEST_TRANSPORT_TYPE_PATH: &str = "crate::codegen::transport::HttpCl
 /// `<user_agent>/<version of the client crate>` as its `User-Agent`, except in the browser. With
 /// `connect`, the transport sends ConnectRPC requests too (`connectrpc::client::ClientTransport`),
 /// with the same token and `User-Agent`, outside the browser.
-pub(crate) fn generate(user_agent: Option<&str>, connect: Option<&super::RuntimeConnect>) -> String {
+pub(crate) fn generate(
+    user_agent: Option<&str>,
+    connect: Option<&super::RuntimeConnect>,
+) -> String {
     let connect = connect.map(|runtime| {
         let cfg = super::client::connect_cfg(runtime.feature.as_deref());
         quote! {

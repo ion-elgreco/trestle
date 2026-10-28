@@ -30,9 +30,11 @@ class Catalog():
         ...
 
 class CatalogStatus():
+    etag: str
+    """The entity tag, in the `ETag` header."""
     state: str
 
-    def __init__(self, state: Optional[str] = None) -> None:
+    def __init__(self, etag: Optional[str] = None, state: Optional[str] = None) -> None:
         ...
 
 class CatalogToken():
@@ -184,6 +186,9 @@ class ExampleClient():
         ...
     def create_catalog(self, catalog: Optional[Catalog] = None) -> Catalog:
         """
+        A create answers 201.
+
+
         Returns:
             The requested resource
         """

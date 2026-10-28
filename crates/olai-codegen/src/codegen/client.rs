@@ -140,8 +140,9 @@ pub(crate) fn connect_side(service: &ServiceHandler<'_>) -> Option<ConnectSide> 
     if !service.plan.connect {
         return None;
     }
-    let mut client = crate::codegen::config::ModelsPath::from_template(&runtime.client_path_template)
-        .resolve(&service.models_segment(), &service.models_version());
+    let mut client =
+        crate::codegen::config::ModelsPath::from_template(&runtime.client_path_template)
+            .resolve(&service.models_segment(), &service.models_version());
     client
         .segments
         .push(format_ident!("{}Client", service.plan.service_name).into());
@@ -293,7 +294,11 @@ pub fn client_method(
         .raw_request_body
         .as_deref()
         .map(crate::utils::field_ident);
-    let (body_copy, body) = if path_fields.is_empty() || raw_body.is_some() {
+    // A body that the rule names (`body: "field"`) is that field alone.
+    let named_body = method.plan.named_body().map(crate::utils::field_ident);
+    let (body_copy, body) = if let Some(field) = &named_body {
+        (quote! {}, quote! { &request.#field })
+    } else if path_fields.is_empty() || raw_body.is_some() {
         (quote! {}, quote! { request })
     } else {
         let copy = quote! {
@@ -318,7 +323,7 @@ pub fn client_method(
     } else {
         let headers = method.plan.request_headers.iter().map(|(field, header)| {
             let field_ident = crate::utils::field_ident(field);
-            match request_header_is_optional(&method, field) {
+            match method.plan.request_header_is_optional(field) {
                 true => quote! {
                     if let Some(ref value) = request.#field_ident {
                         builder = builder.header(#header, value.as_str());
@@ -366,14 +371,6 @@ pub fn client_method(
 
         #connect_fn
     })
-}
-
-/// Whether the request field `field` is an `Option`.
-fn request_header_is_optional(method: &MethodHandler<'_>, field: &str) -> bool {
-    method
-        .plan
-        .query_parameters()
-        .any(|param| param.name == field && param.field_type.is_optional)
 }
 
 /// The statements that turn a successful `response` into the method's output.

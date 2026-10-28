@@ -34,3 +34,10 @@ extend google.protobuf.ServiceOptions {
   // it, a service is REST only, whatever the clients prefer.
   bool connect = 51005;
 }
+
+extend google.protobuf.MethodOptions {
+  // The HTTP status of the REST answer when it is not 200, such as 201 for a create or 204 for
+  // a delete. A 204 answer has no body, so it fits a method without an output. The Connect door
+  // does not use it.
+  int32 response_status = 51006;
+}

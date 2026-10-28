@@ -96,6 +96,7 @@ fn process_method(
         documentation: method_documentation,
         server_streaming: method.server_streaming(),
         no_side_effects: no_side_effects(method),
+        response_status: response_status(method),
     };
 
     // Add to the service's methods
@@ -113,6 +114,22 @@ fn no_side_effects(method: &MethodDescriptorProto) -> bool {
         .options
         .as_ref()
         .is_some_and(|options| options.idempotency_level() == IdempotencyLevel::NO_SIDE_EFFECTS)
+}
+
+/// `(olai.trestle.v1.response_status)`: the HTTP status of the REST answer when it is not 200.
+fn response_status(method: &MethodDescriptorProto) -> Option<u16> {
+    let options = method.options.as_ref()?;
+    options
+        .unknown_fields()
+        .iter()
+        .find_map(|(n, value)| match value {
+            protobuf::UnknownValueRef::Varint(v)
+                if n == super::TRESTLE_RESPONSE_STATUS_EXTENSION =>
+            {
+                u16::try_from(v).ok()
+            }
+            _ => None,
+        })
 }
 
 /// A `bool` option of trestle on a service, such as `(olai.trestle.v1.connect)`, by its extension

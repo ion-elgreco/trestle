@@ -54,10 +54,7 @@ impl TagAssignmentClient {
             encode_path_value(& request.entity_name, false)
         );
         let url = self.base_url.join(&formatted_path)?;
-        let mut body = request.clone();
-        body.entity_type = Default::default();
-        body.entity_name = Default::default();
-        let response = self.client.post(url).json(&body).send().await?;
+        let response = self.client.post(url).json(&request.tag).send().await?;
         if !response.status().is_success() {
             return Err(crate::error::parse_error_response(response).await);
         }

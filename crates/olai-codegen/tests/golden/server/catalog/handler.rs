@@ -15,6 +15,7 @@ use example_common::models::catalog::v1::*;
 
 #[async_trait]
 pub trait CatalogHandler<Cx = crate::Context>: Send + Sync + 'static {
+    /// A create answers 201.
     async fn create_catalog(
         &self,
         request: CreateCatalogRequest,

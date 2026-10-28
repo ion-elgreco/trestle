@@ -27,3 +27,17 @@ extend google.protobuf.FieldOptions {
   // or the body, such as `Range`. On a `string` field.
   string request_header = 51004;
 }
+
+extend google.protobuf.ServiceOptions {
+  // The service is served over ConnectRPC too, next to REST: the server mounts its Connect
+  // routes, and the generated clients call it over Connect when they prefer Connect. Without
+  // it, a service is REST only, whatever the clients prefer.
+  bool connect = 51005;
+}
+
+extend google.protobuf.MethodOptions {
+  // The HTTP status of the REST answer when it is not 200, such as 201 for a create or 204 for
+  // a delete. A 204 answer has no body, so it fits a method without an output. The Connect door
+  // does not use it.
+  int32 response_status = 51006;
+}

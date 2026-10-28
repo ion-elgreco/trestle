@@ -61,6 +61,8 @@ const TRESTLE_RAW_BODY_EXTENSION: u32 = 51003;
 const TRESTLE_REQUEST_HEADER_EXTENSION: u32 = 51004;
 /// `olai.trestle.v1.connect`, on a service.
 const TRESTLE_CONNECT_EXTENSION: u32 = 51005;
+/// `olai.trestle.v1.response_status`, on a method.
+const TRESTLE_RESPONSE_STATUS_EXTENSION: u32 = 51006;
 const GOOGLE_API_RESOURCE_REFERENCE_EXTENSION: u32 = 1055; // google.api.resource_reference
 
 /// Parse a compiled protobuf [`FileDescriptorSet`] into [`CodeGenMetadata`].

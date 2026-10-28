@@ -14,7 +14,8 @@
 //!   whole numbers as integers through the `json_value` helper module.
 //! - **Field options** ([`ModelRewrites::fields`], from [`field_options`]): a field whose proto
 //!   writes out a `json_name` keeps that name, even when it equals the default one; a field with
-//!   `(olai.trestle.v1.emit_unpopulated)` is sent even when empty, zero or `false`.
+//!   `(olai.trestle.v1.emit_unpopulated)` is sent even when empty, zero or `false`; a field with
+//!   `(olai.trestle.v1.response_header)` is left out of the JSON, as it goes in a header.
 //!
 //! The rewrites are idempotent: rewritten output does not match again. They leave alone the
 //! files that trestle writes into the models directory itself.
@@ -72,6 +73,8 @@ pub struct PackageFields {
     pub json_names: BTreeMap<String, String>,
     /// The fields with `(olai.trestle.v1.emit_unpopulated)`.
     pub emit_unpopulated: BTreeSet<String>,
+    /// The fields with `(olai.trestle.v1.response_header)`.
+    pub response_headers: BTreeSet<String>,
 }
 
 /// The fields of `metadata` whose JSON the proto sets, by package, for [`ModelRewrites::fields`].
@@ -102,6 +105,13 @@ pub fn field_options(
                     .entry(package.clone())
                     .or_default()
                     .emit_unpopulated
+                    .insert(key.clone());
+            }
+            if field.response_header.is_some() {
+                packages
+                    .entry(package.clone())
+                    .or_default()
+                    .response_headers
                     .insert(key);
             }
         }
@@ -280,9 +290,9 @@ fn int64_helpers_to(src: &str, module: &str) -> String {
 }
 
 /// Give the fields of `fields` their JSON: the `json_name` that the proto writes out as the
-/// `rename` (after [`swap_serde_renames`], which cannot tell it from a default name), and no
-/// `skip_serializing_if` for an `emit_unpopulated` field. A field is found by the `pub struct`
-/// above it and its name.
+/// `rename` (after [`swap_serde_renames`], which cannot tell it from a default name), no
+/// `skip_serializing_if` for an `emit_unpopulated` field, and `skip` for a field that goes in a
+/// response header. A field is found by the `pub struct` above it and its name.
 fn apply_field_options(src: &str, fields: &PackageFields) -> String {
     static STRUCT: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^\s*pub struct (\w+)").expect("valid regex"));
@@ -294,6 +304,8 @@ fn apply_field_options(src: &str, fields: &PackageFields) -> String {
         LazyLock::new(|| Regex::new(r#"alias = "[^"]*""#).expect("valid regex"));
     static SKIP_IF: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"skip_serializing_if = "[^"]*",?\s*"#).expect("valid regex"));
+    static SERDE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"#\[serde\([^)]*\)\]").expect("valid regex"));
 
     let lines: Vec<&str> = src.lines().collect();
     let mut out: Vec<String> = Vec::with_capacity(lines.len());
@@ -306,9 +318,13 @@ fn apply_field_options(src: &str, fields: &PackageFields) -> String {
             let key = format!("{message}.{name}");
             let json = fields.json_names.get(&key);
             let emit = fields.emit_unpopulated.contains(&key);
-            if json.is_some() || emit {
+            let header = fields.response_headers.contains(&key);
+            if json.is_some() || emit || header {
                 let attrs = attribute_lines(&lines, i);
                 let mut text = lines[attrs.clone()].join("\n");
+                if header {
+                    text = SERDE.replace(&text, "#[serde(skip)]").into_owned();
+                }
                 if let Some(json) = json {
                     // The proto name stays readable, as proto3 JSON asks.
                     text = RENAME
@@ -709,6 +725,7 @@ pub struct Other {
         let fields = PackageFields {
             json_names: [("Spec.spec_id".to_string(), "specId".to_string())].into(),
             emit_unpopulated: ["Spec.fields".to_string()].into(),
+            response_headers: BTreeSet::new(),
         };
         let out = apply_field_options(src, &fields);
         assert!(
@@ -721,6 +738,29 @@ pub struct Other {
             out.contains("rename = \"fields\",\n        deserialize_with"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn response_header_fields_are_not_in_the_json() {
+        let src = r#"pub struct Status {
+    #[serde(rename = "state", alias = "state")]
+    pub state: ::buffa::alloc::string::String,
+    #[serde(
+        rename = "etag",
+        alias = "etag",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub etag: ::core::option::Option<::buffa::alloc::string::String>,
+}
+"#;
+        let fields = PackageFields {
+            response_headers: ["Status.etag".to_string()].into(),
+            ..Default::default()
+        };
+        let out = apply_field_options(src, &fields);
+        assert!(out.contains("#[serde(skip)]\n    pub etag:"), "{out}");
+        assert!(out.contains(r#"rename = "state""#), "{out}");
+        assert_eq!(out.matches("etag").count(), 1, "{out}");
     }
 
     #[test]
