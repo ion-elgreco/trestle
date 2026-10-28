@@ -121,12 +121,13 @@ where
             axum::http::header::CONTENT_TYPE,
             axum::http::HeaderValue::from_static("application/x-ndjson"),
         );
-    if let Some(result) = &first {
-        if let Ok(value) = axum::http::HeaderValue::from_str(
-            &result.version.to_string(),
-        ) {
-            headers.insert("catalog-version", value);
-        }
+    if let Some(value) = first
+        .as_ref()
+        .and_then(|result| {
+            axum::http::HeaderValue::from_str(&result.version.to_string()).ok()
+        })
+    {
+        headers.insert("catalog-version", value);
     }
     let lines = ::futures::StreamExt::map(
         ::futures::StreamExt::chain(::futures::stream::iter(first.map(Ok)), stream),

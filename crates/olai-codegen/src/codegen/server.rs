@@ -328,19 +328,19 @@ fn axum_route_handler_impl(
             )));
         }
         let output_type = method.output_type();
-        let header_sets = method
+        let header_values = method
             .response_header_fields()
             .into_iter()
-            .map(|field| header_set(method, field))
+            .map(|field| header_value(method, field))
             .collect::<crate::error::Result<Vec<_>>>()?;
         if method.plan.metadata.server_streaming {
             // A server stream over REST: an NDJSON body, one line per message. The status, and
             // the headers that come from the first message, go out before the body; an error
             // before the first message is the answer, one after it ends the body.
-            let headers = (!header_sets.is_empty()).then(|| {
+            let header_sets = header_values.iter().map(|(header, value)| {
                 quote! {
-                    if let Some(result) = &first {
-                        #(#header_sets)*
+                    if let Some(value) = first.as_ref().and_then(|result| #value) {
+                        headers.insert(#header, value);
                     }
                 }
             });
@@ -355,7 +355,7 @@ fn axum_route_handler_impl(
                         axum::http::header::CONTENT_TYPE,
                         axum::http::HeaderValue::from_static("application/x-ndjson"),
                     );
-                    #headers
+                    #(#header_sets)*
                     let lines = ::futures::StreamExt::map(
                         ::futures::StreamExt::chain(::futures::stream::iter(first.map(Ok)), stream),
                         |message| -> ::core::result::Result<axum::body::Bytes, axum::BoxError> {
@@ -385,11 +385,18 @@ fn axum_route_handler_impl(
                 types.push(quote! { axum::http::StatusCode });
                 values.push(status.clone());
             }
-            let headers = if header_sets.is_empty() {
+            let headers = if header_values.is_empty() {
                 quote! {}
             } else {
                 types.push(quote! { axum::http::HeaderMap });
                 values.push(quote! { headers });
+                let header_sets = header_values.iter().map(|(header, value)| {
+                    quote! {
+                        if let Some(value) = #value {
+                            headers.insert(#header, value);
+                        }
+                    }
+                });
                 quote! {
                     let mut headers = axum::http::HeaderMap::new();
                     #(#header_sets)*
@@ -472,12 +479,13 @@ fn status_code(method: &MethodHandler<'_>, status: u16) -> crate::error::Result<
     })
 }
 
-/// The statement that puts the output field `field` in its response header: a string when it
-/// is there and not empty, a number or a bool as text.
-fn header_set(
+/// The response header of the output field `field`, and the expression of its value (an
+/// `Option<HeaderValue>`, over the output `result`): a string when it is there and not empty,
+/// a number or a bool as text.
+fn header_value(
     method: &MethodHandler<'_>,
     field: &MessageField,
-) -> crate::error::Result<TokenStream> {
+) -> crate::error::Result<(String, TokenStream)> {
     let ident = crate::utils::field_ident(&field.name);
     let header = field
         .response_header
@@ -505,38 +513,26 @@ fn header_set(
             field.name, method.plan.handler_function_name
         )));
     }
-    let insert = quote! { headers.insert(#header, value); };
-    // The header value, when the field has one: one `if let`, as clippy asks.
-    Ok(match (ty.is_optional, is_string) {
+    let value = match (ty.is_optional, is_string) {
         (true, true) => quote! {
-            if let Some(value) = result.#ident
+            result.#ident
                 .as_deref()
                 .and_then(|value| axum::http::HeaderValue::from_str(value).ok())
-            {
-                #insert
-            }
         },
         (false, true) => quote! {
-            if let Some(value) = Some(result.#ident.as_str())
+            Some(result.#ident.as_str())
                 .filter(|value| !value.is_empty())
                 .and_then(|value| axum::http::HeaderValue::from_str(value).ok())
-            {
-                #insert
-            }
         },
         (true, false) => quote! {
-            if let Some(value) = result.#ident
+            result.#ident
                 .and_then(|value| axum::http::HeaderValue::from_str(&value.to_string()).ok())
-            {
-                #insert
-            }
         },
         (false, false) => quote! {
-            if let Ok(value) = axum::http::HeaderValue::from_str(&result.#ident.to_string()) {
-                #insert
-            }
+            axum::http::HeaderValue::from_str(&result.#ident.to_string()).ok()
         },
-    })
+    };
+    Ok((header, value))
 }
 
 /// The request fields in request headers (`(olai.trestle.v1.request_header)`), read from the
