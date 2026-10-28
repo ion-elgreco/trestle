@@ -21,7 +21,7 @@ async-trait = "0.1.53"
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 bytes = "1.0"
 # Optional: the ConnectRPC transport bridge (enabled by the `connectrpc` feature).
-connectrpc = { version = "0.7", optional = true, default-features = false, features = [
+connectrpc = { version = "0.9", optional = true, default-features = false, features = [
   "client",
 ] }
 chrono = { version = "0.4.34", default-features = false, features = [
