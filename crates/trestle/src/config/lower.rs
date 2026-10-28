@@ -130,6 +130,8 @@ impl GenerateConfig {
                 .as_ref()
                 .and_then(|r| r.connect_client_path.clone()),
             rest_client: self.rest_client_options(),
+            // The CLI's config does not set the server options yet.
+            server: Default::default(),
         })
     }
 
@@ -164,6 +166,8 @@ impl GenerateConfig {
                 .map(|(package, _)| package.clone())
                 .collect(),
             user_agent: rust.and_then(|r| r.user_agent.clone()),
+            route_table: false,
+            connect_at_runtime: None,
         }
     }
 
