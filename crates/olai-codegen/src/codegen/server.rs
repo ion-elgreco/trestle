@@ -460,29 +460,36 @@ fn header_set(
             field.name, method.plan.handler_function_name
         )));
     }
-    let set = if is_string {
-        quote! {
-            if let Ok(value) = axum::http::HeaderValue::from_str(value) {
-                headers.insert(#header, value);
-            }
-        }
-    } else {
-        quote! {
-            if let Ok(value) = axum::http::HeaderValue::from_str(&value.to_string()) {
-                headers.insert(#header, value);
-            }
-        }
-    };
+    let insert = quote! { headers.insert(#header, value); };
+    // The header value, when the field has one: one `if let`, as clippy asks.
     Ok(match (ty.is_optional, is_string) {
-        (true, true) => quote! { if let Some(value) = &result.#ident { #set } },
-        (false, true) => quote! {
-            let value = &result.#ident;
-            if !value.is_empty() { #set }
+        (true, true) => quote! {
+            if let Some(value) = result.#ident
+                .as_deref()
+                .and_then(|value| axum::http::HeaderValue::from_str(value).ok())
+            {
+                #insert
+            }
         },
-        (true, false) => quote! { if let Some(value) = result.#ident { #set } },
+        (false, true) => quote! {
+            if let Some(value) = Some(result.#ident.as_str())
+                .filter(|value| !value.is_empty())
+                .and_then(|value| axum::http::HeaderValue::from_str(value).ok())
+            {
+                #insert
+            }
+        },
+        (true, false) => quote! {
+            if let Some(value) = result.#ident
+                .and_then(|value| axum::http::HeaderValue::from_str(&value.to_string()).ok())
+            {
+                #insert
+            }
+        },
         (false, false) => quote! {
-            let value = result.#ident;
-            #set
+            if let Ok(value) = axum::http::HeaderValue::from_str(&result.#ident.to_string()) {
+                #insert
+            }
         },
     })
 }

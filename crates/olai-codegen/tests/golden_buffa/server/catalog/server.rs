@@ -95,11 +95,11 @@ where
 {
     let result = handler.get_catalog_status(request, context).await?;
     let mut headers = axum::http::HeaderMap::new();
-    let value = &result.etag;
-    if !value.is_empty() {
-        if let Ok(value) = axum::http::HeaderValue::from_str(value) {
-            headers.insert("etag", value);
-        }
+    if let Some(value) = Some(result.etag.as_str())
+        .filter(|value| !value.is_empty())
+        .and_then(|value| axum::http::HeaderValue::from_str(value).ok())
+    {
+        headers.insert("etag", value);
     }
     Ok((headers, axum::Json(result)))
 }
