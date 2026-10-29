@@ -95,7 +95,10 @@ impl PyCatalogClient {
             #[allow(clippy::let_unit_value)]
             let result = runtime
                 .block_on(async move {
-                    let mut chunks = request.into_future().await?;
+                    let mut chunks = match request.into_future().await {
+                        Ok(chunks) => chunks,
+                        Err(e) => return Err(e),
+                    };
                     let mut whole = None;
                     while let Some(chunk) = ::futures::StreamExt::next(&mut chunks).await
                     {

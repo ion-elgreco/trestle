@@ -666,9 +666,13 @@ impl PyBackend<'_> {
             .flatten()
             .map(crate::utils::field_ident);
         let future = match raw_stream {
+            // The error of the block is the client's, as the first `return` fixes it.
             Some(field) => quote! {
                 async move {
-                    let mut chunks = request.into_future().await?;
+                    let mut chunks = match request.into_future().await {
+                        Ok(chunks) => chunks,
+                        Err(e) => return Err(e),
+                    };
                     let mut whole = None;
                     while let Some(chunk) = ::futures::StreamExt::next(&mut chunks).await {
                         let chunk = chunk?;
