@@ -1,12 +1,6 @@
-//! Serde helpers that write 64-bit integers as JSON numbers.
-//!
-//! Proto3 JSON writes `int64`/`uint64` (and their `sint`/`fixed` variants) as quoted decimal
-//! strings, and buffa follows it: its models carry `with = "::buffa::json_helpers::int64"`. Many
-//! REST APIs send and expect plain numbers. With
-//! [`RestClientOptions::json_int64_as_number`](super::RestClientOptions::json_int64_as_number) the
-//! generator appends a `json_int64` module to the models `mod.rs`, and the `trestle` CLI points
-//! buffa's helper paths at it. Serialization writes a number; deserialization delegates to buffa,
-//! so it still accepts numbers and strings.
+//! Serde helpers for [`RestClientOptions::json_int64_as_number`](super::RestClientOptions):
+//! 64-bit integers as JSON numbers instead of proto3-JSON strings. Deserialization delegates to
+//! buffa, so both forms are read.
 
 use quote::quote;
 
@@ -122,11 +116,8 @@ pub(crate) fn module() -> String {
     format_tokens_static(tokens)
 }
 
-/// The `json_value` module appended to the models `mod.rs` with
-/// [`RestClientOptions::json_int64_as_number`](super::RestClientOptions::json_int64_as_number):
-/// serializers for the free-form JSON fields (`google.protobuf.Value`, `Struct`, `ListValue`)
-/// that write whole numbers as JSON integers. buffa holds every JSON number as an `f64` and
-/// writes `1.0` for `1`, which a strict reader of integers refuses.
+/// The `json_value` module appended to the models `mod.rs`: serializers for the free-form JSON
+/// fields that write whole numbers as integers, where buffa writes `1.0` for `1`.
 pub(crate) fn value_module() -> String {
     let tokens = quote! {
         /// Serializers of the free-form JSON fields that write whole numbers as JSON integers

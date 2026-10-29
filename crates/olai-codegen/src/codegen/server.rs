@@ -33,8 +33,7 @@ use crate::{
 /// - FromRequestParts extractor implementations for path/query parameters
 /// - FromRequest extractor implementations for JSON body
 ///
-/// A method with a raw body or a request header field gets no extractor: the server emitter refuses
-/// it.
+/// Methods with a raw body or request-header fields get no extractor (see [`refuse_unsupported`]).
 pub(super) fn generate_common(service: &ServiceHandler<'_>) -> crate::error::Result<String> {
     let extractor_impls = service
         .rest_methods()
@@ -101,16 +100,16 @@ pub(super) fn generate_server(service: &ServiceHandler<'_>) -> crate::error::Res
     format_tokens(tokens)
 }
 
-/// Whether a method sends or reads a raw body (`(olai.trestle.v1.raw_body)`), or has a field in a
-/// request header (`(olai.trestle.v1.request_header)`): what the server emitter does not support.
+/// Whether a method uses `(olai.trestle.v1.raw_body)` or `(olai.trestle.v1.request_header)`,
+/// which the server emitter does not support.
 fn beyond_server(method: &MethodHandler<'_>) -> bool {
     method.plan.raw_request_body.is_some()
         || method.plan.raw_response_body.is_some()
         || !method.plan.request_headers.is_empty()
 }
 
-/// The server emitter refuses a method with a raw body or a request header field, rather than
-/// give it an extractor that its client does not match.
+/// Fail on a method the server emitter does not support, rather than emit a route that does not
+/// match its client.
 fn refuse_unsupported(service: &ServiceHandler<'_>) -> crate::error::Result<()> {
     match service.rest_methods().find(beyond_server) {
         Some(method) => Err(crate::Error::Build(format!(
@@ -358,7 +357,6 @@ fn query_extractions(method: &MethodHandler<'_>) -> TokenStream {
             // None / an empty Vec rather than erroring. Required query params (proto3 fields not
             // marked `optional`) intentionally have NO default: omitting one is a 400/422, which
             // is the correct contract for a required parameter.
-            // The query key that the client sends.
             let key = method.query_key(p);
             let rename = (key != p.name).then(|| quote! { #[serde(rename = #key)] });
             if p.is_optional() || p.field_type.is_repeated {

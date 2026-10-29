@@ -24,8 +24,8 @@ pub struct HttpPattern {
     pub static_prefix: String,
     /// Static suffix (everything after the last parameter)
     pub static_suffix: Option<String>,
-    /// Parameters bound to a multi-segment pattern (`{name=catalogs/*}`, `{path=**}`). Their
-    /// values keep `/` when expanded into a URL; single-segment values have `/` percent-encoded.
+    /// Parameters bound to a multi-segment pattern (`{name=catalogs/*}`, `{path=**}`), whose
+    /// values keep `/` in the URL.
     pub multi_segment_parameters: Vec<String>,
 }
 
@@ -132,9 +132,8 @@ fn normalize_placeholder(raw: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-/// Parse URL template into segments, plus the parameters whose placeholder binds a multi-segment
-/// pattern: `{name=catalogs/*}` or `{path=**}`. gRPC transcoding expands these with `/` kept as
-/// is; `{name}` and `{name=*}` match one segment, so a `/` in their value is percent-encoded.
+/// Parse URL template into segments, plus the parameters bound to a multi-segment pattern
+/// (`{name=catalogs/*}`, `{path=**}`; `{name}` and `{name=*}` match one segment).
 fn parse_url_segments(template: &str) -> (Vec<UrlSegment>, Vec<String>) {
     let mut segments = Vec::new();
     let mut multi_segment = Vec::new();

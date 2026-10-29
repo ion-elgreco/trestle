@@ -337,7 +337,6 @@ fn builder_with_impl(method: &MethodHandler<'_>, field: &BodyField) -> TokenStre
     let doc_attr = field_doc_attr(field.documentation.as_deref(), field_name);
 
     if let BaseType::Map(_, value) = &field.field_type.base_type {
-        // The values convert into the map's value type (`String` for a `map<string, string>`).
         let value_type = method.field_type(value, RenderContext::BuilderMethod);
         quote! {
             #doc_attr
@@ -554,8 +553,7 @@ fn generate_into_stream_impl(
             let remaining = self.request.max_results;
             let stream = stream_paginated((self, remaining), move |(mut builder, mut remaining), page_token| async move {
                 builder.request.page_token = page_token;
-                // Ask each page for the items still wanted, and keep no more: a server can cap
-                // its pages below `max_results`, and the cap holds over all pages.
+                // Request only the items still wanted, and keep no more than that.
                 if remaining.is_some() {
                     builder.request.max_results = remaining;
                 }

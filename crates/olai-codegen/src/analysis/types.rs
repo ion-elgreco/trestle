@@ -244,14 +244,12 @@ pub struct MethodPlan {
     /// ConnectRPC emitter can use it — but it has no REST route, so the REST client/handler
     /// emitters skip it. `true` for methods with an HTTP annotation, `false` otherwise.
     pub has_http_route: bool,
-    /// The request field that is sent as the raw HTTP body (`(olai.trestle.v1.raw_body)`).
+    /// The request field sent as the raw HTTP body (`(olai.trestle.v1.raw_body)`).
     pub raw_request_body: Option<String>,
-    /// The response field that takes the raw HTTP body (`(olai.trestle.v1.raw_body)`); the other
-    /// fields of the response come from headers.
+    /// The response field that takes the raw HTTP body (`(olai.trestle.v1.raw_body)`).
     pub raw_response_body: Option<String>,
-    /// The request fields that go in HTTP request headers (`(olai.trestle.v1.request_header)`),
-    /// with their headers. They are query parameters to the builders and bindings, but not in
-    /// the URL.
+    /// The request fields sent as HTTP headers (`(olai.trestle.v1.request_header)`), with their
+    /// header names. They stay query parameters for the builders and bindings.
     pub request_headers: Vec<(String, String)>,
 }
 
@@ -263,15 +261,14 @@ impl MethodPlan {
         })
     }
 
-    /// Whether the REST client puts request values into the URL path: the method has path
-    /// parameters, and its template binds them.
+    /// Whether the REST client formats path parameters into the URL.
     pub fn formats_path_values(&self) -> bool {
         self.has_http_route
             && self.path_parameters().next().is_some()
             && !self.http_pattern.parameter_names().is_empty()
     }
 
-    /// The query parameters that go in the URL: not the ones in request headers.
+    /// The query parameters that go in the URL, not in request headers.
     pub fn url_query_parameters(&self) -> impl Iterator<Item = &QueryParam> {
         self.query_parameters().filter(|param| {
             !self
@@ -382,9 +379,8 @@ pub struct QueryParam {
 }
 
 impl QueryParam {
-    /// The key of the parameter in the query string: the `json_name` that the proto writes
-    /// out; else, with `json_names` (a package whose JSON names are its query keys), the default
-    /// lowerCamelCase JSON name; else the proto name. gRPC transcoding accepts both.
+    /// The query-string key: the explicit `json_name`, else the lowerCamelCase JSON name with
+    /// `json_names`, else the proto name.
     pub fn key(&self, json_names: bool) -> std::borrow::Cow<'_, str> {
         match &self.json_name {
             Some(json) => json.into(),

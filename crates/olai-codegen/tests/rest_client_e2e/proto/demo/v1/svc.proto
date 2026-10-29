@@ -68,20 +68,19 @@ message ListWidgetsRequest {
   optional string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
   // Only the widgets of this color.
   optional Color color = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Index of the first widget, from 1. Its query key is its explicit JSON name.
+  // Index of the first widget, from 1. Sent under its explicit JSON name.
   optional int32 first = 4 [json_name = "startIndex"];
-  // The order of the widgets. Its query key is the JSON name that the proto writes out, though
-  // it is the default one.
+  // The order of the widgets. Sent under its explicit JSON name, though it is the default one.
   optional string order_by = 5 [json_name = "orderBy"];
 }
 
-// A label of a widget. Only requests take it, so only it gets a Python constructor.
+// A label of a widget. An input-only model: the only one with a Python constructor.
 message Label {
-  // The key: a required argument of the constructor.
+  // The key.
   string key = 1 [(google.api.field_behavior) = REQUIRED];
   // The value.
   string value = 2;
-  // A secret: the Python repr hides it.
+  // A secret, hidden in the Python repr.
   optional string secret = 3 [debug_redact = true];
 }
 
@@ -103,7 +102,7 @@ message CreateWidgetRequest {
   google.protobuf.Struct attributes = 5 [(google.api.field_behavior) = OPTIONAL];
   // The kind of widget.
   optional string type = 6 [(google.api.field_behavior) = OPTIONAL];
-  // Where the widget comes from, sent as the JSON name that the proto writes out.
+  // Where the widget comes from. Sent under its explicit JSON name.
   optional string source_url = 7 [json_name = "sourceUrl"];
   // Tags, sent even when there are none.
   repeated string tags = 8 [(olai.trestle.v1.emit_unpopulated) = true];
@@ -169,21 +168,21 @@ message WidgetExistsRequest {
 message SearchWidgetsRequest {
   // The start of the names to find.
   string prefix = 1 [(google.api.field_behavior) = REQUIRED];
-  // The tags of the widgets to find: a required list.
+  // The tags of the widgets to find.
   repeated string tags = 2 [(google.api.field_behavior) = REQUIRED];
-  // Free-form filters by field: a required map of free-form JSON.
+  // Free-form filters by field.
   map<string, google.protobuf.ListValue> filters = 3 [(google.api.field_behavior) = REQUIRED];
 }
 
 message TagWidgetRequest {
-  // The name of the widget: a path value, which the body leaves out.
+  // The name of the widget.
   string name = 1 [(google.api.field_behavior) = REQUIRED];
   // The tag to add.
   string tag = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message RenameWidgetRequest {
-  // The name of the widget: a path value, which the body keeps too.
+  // The name of the widget.
   string name = 1 [(google.api.field_behavior) = REQUIRED];
   // The new name.
   string new_name = 2 [(google.api.field_behavior) = REQUIRED];
@@ -242,9 +241,9 @@ message Blob {
   optional int64 size = 2 [(olai.trestle.v1.response_header) = "Content-Length"];
 }
 
-// Requests that `google.api.http` writes in less common ways.
+// Less common `google.api.http` shapes.
 service ProbeService {
-  // Whether a widget exists: a `HEAD` request, which fails for a missing widget.
+  // Whether a widget exists: a `HEAD` request.
   rpc WidgetExists(WidgetExistsRequest) returns (Empty) {
     option (google.api.http) = {
       custom: {
@@ -262,7 +261,7 @@ service ProbeService {
     };
   }
 
-  // Tag a widget: a body next to a path value.
+  // Tag a widget: a body that leaves the path value out.
   rpc TagWidget(TagWidgetRequest) returns (Empty) {
     option (google.api.http) = {
       post: "/api/v1/widgets/{name}/tags"
@@ -278,7 +277,7 @@ service ProbeService {
     };
   }
 
-  // Stream widgets: an NDJSON answer, one line per widget.
+  // Stream widgets: an NDJSON answer.
   rpc StreamWidgets(StreamWidgetsRequest) returns (stream WidgetLine) {
     option (google.api.http) = {get: "/api/v1/widget-lines"};
   }
@@ -288,7 +287,7 @@ service ProbeService {
     option (google.api.http) = {get: "/api/v1/widgets/{name}/version"};
   }
 
-  // Store a blob: a raw request body, at a path value of several segments.
+  // Store a blob: a raw request body, at a multi-segment path.
   rpc PutBlob(PutBlobRequest) returns (Empty) {
     option (google.api.http) = {
       put: "/api/v1/blobs/{path=**}"

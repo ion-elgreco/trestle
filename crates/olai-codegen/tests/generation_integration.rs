@@ -660,10 +660,8 @@ fn node_ts_bindings_generated() {
 
 // ── REST client and Python options ───────────────────────────────────────────
 
-/// Every REST client and Python option at once (reqwest transport, error modules, async twins,
-/// frozen models, str enums, stub annotations, …): the Rust files parse, and the Python package
-/// files and the stub annotations are there. The opt-in `tests/rest_client_e2e` fixture compiles
-/// and runs this output against a server.
+/// Every REST client and Python option at once: the output parses and has the expected parts.
+/// The opt-in `tests/rest_client_e2e` fixture compiles and runs it against a server.
 #[test]
 fn rest_client_and_python_options_generate_valid_code() {
     let tmp = TempDir::new().unwrap();
@@ -727,7 +725,6 @@ fn rest_client_and_python_options_generate_valid_code() {
         "error module missing"
     );
     assert!(client.contains("ignore_unknown_enum_values(true)"));
-    // The default `User-Agent`, outside the browser; the aggregate client can set another.
     assert!(
         client.contains("\"example-client/\"") && client.contains("not(target_arch = \"wasm32\")"),
         "default User-Agent missing"
@@ -762,7 +759,6 @@ fn rest_client_and_python_options_generate_valid_code() {
         !enums.contains("_UNSPECIFIED ="),
         "hidden zero values: {enums}"
     );
-    // A public module per submodule: its classes and scoped client, and its enums.
     let schemas = std::fs::read_to_string(package.join("schemas.py")).unwrap();
     assert!(
         schemas.contains("from example._core.schemas import (\n    DeleteSchemaResponse,")
@@ -779,8 +775,6 @@ fn rest_client_and_python_options_generate_valid_code() {
 
 // ── Without the common (extractor) output ────────────────────────────────────
 
-/// A client-only config without `common`: no extractors are written, and the models `mod.rs`
-/// does not declare them.
 #[test]
 fn no_common_output_leaves_out_the_extractors() {
     let tmp = TempDir::new().unwrap();
@@ -802,7 +796,6 @@ fn no_common_output_leaves_out_the_extractors() {
     syn::parse_file(&models_mod).expect("the models mod.rs is valid Rust");
 }
 
-/// The server routes need the extractors of the common output.
 #[test]
 fn server_output_needs_the_common_output() {
     let tmp = TempDir::new().unwrap();

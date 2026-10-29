@@ -13,8 +13,7 @@ use crate::codegen::DemoClient;
 use crate::codegen::error::Error;
 use crate::models::demo::v1::{Color, CreateWidgetRequest, ErrorCode, Widget};
 
-/// What the server saw: the raw request paths, bodies, content types, authorization headers and
-/// user agents.
+/// What the server saw: paths, bodies and headers.
 #[derive(Clone, Default)]
 struct Seen(Arc<Mutex<Vec<String>>>);
 
@@ -209,7 +208,6 @@ async fn widget_version(Path(name): Path<String>) -> Response {
     ([("Widget-Version", "7"), ("ETag", "abc")], body).into_response()
 }
 
-/// Store a blob: the server notes its path, content type and bytes.
 async fn put_blob(
     State(seen): State<Seen>,
     uri: OriginalUri,
@@ -228,7 +226,6 @@ async fn put_blob(
     StatusCode::NO_CONTENT
 }
 
-/// A blob whose bytes are `blob:` and its path, or `range:` and the `Range` header.
 async fn get_blob(Path(path): Path<String>, headers: HeaderMap) -> Vec<u8> {
     match headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
         Some(range) => format!("range:{range}").into_bytes(),
@@ -278,8 +275,7 @@ async fn responses_read_numbers_names_and_unknown_enums() {
     let (base, _) = serve().await;
     let client = DemoClient::new_unauthenticated(base);
     let widget: Widget = client.widget("w").get().await.unwrap();
-    // `PURPLE` is not a `Color`: with `ignore_unknown_enum_values` it becomes the zero value
-    // instead of failing the response.
+    // `PURPLE` is not a `Color`: `ignore_unknown_enum_values` makes it the zero value.
     assert_eq!(
         widget.color,
         buffa::EnumValue::Known(Color::COLOR_UNSPECIFIED)
@@ -312,7 +308,7 @@ async fn requests_write_snake_case_and_int64_numbers() {
         .unwrap();
     let body: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(body["created_at"], json!(1_700_000_000_000_i64));
-    // An explicit JSON name stays, and an `emit_unpopulated` field is sent when empty.
+    // Explicit JSON name; `emit_unpopulated` field.
     assert_eq!(body["sourceUrl"], json!("s3://w"));
     assert_eq!(body["tags"], json!([]));
     assert_eq!(body["display_name"], json!("Shown"));
@@ -350,21 +346,20 @@ async fn error_answers_keep_status_code_message_and_details() {
     assert_eq!(e.message, "no widget named missing");
     assert_eq!(e.details, vec![json!({"reason": "gone"})]);
     assert_eq!(e.to_string(), "WIDGET_NOT_FOUND: no widget named missing");
-    // The body as sent stays readable.
     assert!(
         e.body.starts_with('{') && e.body.contains("\"reason\":\"gone\""),
         "{}",
         e.body
     );
 
-    // A code that the client does not know is kept, from the camelCase key too.
+    // An unknown code, under the camelCase key.
     let err = client.widget("odd").get().await.unwrap_err();
     assert_eq!(err.status(), Some(400));
     assert_eq!(err.code(), Some("SOMETHING_NEW"));
     let Error::Api(e) = err else { unreachable!() };
     assert_eq!(e.error_code(), None);
 
-    // A body that is not a JSON error becomes the message.
+    // A non-JSON body.
     let err = client.widget("text").get().await.unwrap_err();
     assert_eq!(err.status(), Some(502));
     assert_eq!(err.code(), None);
@@ -372,7 +367,7 @@ async fn error_answers_keep_status_code_message_and_details() {
     let Error::Api(e) = err else { unreachable!() };
     assert_eq!(e.body, "bad gateway\n");
 
-    // An error object under `error`, and OAuth's error keys.
+    // An `error` envelope, and OAuth's keys.
     let err = client.widget("nested").get().await.unwrap_err();
     assert_eq!(err.code(), Some("AlreadyExistsException"));
     assert_eq!(err.to_string(), "AlreadyExistsException: table exists");
@@ -401,7 +396,7 @@ async fn list_stream_reads_all_pages() {
 async fn list_stream_holds_its_cap_when_pages_are_larger() {
     let (base, seen) = serve().await;
     let client = DemoClient::new_unauthenticated(base);
-    // The server sends 2 widgets on its first page whatever the request asks for.
+    // The server's first page always has 2 widgets.
     let one: Vec<Widget> = client
         .list_widgets()
         .with_max_results(1)
@@ -410,7 +405,6 @@ async fn list_stream_holds_its_cap_when_pages_are_larger() {
         .await
         .unwrap();
     assert_eq!(one.len(), 1);
-    // Each page asks for the widgets still wanted.
     let three: Vec<Widget> = client
         .list_widgets()
         .with_max_results(3)
@@ -469,11 +463,10 @@ async fn free_form_json_keeps_whole_numbers() {
         widget.rows["t"].values,
         [Value::from(1_i64), Value::from(2_i64)]
     );
-    // The models write the whole numbers back as integers too.
     let json = serde_json::to_string(&widget).unwrap();
     assert!(json.contains(r#""rows":{"t":[1,2]}"#), "{json}");
 
-    // Repeated 64-bit integers and map values of them are numbers as well.
+    // Repeated and map `int64` values.
     let widget = Widget {
         sizes: vec![1, 2],
         counts: [("a".to_string(), 3)].into_iter().collect(),
@@ -490,7 +483,6 @@ async fn free_form_json_keeps_whole_numbers() {
 async fn head_requests_and_get_bodies() {
     let (base, seen) = serve().await;
     let client = DemoClient::new_unauthenticated(base);
-    // A HEAD request without an answer tells whether the widget exists; other errors fail.
     assert!(client.widget_exists("w").await.unwrap());
     assert!(!client.widget_exists("missing").await.unwrap());
     let err = client.widget_exists("denied").await.unwrap_err();
@@ -524,9 +516,8 @@ async fn path_values_stay_out_of_the_body() {
     let (base, seen) = serve().await;
     let client = DemoClient::new_unauthenticated(base);
     client.tag_widget("w", "blue").await.unwrap();
-    // A method of `path_fields_in_body_methods` keeps them.
+    // `RenameWidget` is in `path_fields_in_body_methods`.
     client.rename_widget("w", "v").await.unwrap();
-    // The name is in the path only: a strict server rejects fields that it does not know.
     let seen = seen.all();
     assert!(
         seen.contains(&r#"tag w body {"tag":"blue"}"#.to_string()),
@@ -563,7 +554,7 @@ async fn ndjson_answers_and_header_fields() {
 async fn raw_bodies_and_paths_of_several_segments() {
     let (base, seen) = serve().await;
     let client = DemoClient::new_unauthenticated(base);
-    // A path value keeps its `/` and drops its leading one.
+    // A multi-segment path value keeps its `/` and drops the leading one.
     client
         .put_blob("/a/b c.bin", vec![0, 1, 255])
         .await
@@ -575,7 +566,6 @@ async fn raw_bodies_and_paths_of_several_segments() {
     let blob = client.get_blob("x/y").await.unwrap();
     assert_eq!(blob.data, b"blob:x/y");
     assert_eq!(blob.size, Some(8));
-    // A request header field goes in its header, not in the query.
     let part = client
         .get_blob("x/y")
         .with_range("bytes=0-1".to_string())
@@ -625,7 +615,6 @@ async fn bearer_token_goes_in_every_request_and_form_bodies_are_encoded() {
             .to_string()
     ));
 
-    // The token never shows in `Debug`.
     let transport = crate::codegen::transport::HttpClient::default().with_token("secret");
     assert!(!format!("{transport:?}").contains("secret"));
 }

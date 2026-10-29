@@ -128,8 +128,7 @@ generate_code(&metadata, &config)?;
 ```
 
 See the rustdoc for the full `CodeGenConfig` / `CodeGenOutput` field reference. A client-only
-crate sets `common` to `None`: no Axum extractors are written, and the models `mod.rs` does not
-declare them. The `server` output needs them.
+crate sets `common` to `None` to skip the Axum extractors; the `server` output needs them.
 
 ## WASM / browser clients
 
@@ -155,10 +154,10 @@ option is off by default.
 | `path_fields_in_body_methods` | `path_fields_in_body_methods: [pkg.Service.Method]` | Keep the path values in the request body of these RPCs too, for APIs that check that both match. |
 | `json_query_packages` | `json_field_names_by_package: {pkg: json}` | Send the query parameters of these packages by their JSON name (`startIndex`), as their bodies. Elsewhere a query key is the proto name, or a `json_name` that differs from the default. |
 
-Path values are always percent-encoded (`/` too, except for multi-segment patterns such as
-`{name=catalogs/*}`). As `google.api.http` maps them, they are not in the request body, also
-with `body: "*"`: a strict server rejects fields that it does not know. With `json_field_names: proto`, a field with an explicit `json_name`
-keeps it, and `json_field_names_by_package` overrides the style per proto package.
+Path values are percent-encoded (`/` too, except in multi-segment patterns such as
+`{name=catalogs/*}`) and left out of the request body, as `google.api.http` specifies. With
+`json_field_names: proto`, an explicit `json_name` is kept, and `json_field_names_by_package`
+overrides the style per proto package.
 
 ## Python API
 
@@ -168,8 +167,8 @@ the Python exception classes raise its errors.
 
 The generated API:
 
-- Model classes are frozen, with equality and a `repr()` of `Name(field=value, …)` without the
-  `None` fields. Only the models that a request takes get a keyword constructor.
+- Model classes are frozen, `eq`, with a `repr()` of `Name(field=value, …)` without the `None`
+  fields. Only the models that a request takes get a keyword constructor.
 - Enums are `enum.StrEnum` classes (Python 3.11+) in `<package>/_enums.py`; parameters take a
   member or a name. The zero `*_UNSPECIFIED` value is not a member; a field that holds it reads
   as `None`.
@@ -177,7 +176,7 @@ The generated API:
   docstrings; the bindings crate writes the `.pyi` from them.
 - `codegen/error.rs` holds the PyO3 exception classes: a base class (`error_base_class`;
   `bindings.error_base_class` in `trestle.yaml`) with `message`, `code`, `status` and `details`,
-  and one subclass per kind of HTTP error status, which `register` adds to the module.
+  and one subclass per kind of HTTP error status.
 - The methods block on the Tokio runtime of `codegen/runtime.rs` (`rt()`, made on first use; it
   panics in a forked child). With `async_methods`, `register` installs it in
   `pyo3-async-runtimes`.
@@ -185,10 +184,10 @@ The generated API:
 | Option | Effect |
 |---|---|
 | `package` | Where `_enums.py` and the public modules go: `{ dir, name }`. Required. |
-| `module` | Classes go in `<module>.<service>`; the root client in `<module>`. The generated `register(module)` adds them and the submodules. With a module, request messages get no class. |
+| `module` | Classes go in `<module>.<service>`, the root client in `<module>`; `register(module)` adds them all. Request messages get no class. |
 | `async_methods` | Each method gets a `<name>_async` twin that returns an `asyncio.Future` (needs `pyo3-async-runtimes`). |
 | `keyword_only` | Optional parameters are keyword-only. |
-| `public_modules` | A module `<package>/<service>.py` per submodule of `module`: it re-exports the classes of the submodule and the enums of its proto package, so users import `<package>.<service>`. Needs `module`. |
+| `public_modules` | A module `<package>/<service>.py` per submodule of `module`, re-exporting its classes and enums. Needs `module`. |
 
 In `trestle.yaml`, `package` sits under `clients.python` and the rest under
 `clients.python.options`. `tests/rest_client_e2e` runs a client and Python bindings with all of

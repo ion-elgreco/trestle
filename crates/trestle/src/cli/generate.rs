@@ -81,9 +81,7 @@ pub fn run(args: GenerateArgs) -> Result<()> {
     let config = cfg.to_codegen_config()?;
     generate_code(&metadata, &config)?;
 
-    // Rewrite the buffa model output: snake_case JSON field names and 64-bit integers as
-    // numbers, when requested. Runs after all `.rs` are on disk but before `cargo fmt`, so the
-    // format pass normalizes any whitespace the edit introduces.
+    // Rewrite the buffa model output before `cargo fmt`, which then normalizes the edits.
     if cfg.generate.proto_lib == ProtoLib::Buffa {
         rewrite_models(&cfg, &config, &metadata)?;
     }
@@ -236,9 +234,7 @@ fn format_generated(config: &CodeGenConfig, project_dir: &Path) {
     }
 }
 
-/// Apply the configured [`ModelRewrites`] to every `.rs` file in the model output
-/// (`models_subdir_path`), the only place the buf-plugin model files live. A no-op when the
-/// config has no models dir or asks for no rewrite.
+/// Apply the configured [`ModelRewrites`] to the buf-plugin model files (`models_subdir_path`).
 fn rewrite_models(
     cfg: &TrestleConfig,
     config: &CodeGenConfig,

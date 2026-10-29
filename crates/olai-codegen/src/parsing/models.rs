@@ -76,19 +76,15 @@ pub struct MessageInfo {
 #[derive(Debug, Clone)]
 pub struct MessageField {
     pub name: String,
-    /// The `json_name` that the proto writes out for the field; `None` for protoc's default
-    /// lowerCamelCase name, even when an explicit name equals it.
+    /// The explicit `json_name` of the field; `None` for protoc's default.
     pub json_name: Option<String>,
-    /// The HTTP response header that this response field comes from
-    /// (`(olai.trestle.v1.response_header)`), instead of the body.
+    /// The HTTP response header this field is read from (`(olai.trestle.v1.response_header)`).
     pub response_header: Option<String>,
-    /// The HTTP request header that this request field goes in
-    /// (`(olai.trestle.v1.request_header)`), instead of the query or the body.
+    /// The HTTP request header this field is sent in (`(olai.trestle.v1.request_header)`).
     pub request_header: Option<String>,
     /// Whether the field is sent even when unpopulated (`(olai.trestle.v1.emit_unpopulated)`).
     pub emit_unpopulated: bool,
-    /// Whether the field is the raw HTTP body of its message (`(olai.trestle.v1.raw_body)`): the
-    /// bytes of a request body, or of a response body, instead of JSON.
+    /// Whether the field is the raw HTTP body of its message (`(olai.trestle.v1.raw_body)`).
     pub raw_body: bool,
     /// Language-agnostic type; carries `is_optional` and `is_repeated` flags.
     pub unified_type: UnifiedType,
@@ -165,8 +161,7 @@ pub struct MethodMetadata {
     /// Pre-parsed HTTP URL pattern. Analysis should use this directly instead of re-parsing.
     pub http_pattern: HttpPattern,
     pub documentation: Option<String>,
-    /// A server-streaming RPC (`returns (stream T)`): over REST, an NDJSON answer with one `T`
-    /// per line.
+    /// A server-streaming RPC (`returns (stream T)`): NDJSON over REST.
     pub server_streaming: bool,
 }
 

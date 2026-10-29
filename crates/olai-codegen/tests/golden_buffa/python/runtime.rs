@@ -1,12 +1,10 @@
 // @generated — do not edit by hand.
-//! The Tokio runtime of the bindings: one multi-thread runtime, made on first use. The
-//! methods block on it, and the `_async` methods run on it. It panics in a forked child,
-//! where Tokio's thread pool does not work.
+//! The Tokio runtime of the bindings, made on first use.
 
 use std::sync::OnceLock;
 use tokio::runtime::{Builder, Runtime};
 
-/// The runtime. It panics in a forked child process.
+/// The runtime. It panics in a forked child, where Tokio's thread pool does not work.
 pub fn rt() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
     static PID: OnceLock<u32> = OnceLock::new();

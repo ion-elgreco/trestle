@@ -39,9 +39,8 @@ pub fn extract_qualified_type_name(name: &str) -> String {
     }
 }
 
-/// A fully-qualified type name in the form the [`CodeGenMetadata`](crate::parsing::CodeGenMetadata)
-/// tables are keyed by: with a leading `.`. Field types carry the name without it
-/// (`demo.v1.Color`).
+/// `name` with the leading `.` that the [`CodeGenMetadata`](crate::parsing::CodeGenMetadata)
+/// tables are keyed by (field types carry it without).
 pub(crate) fn metadata_key(name: &str) -> String {
     if name.starts_with('.') {
         name.to_string()
@@ -110,8 +109,8 @@ pub mod strings {
     }
 }
 
-/// The Rust identifier of a proto field: a raw identifier (`r#type`) for a Rust keyword, as buffa
-/// and prost name such fields. `self`, `Self`, `super` and `crate` cannot be raw identifiers.
+/// The Rust identifier of a proto field: raw (`r#type`) for a keyword, as buffa and prost name
+/// such fields.
 pub(crate) fn field_ident(name: &str) -> proc_macro2::Ident {
     const KEYWORDS: &[&str] = &[
         "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "do",

@@ -1,11 +1,8 @@
 //! The pure-Python files of the generated package: `_enums.py`, and the public modules that
 //! re-export the submodules of the extension module.
 //!
-//! Enums are better as Python source than as PyO3 classes. An `enum.StrEnum` (Python 3.11+)
-//! member is a real `str`: it equals its name, works as a dict key for that name, and goes into
-//! JSON as is. PyO3 enum classes cannot subclass `str`, and `pyo3-stub-gen` can only describe an
-//! `enum.Enum` base. The model wrappers convert through these classes (see `model_conversions`).
-//! Type checkers read the classes from the file directly, so it needs no stubs.
+//! Enums are Python source because a PyO3 class cannot subclass `str`: an `enum.StrEnum` member
+//! equals its name, works as a dict key and goes into JSON as is. The file needs no stubs.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,8 +10,7 @@ use crate::parsing::{CodeGenMetadata, EnumInfo};
 
 use super::model_conversions::{hidden_value, python_class_name};
 
-/// The `_enums.py` file: one `enum.StrEnum` class per enum in `enum_names` (the project enums,
-/// see [`ModelClasses`](super::model_conversions::ModelClasses)).
+/// The `_enums.py` file: one `enum.StrEnum` class per enum in `enum_names`.
 pub(crate) fn enums_py(metadata: &CodeGenMetadata, enum_names: &[&String]) -> String {
     let mut out = String::from(
         "\"\"\"The enums of the API.\n\n\
@@ -41,7 +37,7 @@ fn enum_class(fq_name: &str, info: &EnumInfo) -> String {
         if hidden_value(value) {
             continue;
         }
-        // An explicit value: `enum.auto()` gives the lowercase name in a `StrEnum`.
+        // Not `enum.auto()`, which lowercases the name in a `StrEnum`.
         out.push_str(&format!("    {0} = \"{0}\"\n", value.name));
         if let Some(doc) = docstring(value.documentation.as_deref(), "    ") {
             out.push_str(&doc);
@@ -51,8 +47,7 @@ fn enum_class(fq_name: &str, info: &EnumInfo) -> String {
 }
 
 /// The public modules, `<segment>.py` by file name: one per submodule `<module>.<segment>`,
-/// which re-exports its classes (the `names` that are not enums, and `clients`) and the enums
-/// of its proto package from `<package>._enums`.
+/// re-exporting its classes and clients, and its enums from `<package>._enums`.
 pub(crate) fn public_modules<'a>(
     module: &str,
     package: &str,
@@ -99,8 +94,7 @@ pub(crate) fn public_modules<'a>(
         .collect()
 }
 
-/// `names` in the order of isort (and ruff) within a `from` import: the constants (`ALL_CAPS`)
-/// first, then the others, each without case (`SharedDataObject` before `ShareInfo`).
+/// `names` in isort order: constants (`ALL_CAPS`) first, then the rest case-insensitively.
 fn isort_order(names: &BTreeSet<String>) -> Vec<&String> {
     let mut names: Vec<&String> = names.iter().collect();
     names.sort_by_key(|name| {

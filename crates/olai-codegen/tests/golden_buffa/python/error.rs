@@ -9,7 +9,7 @@ use pyo3::types::{PyDict, PyList, PyString};
 type ClientError = example_client::error::Error;
 /// The result of a binding call.
 pub type PyExampleResult<T> = ::core::result::Result<T, PyExampleError>;
-/// The error of a binding call: a client error, raised as a `ExampleError`, or a Python error, raised as is.
+/// The error of a binding call: a client error (raised as a `ExampleError`) or a Python error.
 #[derive(Debug)]
 pub enum PyExampleError {
     /// A client error.
@@ -47,8 +47,7 @@ impl ::core::convert::From<PyExampleError> for PyErr {
     }
 }
 
-/// An error answer of the server, or a request that got no answer. A subclass tells the
-/// kind of HTTP error status.
+/// An error answer of the server, or a request that got no answer.
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
 #[::pyo3::pyclass(extends = PyException, subclass, frozen, name = "ExampleError")]
 pub struct ExampleError {
@@ -78,8 +77,8 @@ impl ExampleError {
         }
     }
 
-    /// The fields come from the constructor. `BaseException.__init__` takes no keyword
-    /// arguments, so this one sets `args` to the message, as that one would.
+    /// Sets `args` to the message, as `BaseException.__init__` (which takes no keyword
+    /// arguments) would.
     #[pyo3(signature = (message, code = None, status = None, details = None))]
     #[allow(unused_variables)]
     fn __init__(
@@ -98,8 +97,7 @@ impl ExampleError {
         &self.message
     }
 
-    /// The error code of the answer, such as `NOT_FOUND`. `None` when the answer has
-    /// none, or when the request got no answer.
+    /// The error code of the answer, such as `NOT_FOUND`, if any.
     #[getter]
     fn code(&self) -> Option<&str> {
         self.code.as_deref()
@@ -141,7 +139,7 @@ impl ExampleError {
         Ok(format!("{}({})", slf.get_type().name() ?, parts.join(", ")))
     }
 
-    /// The class and the arguments that make the exception again, for `pickle`.
+    /// For `pickle`.
     #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(
         slf: &Bound<'py, Self>,

@@ -1,9 +1,7 @@
-//! The generated models and REST client of `proto/demo/v1/svc.proto`, mounted as a client crate
-//! mounts them: models under `crate::models`, the client under `crate::codegen`.
-//!
-//! The tests run the client against a local axum server.
+//! The generated models (`crate::models`) and REST client (`crate::codegen`) of
+//! `proto/demo/v1/svc.proto`, mounted as a client crate mounts them.
 
-// The generated code names this crate `rest_client_e2e`, as another crate would.
+// The generated code refers to this crate by name.
 extern crate self as rest_client_e2e;
 
 pub mod models {
@@ -15,8 +13,7 @@ pub mod codegen {
     include!(concat!(env!("OUT_DIR"), "/client/mod.rs"));
 }
 
-// The binding crate names the clients and the error module from the crate root.
-// The client root re-exports the root client and every resource client.
+// The binding crate imports the clients and the error module from the crate root.
 pub use codegen::*;
 
 /// Context type of the (unused) server config.

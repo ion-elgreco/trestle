@@ -1,11 +1,5 @@
-//! Generates, into `OUT_DIR`:
-//!
-//! 1. the buffa models of `proto/demo/v1/svc.proto` (with views), into `models/_gen/`;
-//! 2. the trestle REST client (reqwest transport, error module) into `client/`, and the models
-//!    `mod.rs` (with the `json_int64` helpers and the PyO3 wrappers) next to the buffa files;
-//! 3. the trestle model rewrites over the buffa files: snake_case JSON names, int64 as numbers.
-//!
-//! `src/lib.rs` mounts both trees. The Python bindings are built by the `py` crate.
+//! Generates the buffa models, the trestle client and models `mod.rs`, and the model rewrites
+//! into `OUT_DIR`. The `py` crate generates the Python bindings.
 
 include!("config.rs");
 
@@ -19,8 +13,8 @@ fn main() {
     let config = demo_config(&out);
     let gen_dir = config.output.models_subdir_path().unwrap();
 
-    // 1. buffa models. buffa-build writes one file per proto file plus `<package>.mod.rs`; the
-    // buf plugin's `file_per_package` writes `<package>.rs`, which the models `mod.rs` includes.
+    // buffa-build writes `<package>.mod.rs`; the models `mod.rs` includes the buf plugin's
+    // `<package>.rs`, so bridge the two.
     buffa_build::Config::new()
         .files(&[fixture_dir().join("proto/demo/v1/svc.proto")])
         .includes(&[fixture_dir().join("proto")])
@@ -36,13 +30,12 @@ fn main() {
     )
     .unwrap();
 
-    // 2. trestle client + models `mod.rs`.
     let fds = FileDescriptorSet::parse_from_bytes(&std::fs::read(&descriptors).unwrap()).unwrap();
     let metadata = parse_file_descriptor_set(&fds).unwrap();
     generate_code(&metadata, &config).unwrap();
-
-    // 3. The model rewrites.
-    demo_rewrites(&config, &metadata).rewrite_dir(&gen_dir).unwrap();
+    demo_rewrites(&config, &metadata)
+        .rewrite_dir(&gen_dir)
+        .unwrap();
 
     // `#[path]` needs a literal path, so mount the generated `mod.rs` through a small file.
     std::fs::write(

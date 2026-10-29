@@ -53,7 +53,7 @@ async fn list_widgets(uri: OriginalUri) -> Response {
 
 async fn create_widget(body: String) -> Response {
     let request: serde_json::Value = serde_json::from_str(&body).unwrap();
-    // The raw body comes back as the display name, so the test sees its numbers.
+    // The raw body comes back as `display_name`, so the test can check its numbers.
     axum::Json(json!({
         "name": request["name"],
         "created_at": request["created_at"],
@@ -74,7 +74,7 @@ async fn widget_exists(Path(name): Path<String>) -> StatusCode {
     }
 }
 
-/// A `GET` with a JSON body: the widgets whose names start with `prefix`.
+/// A `GET` with a JSON body.
 async fn search_widgets(axum::Json(body): axum::Json<serde_json::Value>) -> Response {
     let prefix = body["prefix"].as_str().unwrap_or_default().to_string();
     let widgets: Vec<_> = ["w1", "w2", "x1"]
@@ -85,7 +85,7 @@ async fn search_widgets(axum::Json(body): axum::Json<serde_json::Value>) -> Resp
     axum::Json(json!({"widgets": widgets})).into_response()
 }
 
-/// An NDJSON answer: one widget per line.
+/// An NDJSON answer.
 async fn stream_widgets() -> Response {
     let lines: String = ["w1", "w2"]
         .into_iter()
@@ -98,14 +98,13 @@ async fn stream_widgets() -> Response {
         .into_response()
 }
 
-/// A version in the response headers, the name in the body.
+/// Fields in the response headers.
 async fn widget_version(Path(name): Path<String>) -> Response {
     let body = json!({"name": name}).to_string();
     ([("Widget-Version", "7"), ("ETag", "abc")], body).into_response()
 }
 
-/// Start the demo server on its own Tokio runtime; returns its base URL and the runtime, which
-/// must stay alive while the test runs.
+/// Start the demo server on its own runtime, which must outlive the test.
 fn serve() -> (String, tokio::runtime::Runtime) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let base = runtime.block_on(async {
@@ -143,8 +142,7 @@ fn serve() -> (String, tokio::runtime::Runtime) {
     (base, runtime)
 }
 
-/// Run `code` with `BASE` (the server URL) and the generated package importable: `demo` from
-/// the package directory, `demo._core` from the generated `register`.
+/// Run `code` with `BASE` set to the server URL and the `demo` package importable.
 fn run_python(code: &str) {
     let (base, _server) = serve();
     Python::initialize();
@@ -222,10 +220,10 @@ except ValueError as e:
 # Lists read every page.
 assert [x.name for x in client.list_widgets()] == ["w1", "w2", "w3"]
 
-# Only models that a request takes have a constructor; optional arguments are keyword-only.
+# Only input models have a constructor; optional arguments are keyword-only.
 label = Label(key="k", value="v")
 assert Label("k").key == "k"
-# Models compare by value; a `debug_redact` field is hidden in the repr, not in the attribute.
+# Value equality; a `debug_redact` field is hidden in the repr only.
 assert Label("k") == Label("k") and Label("k") != Label("j")
 hidden = Label("k", secret="s3cret")
 assert hidden.secret == "s3cret" and "s3cret" not in repr(hidden), repr(hidden)
@@ -260,7 +258,7 @@ except NotFoundError as e:
     assert e.details == [{"reason": "gone"}], e.details
     assert str(e) == "WIDGET_NOT_FOUND: no widget named missing", str(e)
     assert repr(e) == "NotFoundError('no widget named missing', code='WIDGET_NOT_FOUND', status=404)", repr(e)
-    # Pickle keeps the class and the fields, as multiprocessing needs.
+    # Pickle round-trip, as multiprocessing needs.
     again = pickle.loads(pickle.dumps(e))
     assert type(again) is NotFoundError and str(again) == str(e) and again.details == e.details
     assert e.args == ("no widget named missing",), e.args
@@ -275,7 +273,7 @@ try:
     raise AssertionError("expected an error")
 except DemoError as e:
     assert type(e) is DemoError and e.status is None and e.code is None
-    # The message names the cause, as a Python exception has no chain of Rust causes.
+    # The message includes the Rust cause chain.
     assert "onnect" in str(e).split("error sending request", 1)[1], str(e)
 
 # Free-form JSON fields are plain Python objects; whole numbers are ints both ways.
@@ -288,19 +286,19 @@ assert w.rows == {"t": [1, 2]}, w.rows
 created = client.create_widget("w2", attributes={"count": 3, "flag": True, "list": [1, 2.5]})
 assert created.attributes == {"count": 3, "flag": True, "list": [1, 2.5]}, created.attributes
 assert '"count":3' in created.display_name, created.display_name
-# A field named after a Rust keyword keeps its name in Python.
+# A field named after a Rust keyword.
 assert client.create_widget("w4", type="gear").type == "gear"
-# A map of messages, both ways.
+# A map of messages.
 by_key = client.create_widget("w5", labels_by_key={"k": label}).labels_by_key
 assert list(by_key) == ["k"] and by_key["k"].value == "v", by_key
-# A list of free-form JSON as an argument.
+# A list of free-form JSON.
 assert client.create_widget("w6", notes=[1, "two"]).notes == [1, "two"]
 try:
     client.create_widget("w3", attributes={"bad": object()})
     raise AssertionError("expected a TypeError")
 except TypeError:
     pass
-# JSON has no NaN or infinity: refused before the request.
+# JSON has no NaN or infinity.
 for bad in (float("nan"), float("inf")):
     try:
         client.create_widget("w3", attributes={"bad": bad})
@@ -308,7 +306,7 @@ for bad in (float("nan"), float("inf")):
     except ValueError:
         pass
 
-# A HEAD request tells whether the widget exists; other errors raise. A GET can carry a JSON body.
+# A HEAD existence check, and a GET with a JSON body.
 assert client.widget_exists("w") is True
 assert client.widget_exists("missing") is False
 try:
@@ -318,12 +316,12 @@ except PermissionDeniedError:
     pass
 assert [w.name for w in client.search_widgets("w", ["a"], {"t": [1, 2]}).widgets] == ["w1", "w2"]
 
-# A streaming method gives a list, one item per NDJSON line; fields can come from headers.
+# An NDJSON stream as a list; fields from response headers.
 assert [w.name for w in client.stream_widgets()] == ["w1", "w2"]
 version = client.widget_version("w")
 assert (version.name, version.version, version.etag) == ("w", 7, "abc"), version
 
-# A raw body: `bytes` in and out.
+# Raw bodies as `bytes`.
 assert client.put_blob("x/y", b"\x00\x01\xff") is None
 blob = client.get_blob("x/y")
 assert (blob.data, blob.size) == (b"blob:x/y", 8), blob
@@ -347,8 +345,7 @@ asyncio.run(main())
     );
 }
 
-/// The generated classes carry `pyo3-stub-gen` annotations: the stubs show the module layout,
-/// the proto docs, the `_async` futures and the `str` enums.
+/// The stubs that `pyo3-stub-gen` writes from the generated annotations.
 #[test]
 fn stubs() {
     let dir = std::path::PathBuf::from(concat!(env!("OUT_DIR"), "/stubs"));
@@ -382,9 +379,7 @@ fn stubs() {
     for expected in [
         "class Widget:",
         "def color(self) -> typing.Optional[_enums.Color]:",
-        // A field named after a Rust keyword keeps its Python name.
         "def type(self) -> typing.Optional[builtins.str]:",
-        // `#[pyclass(eq)]`: comparable with any object, positional-only.
         "def __eq__(self, other: builtins.object, /) -> builtins.bool:",
         "The color of the widget.",
         "def __new__(cls, key: builtins.str, *, value: typing.Optional[builtins.str] = None",
@@ -401,7 +396,7 @@ fn stubs() {
             "missing `{expected}` in:\n{models}"
         );
     }
-    // Request messages are not Python classes, and response models have no constructor.
+    // No request classes; no constructor on response models.
     assert!(!models.contains("class CreateWidgetRequest"), "{models}");
     let widget = &models[models.find("class Widget:").unwrap()..];
     let widget = &widget[..widget.find("class WidgetClient:").unwrap()];

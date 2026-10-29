@@ -1,13 +1,6 @@
-//! The generated client error module (`error.rs`).
-//!
-//! Generated client methods return `Err(crate::codegen::error::parse_error_response(response))`
-//! for an error status, and use `?` on transport, URL and JSON errors. With
-//! [`RestClientOptions::error_module`](super::RestClientOptions::error_module) set, this module
-//! supplies all of it: the `Error` and `Result` types, an `ApiError` with the HTTP status and
-//! the code, message and details of the JSON error body, and `parse_error_response`.
-//!
-//! The body keys come from [`ErrorModuleConfig`]. A code that is not in the configured code enum
-//! is kept as a string, and a body that is not a JSON error object becomes the message.
+//! The generated client error module (`error.rs`): the `Error`/`Result` types, an `ApiError`
+//! with the HTTP status and the code, message and details of the JSON error body (keys from
+//! [`ErrorModuleConfig`]), and the `parse_error_response` the client methods call.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -30,8 +23,7 @@ pub(crate) fn generate(
     errors: &ErrorModuleConfig,
     metadata: &CodeGenMetadata,
 ) -> Result<String> {
-    // The keys of the code, in order: the code key, its lowerCamelCase form when that is another
-    // key, then the configured fallbacks. The message keys likewise.
+    // Code keys, in order: the configured key, its lowerCamelCase form, the fallbacks.
     let code_alias =
         Some(lower_camel(&errors.code_field)).filter(|alias| *alias != errors.code_field);
     let code_fields = std::iter::once(errors.code_field.clone())
@@ -42,7 +34,6 @@ pub(crate) fn generate(
     let envelope_fields = &errors.envelope_fields;
     let envelope = (!envelope_fields.is_empty()).then(|| {
         quote! {
-            // An answer that holds the error object under a key: read the fields from it.
             let object = [#(#envelope_fields),*]
                 .into_iter()
                 .find_map(|key| object.and_then(|o| o.get(key)).and_then(|v| v.as_object()))
@@ -66,8 +57,7 @@ pub(crate) fn generate(
         .map(|name| code_enum_accessor(config, metadata, name))
         .transpose()?;
 
-    // `olai_http::CloudClient::send` fails with `olai_http::Error`; the reqwest-based transports
-    // (the generated `HttpClient`, `olai_http_wasm::WasmClient`) fail with `reqwest::Error`.
+    // `CloudClient` fails with `olai_http::Error`; the reqwest-based transports with `reqwest::Error`.
     let cloud = config.uses_default_transport() || config.dual_transport();
     let cloud_cfg = if config.dual_transport() {
         quote! { #[cfg(not(target_arch = "wasm32"))] }
@@ -278,7 +268,6 @@ fn code_enum_accessor(
             "error code enum `{name}` is not an enum of the descriptor set"
         )));
     }
-    // The models module of the enum's package, as the clients import it (`models_path`).
     let (package, _) = key[1..].rsplit_once('.').unwrap_or_default();
     let module = ModelsPath::from_template(&config.models_path_template).try_resolve(
         package_models_segment(package).unwrap_or(package),
@@ -294,8 +283,7 @@ fn code_enum_accessor(
         },
     };
     Ok(quote! {
-        /// The error code as a known code. `None` when the body has no code, or a code that
-        /// the client does not know.
+        /// The error code as a known code; `None` for no code or an unknown one.
         pub fn error_code(&self) -> Option<#module::#enum_ident> {
             #parse
         }

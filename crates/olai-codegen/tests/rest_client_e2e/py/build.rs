@@ -1,5 +1,4 @@
-//! Generates the Python bindings (`python/`) and the Python package files (`pkg/demo/`) into
-//! `OUT_DIR`, from the same config as the client crate.
+//! Generates the Python bindings and package files into `OUT_DIR`, from the client crate's config.
 
 include!("../config.rs");
 

@@ -17,8 +17,7 @@ mod runtime;
 pub(crate) use bindings::{generate, main_module};
 pub(crate) use model_conversions::generate_pyo3_impls;
 
-/// The extra files of the Python bindings, by path relative to the binding output: the error
-/// module, the runtime, and the `PyFuture` helper with `async_methods`.
+/// The helper files of the Python bindings (error module, `PyFuture`, runtime), by file name.
 pub(crate) fn helper_files(config: &crate::codegen::CodeGenConfig) -> Vec<(String, String)> {
     let bindings = config
         .bindings
@@ -38,8 +37,7 @@ pub(crate) fn helper_files(config: &crate::codegen::CodeGenConfig) -> Vec<(Strin
     files
 }
 
-/// The pure-Python files of the package by file name: `_enums.py` when the project has enums,
-/// and the [`PythonOptions::public_modules`].
+/// The pure-Python package files (`_enums.py`, the public modules), by file name.
 pub(crate) fn package_files(
     config: &crate::codegen::CodeGenConfig,
     plan: &crate::analysis::GenerationPlan,
@@ -84,18 +82,18 @@ pub(crate) fn package_files(
     files
 }
 
-/// The `pyo3-stub-gen` attribute that goes before a `#[pyclass]`.
+/// The `pyo3-stub-gen` attribute of a `#[pyclass]`.
 fn stub_class_attr() -> TokenStream {
     quote! { #[::pyo3_stub_gen::derive::gen_stub_pyclass] }
 }
 
-/// The `pyo3-stub-gen` attribute that goes before a `#[pymethods]`.
+/// The `pyo3-stub-gen` attribute of a `#[pymethods]`.
 fn stub_methods_attr() -> TokenStream {
     quote! { #[::pyo3_stub_gen::derive::gen_stub_pymethods] }
 }
 
 /// The `module = "…",` argument of a `#[pyclass]` with [`PythonOptions::module`]: the module
-/// itself, or its submodule of the models segment `segment` of a proto package.
+/// itself, or its submodule `segment`.
 fn module_arg(options: &PythonOptions, segment: Option<&str>) -> Option<TokenStream> {
     let root = options.module.as_deref()?;
     let module = match segment {
@@ -105,8 +103,7 @@ fn module_arg(options: &PythonOptions, segment: Option<&str>) -> Option<TokenStr
     Some(quote! { module = #module, })
 }
 
-/// The Python submodule segment of a proto package: its models segment
-/// (`a.catalogs.v1` → `catalogs`).
+/// The Python submodule segment of a proto package (`a.catalogs.v1` → `catalogs`).
 fn package_segment(package: &str) -> &str {
     crate::codegen::package_models_segment(package).unwrap_or(package)
 }

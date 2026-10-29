@@ -1,20 +1,14 @@
-//! The generated `codegen/error.rs` of the Python bindings.
+//! The generated `codegen/error.rs` of the Python bindings: the error/result types the binding
+//! methods return, and the PyO3 exception classes a client error is raised as (a base class,
+//! [`PythonOptions::error_base_class`], and one subclass per kind of HTTP error status).
 //!
-//! It defines the error and result types that the binding methods return
-//! ([`BindingsConfig::py_error_type`] / [`BindingsConfig::py_result_type`]): a client error, or
-//! a Python error. A client error becomes one of the generated PyO3 exception classes: one base
-//! class with `message`, `code`, `status` and `details`, and one subclass per kind of HTTP
-//! error status. The generated `register` adds them to the extension module.
-//!
-//! [`BindingsConfig::py_error_type`]: crate::codegen::BindingsConfig::py_error_type
-//! [`BindingsConfig::py_result_type`]: crate::codegen::BindingsConfig::py_result_type
+//! [`PythonOptions::error_base_class`]: crate::codegen::PythonOptions::error_base_class
 
 use quote::{format_ident, quote};
 
 use crate::codegen::{BindingsConfig, PythonOptions, format_tokens_static};
 
-/// The exception subclasses, one per kind of HTTP error status: `(name, statuses, doc)`.
-/// `ServerError` takes every 5xx status.
+/// The exception subclasses: `(name, statuses, doc)`. An empty `statuses` means every 5xx.
 const ERROR_CLASSES: &[(&str, &[u16], &str)] = &[
     (
         "BadRequestError",
@@ -63,13 +57,11 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
     let module_arg = super::module_arg(python, None);
     let stub_class = super::stub_class_attr();
     let stub_methods = super::stub_methods_attr();
-    // The details are JSON values: `list[typing.Any]`, not a bare `list`.
     let details_stub_type = quote! {
         #[gen_stub(override_return_type(type_repr = "list[typing.Any]", imports = ("typing")))]
     };
     let error_doc = format!(
-        " The error of a binding call: a client error, raised as a `{base_name}`, or a Python \
-         error, raised as is."
+        " The error of a binding call: a client error (raised as a `{base_name}`) or a Python error."
     );
 
     let subclasses = ERROR_CLASSES.iter().map(|(name, _, doc)| {
@@ -164,8 +156,7 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
             }
         }
 
-        /// An error answer of the server, or a request that got no answer. A subclass tells the
-        /// kind of HTTP error status.
+        /// An error answer of the server, or a request that got no answer.
         #stub_class
         #[::pyo3::pyclass(
             // A single ident: pyo3-stub-gen reads `extends` only in that form.
@@ -202,8 +193,8 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
                 }
             }
 
-            /// The fields come from the constructor. `BaseException.__init__` takes no keyword
-            /// arguments, so this one sets `args` to the message, as that one would.
+            /// Sets `args` to the message, as `BaseException.__init__` (which takes no keyword
+            /// arguments) would.
             #[pyo3(signature = (message, code = None, status = None, details = None))]
             #[allow(unused_variables)]
             fn __init__(
@@ -222,8 +213,7 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
                 &self.message
             }
 
-            /// The error code of the answer, such as `NOT_FOUND`. `None` when the answer has
-            /// none, or when the request got no answer.
+            /// The error code of the answer, such as `NOT_FOUND`, if any.
             #[getter]
             fn code(&self) -> Option<&str> {
                 self.code.as_deref()
@@ -263,7 +253,7 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
                 Ok(format!("{}({})", slf.get_type().name()?, parts.join(", ")))
             }
 
-            /// The class and the arguments that make the exception again, for `pickle`.
+            /// For `pickle`.
             #[allow(clippy::type_complexity)]
             fn __reduce__<'py>(
                 slf: &Bound<'py, Self>,
@@ -296,8 +286,7 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
             let (message, code, status, details) = match e {
                 ClientError::Api(api) => (api.message, api.code, Some(api.status), api.details),
                 other => {
-                    // A Python exception has no chain of causes, so the message lists them.
-                    // The first source is the error that `other` wraps and shows already.
+                    // Python has no cause chain, so append the causes `Display` does not show.
                     let mut message = other.to_string();
                     let mut cause = ::std::error::Error::source(&other).and_then(::std::error::Error::source);
                     while let Some(error) = cause {

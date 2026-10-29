@@ -7,7 +7,7 @@ use quote::quote;
 
 use crate::codegen::format_tokens_static;
 
-/// The `py_future.rs` file. `PyFuture<T>` shows in the stubs as `asyncio.Future[T]`.
+/// The `py_future.rs` file. `PyFuture<T>` is `asyncio.Future[T]` in the stubs.
 pub(crate) fn generate() -> String {
     let stub_impls = quote! {
             impl ::pyo3_stub_gen::PyStubType for NoResult {
@@ -50,15 +50,13 @@ pub(crate) fn generate() -> String {
             T: for<'a> IntoPyObject<'a> + Send + 'static,
         {
             /// Run `future` on the Tokio runtime of `pyo3-async-runtimes`; its result completes
-            /// the `asyncio.Future`. It needs a running event loop.
-            ///
-            /// It first calls `crate::codegen::runtime::rt`, so that a call in a forked child fails
-            /// as a sync call does: `future_into_py` spawns on the installed runtime without that
-            /// check.
+            /// the `asyncio.Future`. Needs a running event loop.
             pub fn new(
                 py: Python<'py>,
                 future: impl Future<Output = PyResult<T>> + Send + 'static,
             ) -> PyResult<Self> {
+                // `future_into_py` skips the runtime's own checks (such as the one for a
+                // forked child), so run them first.
                 crate::codegen::runtime::rt();
                 Ok(Self {
                     future: ::pyo3_async_runtimes::tokio::future_into_py(py, future)?,
@@ -77,8 +75,7 @@ pub(crate) fn generate() -> String {
             }
         }
 
-        /// The result of a request that returns nothing: Python's `None`. A `()` result would
-        /// give an empty tuple.
+        /// Python's `None`, for a request that returns nothing (`()` would be an empty tuple).
         pub struct NoResult;
 
         impl<'py> IntoPyObject<'py> for NoResult {

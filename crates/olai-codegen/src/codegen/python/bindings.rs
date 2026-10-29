@@ -38,11 +38,8 @@ fn qualified_wrapper_ident(ty: &UnifiedType) -> Ident {
     }
 }
 
-/// Wrap a model output ident as its `Py` wrapper return type, and produce the
-/// expression converting the bare client result `result` into it.
-///
-/// Returns `(return_type, convert_expr)`, or `None` for an `Empty`-returning method
-/// ([`MethodHandler::output_type`] is `None`). A server-streaming method returns a list.
+/// The Python-visible return type of a method and the expression that converts the bare client
+/// `result` into it; `None` for a method that returns nothing.
 fn wrap_single_output(method: &MethodHandler<'_>) -> Option<(TokenStream, TokenStream)> {
     if method.is_existence_check() {
         return Some((quote! { bool }, quote! { result }));
@@ -84,19 +81,14 @@ impl<'a> PyBackend<'a> {
         Self::from_service(services.first().expect("python output has a service"))
     }
 
-    /// The `register` function that adds every generated class to the extension module.
-    ///
-    /// With [`PythonOptions::module`], the root client goes in the module itself and the
-    /// classes of each proto package in a submodule named after its service segment, which is
-    /// also put in `sys.modules` so that `import <module>.<service>` finds it: the generated
-    /// `register_submodule!` macro does both, once per submodule. Without it, every
-    /// class goes in the module. With `_async` methods, it first installs the generated runtime
-    /// in `pyo3-async-runtimes`.
+    /// The `register` function that adds the generated classes to the extension module. With
+    /// [`PythonOptions::module`], the classes of each proto package go in a submodule
+    /// (`register_submodule!` also puts it in `sys.modules`); otherwise all go in the module.
     fn register_fn(&self, services: &[&ServiceHandler<'_>], aggregate: &Ident) -> TokenStream {
         let Some(first) = services.first() else {
             return quote! {};
         };
-        // Classes per service segment: the model wrappers, then the scoped clients.
+        // Classes per package segment: the model wrappers, then the scoped clients.
         let mut groups: BTreeMap<&str, Vec<Ident>> = BTreeMap::new();
         let plans: Vec<_> = services.iter().map(|s| s.plan).collect();
         let classes =
@@ -111,8 +103,6 @@ impl<'a> PyBackend<'a> {
                 .push(format_ident!("Py{}", service.client_type().to_string()));
         }
 
-        // With a module path, each submodule is registered by `register_submodule!`, which goes
-        // before `register`, as a macro is defined before its use.
         let (helpers, body) = match &self.python.module {
             Some(root) => {
                 let children = groups.iter().map(|(segment, classes)| {
@@ -120,8 +110,7 @@ impl<'a> PyBackend<'a> {
                         register_submodule!(module, #segment, [#(#classes),*])?;
                     }
                 });
-                // The macro body goes in as text after formatting (`REGISTER_SUBMODULE_MACRO`):
-                // this placeholder marks its place.
+                // A placeholder; `REGISTER_SUBMODULE_MACRO` replaces it after formatting.
                 let helpers = quote! {
                     /// The extension module, as Python imports it.
                     pub const CORE_MODULE: &str = #root;
@@ -161,17 +150,11 @@ impl<'a> PyBackend<'a> {
     }
 }
 
-/// The `register_submodule!` macro of the bindings' `mod.rs`, as text: prettyplease prints a
-/// macro body as a token stream on few lines, and rustfmt leaves a body with repetitions as it
-/// is. It replaces [`REGISTER_SUBMODULE_PLACEHOLDER`], after a blank line.
+/// The `register_submodule!` macro, spliced in as text because prettyplease and rustfmt do not
+/// format macro bodies. It replaces [`REGISTER_SUBMODULE_PLACEHOLDER`].
 const REGISTER_SUBMODULE_MACRO: &str = r#"
-/// Register the submodule `<CORE_MODULE>.<name>` with its classes. It also goes in
-/// `sys.modules`, so `import <CORE_MODULE>.<name>` finds it.
-///
-/// Usage:
-/// ```ignore
-/// register_submodule!(module, "tables", [PyColumnInfo, PyTableInfo])?;
-/// ```
+/// Register the submodule `<CORE_MODULE>.<name>` with its classes, and put it in `sys.modules`
+/// so that `import <CORE_MODULE>.<name>` finds it.
 macro_rules! register_submodule {
     ($parent:expr, $mod_name:expr, [$($type:ty),* $(,)?]) => {{
         let py = $parent.py();
@@ -360,8 +343,7 @@ impl BindingBackend for PyBackend<'_> {
             #stub_class
             #[pyclass(name = #aggregate_client_name, #root_module_arg)]
             pub struct #py_aggregate_client_ident {
-                // `pub(crate)`: hand-written `#[pymethods]` blocks of the binding crate can add
-                // methods (pyo3's `multiple-pymethods`).
+                // `pub(crate)` so the binding crate can add `#[pymethods]` of its own.
                 pub(crate) client: #aggregate_client_ident
             }
 
@@ -525,8 +507,7 @@ impl BindingBackend for PyBackend<'_> {
     }
 }
 
-/// The name of a get, update or delete binding method: the resource client method on a scoped
-/// client.
+/// The name of a get, update or delete binding method.
 fn scoped_method_name(parts: &ShapeParts<'_>) -> Ident {
     match parts.mode {
         BindingMode::Scoped => parts.method.plan.resource_client_method(),
@@ -544,16 +525,15 @@ fn glob_imports(paths: impl Iterator<Item = syn::Path>) -> Vec<TokenStream> {
         .collect()
 }
 
-/// What a binding method gives back: the future of the bare client result (an expression over
-/// the `request` builder), and its Python-visible type and the conversion of that `result`.
-/// `value` is `None` for a method that gives back nothing: Python `None`.
+/// What a binding method returns: the future of the bare client result (over the `request`
+/// builder), and the Python type and conversion of that `result`; `None` for Python `None`.
 struct MethodOutput {
     future: TokenStream,
     value: Option<(TokenStream, TokenStream)>,
 }
 
 impl PyBackend<'_> {
-    /// A method that gives back one model, or nothing.
+    /// A method that returns one model, or nothing.
     fn single(
         &self,
         parts: &ShapeParts<'_>,
@@ -603,8 +583,6 @@ impl PyBackend<'_> {
                 let request = #client_call #(#builder_calls)*;
                 let runtime = crate::codegen::runtime::rt();
                 py.detach(|| {
-                    // `result` is the bare client value; `#convert` lifts it into the `Py`
-                    // wrapper (or passes a unit through unchanged).
                     #[allow(clippy::let_unit_value)]
                     let result = runtime.block_on(#future)?;
                     Ok::<_, #py_error_type>(#convert)
@@ -649,8 +627,7 @@ impl PyBackend<'_> {
     }
 }
 
-/// `#[doc]` attributes for a binding method: the proto comment, then `Args:` and `Returns:`
-/// sections, as in the `.pyi` typings.
+/// `#[doc]` attributes for a binding method, with the `Args:`/`Returns:` sections of the `.pyi`.
 fn method_doc_attrs(method: &MethodHandler<'_>) -> TokenStream {
     let doc = super::docs::format_method_docstring_with_params(method);
     if doc.trim().is_empty() {
@@ -674,7 +651,6 @@ impl SetterRender for PyBackend<'_> {
     ) -> TokenStream {
         let ty = setter.field_type;
         let collection = ty.is_repeated || matches!(ty.base_type, BaseType::Map(..));
-        // A free-form JSON argument is any Python object: convert it to the field's value.
         if let Some(json) = json_param(ty) {
             let value = if collection {
                 let items =
@@ -691,9 +667,8 @@ impl SetterRender for PyBackend<'_> {
             };
             return quote! { .#with_method(#value) };
         }
-        // Maps and repeated fields are `Option`s at the binding boundary: one left out is the
-        // empty collection, which the request holds anyway. Message and enum elements are
-        // converted from their `Py` wrappers to the bare models.
+        // A map or list left out is the empty collection; message and enum elements are
+        // converted from their `Py` wrappers.
         if collection {
             let value = quote! { #param_ident.unwrap_or_default() };
             let value = if message_map_value(ty).is_some() {
@@ -737,7 +712,6 @@ fn python_param_defs(method: &MethodHandler<'_>, mode: BindingMode) -> Vec<Token
         .map(|p| {
             let param_name = p.field_ident();
             if json_param(p.field_type()).is_some() {
-                // Any Python object; `None` for an optional argument left out.
                 return if p.is_optional() {
                     quote! { #param_name: ::core::option::Option<::pyo3::Bound<'_, ::pyo3::PyAny>> }
                 } else {
@@ -746,7 +720,7 @@ fn python_param_defs(method: &MethodHandler<'_>, mode: BindingMode) -> Vec<Token
             }
             let rust_type = method.field_type(p.field_type(), RenderContext::PythonParameter);
             let py_type = wrap_param_type(p.field_type(), &rust_type);
-            // Every list and map is an `Option` at the boundary; a required one is not.
+            // A required list or map is not an `Option`.
             let py_type = if p.is_optional() || !is_collection(p.field_type()) {
                 py_type
             } else {
@@ -757,14 +731,11 @@ fn python_param_defs(method: &MethodHandler<'_>, mode: BindingMode) -> Vec<Token
         .collect()
 }
 
-/// The free-form JSON type of a param (`google.protobuf.Value`, `Struct`, `ListValue`), which
-/// Python passes as a plain object.
+/// The free-form JSON type of a param, which Python passes as a plain object.
 fn json_param(ty: &UnifiedType) -> Option<JsonType> {
     JsonType::of_field(ty)
 }
 
-/// Whether a param's base type is a model (message/enum) that has a `Py` wrapper,
-/// so its value must be converted (`.into()`) when forwarded to the Rust client.
 /// The value type of a `map<K, Message>` param, whose values cross the boundary as wrappers.
 fn message_map_value(ty: &UnifiedType) -> Option<&UnifiedType> {
     match &ty.base_type {
@@ -773,8 +744,7 @@ fn message_map_value(ty: &UnifiedType) -> Option<&UnifiedType> {
     }
 }
 
-/// The expression that converts the wrapper values of a map param `expr` to the models: each
-/// wrapper holds its model in `.0`.
+/// Convert the wrapper values of the map param `expr` to the bare models.
 fn convert_map_values(expr: TokenStream) -> TokenStream {
     quote! {
         #expr
@@ -784,6 +754,8 @@ fn convert_map_values(expr: TokenStream) -> TokenStream {
     }
 }
 
+/// Whether a param's base type is a model (message/enum) that has a `Py` wrapper, so its value
+/// must be converted (`.into()`) when forwarded to the Rust client.
 fn param_needs_conversion(ty: &UnifiedType) -> bool {
     matches!(
         ty.base_type,
@@ -791,8 +763,8 @@ fn param_needs_conversion(ty: &UnifiedType) -> bool {
     )
 }
 
-/// The type that takes a singular `bytes` value from Python, `Option`al or not: `PyBackedBytes`,
-/// which takes `bytes` without copying it byte by byte, as a `Vec<u8>` would.
+/// The type of a singular `bytes` argument: `PyBackedBytes`, which does not copy the Python
+/// `bytes` element by element as a `Vec<u8>` would.
 pub(super) fn py_bytes_input(optional: bool) -> TokenStream {
     match optional {
         true => quote! { ::core::option::Option<::pyo3::pybacked::PyBackedBytes> },
@@ -800,7 +772,7 @@ pub(super) fn py_bytes_input(optional: bool) -> TokenStream {
     }
 }
 
-/// The bytes of the [`py_bytes_input`] value `expr`, for the model.
+/// The `Vec<u8>` of the [`py_bytes_input`] value `expr`.
 pub(super) fn bytes_to_vec(expr: TokenStream, optional: bool) -> TokenStream {
     match optional {
         true => quote! { #expr.map(|v| v.to_vec()) },
@@ -808,10 +780,9 @@ pub(super) fn bytes_to_vec(expr: TokenStream, optional: bool) -> TokenStream {
     }
 }
 
-/// Rewrite a rendered param `syn::Type` so a message/enum base type becomes its
-/// `Py` wrapper, preserving the `Option`/`Vec` cardinality wrapping. A `bytes` param is
-/// `PyBackedBytes`, which takes `bytes` without copying it byte by byte. Other scalars,
-/// maps, and `()` are returned unchanged.
+/// Rewrite a rendered param `syn::Type` so a message/enum base type becomes its `Py` wrapper,
+/// preserving the `Option`/`Vec` wrapping; `bytes` becomes `PyBackedBytes`. Other scalars,
+/// maps and `()` are returned unchanged.
 fn wrap_param_type(ty: &UnifiedType, rendered: &syn::Type) -> TokenStream {
     if ty.is_singular_bytes() {
         return py_bytes_input(ty.is_optional);
@@ -863,9 +834,8 @@ fn strip_option(ty: TokenStream) -> TokenStream {
     }
 }
 
-/// The expression that converts the Python-wrapper value `expr` of a required param back into
-/// the bare model the Rust client expects. A required list is a plain `Vec` (see
-/// [`python_param_defs`]). Scalars pass through.
+/// Convert the Python-side value `expr` of a required param into what the Rust client takes.
+/// Scalars pass through.
 fn convert_param_value(ty: &UnifiedType, expr: TokenStream) -> TokenStream {
     if let Some(json) = json_param(ty) {
         if ty.is_repeated || matches!(ty.base_type, BaseType::Map(..)) {
@@ -900,7 +870,6 @@ fn pyo3_signature(
     keyword_only: bool,
 ) -> TokenStream {
     let mut signature_parts = Vec::new();
-    // The `*` that goes before the first optional parameter.
     let mut star = keyword_only;
     for p in method.param_plan(mode).iter() {
         let ident = p.field_ident();

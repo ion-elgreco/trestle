@@ -81,8 +81,7 @@ impl TypeRenderer for TypeScriptRenderer {
 pub fn unified_to_rust(unified_type: &UnifiedType, context: RenderContext) -> String {
     let base_type_str = match &unified_type.base_type {
         BaseType::String => {
-            // `impl Into<String>` only for a single string: a repeated one is a plain
-            // `Vec<String>`, which the constructor stores with `.into()`.
+            // A repeated string stays a plain `Vec<String>`.
             if matches!(context, RenderContext::Constructor)
                 && !unified_type.is_optional
                 && !unified_type.is_repeated
@@ -188,7 +187,7 @@ pub fn field_assignment(
         return flexible_optional_field_assignment(unified_type, field_ident, runtime);
     }
     match &unified_type.base_type {
-        // A single string is an `impl Into<String>`; a repeated one is already a `Vec<String>`.
+        // A single string is an `impl Into<String>`; a repeated one is already `Vec<String>`.
         BaseType::String if !unified_type.is_optional && !unified_type.is_repeated => {
             quote! { #field_ident.into() }
         }
@@ -202,8 +201,7 @@ pub fn field_assignment(
             }
             Runtime::Buffa => quote! { buffa::EnumValue::Known(#field_ident) },
         },
-        // A constructor takes the keys as `impl Into<String>`, and string values too; other
-        // values have the field's type already.
+        // Only string map values go through `.into()`; others already have the field's type.
         BaseType::Map(_, value)
             if matches!(ctx, RenderContext::Constructor)
                 && !matches!(value.base_type, BaseType::String) =>
@@ -445,9 +443,8 @@ pub struct UnifiedType {
     pub is_repeated: bool,
 }
 
-/// A free-form JSON type of `google/protobuf/struct.proto`. The Rust models hold buffa's types
-/// (`buffa_types`); Python sees plain JSON objects (`dict`, `list`, `str`, numbers, `bool`,
-/// `None`).
+/// A free-form JSON type of `google/protobuf/struct.proto`: buffa's type in Rust, a plain
+/// object in Python.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonType {
     /// `google.protobuf.Value`: any JSON value.
@@ -459,7 +456,7 @@ pub enum JsonType {
 }
 
 impl JsonType {
-    /// The JSON type that the proto message `name` (with or without the leading `.`) is.
+    /// The JSON type of the proto message `name`, if it is one.
     pub fn of(name: &str) -> Option<Self> {
         match name.trim_start_matches('.') {
             "google.protobuf.Value" => Some(Self::Value),
@@ -487,7 +484,7 @@ impl JsonType {
         }
     }
 
-    /// The name the conversion functions of the type use: `value`, `struct`, `list`.
+    /// The suffix of the type's conversion functions: `value`, `struct`, `list`.
     pub fn fn_suffix(self) -> &'static str {
         match self {
             Self::Value => "value",

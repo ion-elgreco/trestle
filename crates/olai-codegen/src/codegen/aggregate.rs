@@ -96,8 +96,8 @@ pub(crate) fn generate(
     } else {
         quote! {}
     };
-    // The no-auth and bearer-token transports: the cloud client's own constructors, or the
-    // generated reqwest transport. A custom transport gets only `new(transport, base_url)`.
+    // `new_unauthenticated`/`new_with_token` for the transports that support them; a custom
+    // transport gets only `new(transport, base_url)`.
     let token_ctors = if dual || config.uses_default_transport() {
         Some((
             quote! { #transport_ident::new_unauthenticated() },
@@ -164,8 +164,7 @@ pub(crate) fn generate(
 
         #[derive(Clone)]
         pub struct #aggregate_ident {
-            // `pub(crate)`: hand-written methods of the client crate can send requests that
-            // the protos cannot describe, with the same transport and base URL.
+            // `pub(crate)` so the client crate can add hand-written requests.
             pub(crate) client: #transport_ident,
             pub(crate) base_url: Url,
         }

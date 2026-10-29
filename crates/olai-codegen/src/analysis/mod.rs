@@ -464,8 +464,7 @@ pub(crate) fn analyze_method(
         .chain(body_fields.into_iter().map(Into::into))
         .collect();
 
-    // A write verb has a body; so does any method whose HTTP rule names one (a `GET` with a JSON
-    // body, as some APIs take).
+    // A method whose HTTP rule names a body has one, whatever the verb.
     let has_request_body =
         types::request_has_body(&request_type) || !method.http_rule.body.is_empty();
     let needs_request_parts = types::request_needs_request_parts(&request_type);
@@ -495,8 +494,8 @@ pub(crate) fn analyze_method(
     })
 }
 
-/// The request fields that go in HTTP request headers (`(olai.trestle.v1.request_header)`), with
-/// their headers: `string` fields out of the body.
+/// The `(olai.trestle.v1.request_header)` fields of the request with their headers: `string`
+/// fields outside the body.
 fn request_headers(
     method: &MethodMetadata,
     input_fields: &[MessageField],
@@ -522,10 +521,9 @@ fn request_headers(
         .collect()
 }
 
-/// The fields that are the raw request and response bodies of a method
-/// (`(olai.trestle.v1.raw_body)`): singular `bytes` fields. In the request, the field that the
-/// rule's `body` names. In the response of a method that does not stream, beside fields that come
-/// from response headers only.
+/// The `(olai.trestle.v1.raw_body)` fields of the request and the response: singular `bytes`
+/// fields. The request one must be the rule's `body`; the response one needs a non-streaming
+/// method whose other output fields come from response headers.
 fn raw_bodies(
     metadata: &CodeGenMetadata,
     method: &MethodMetadata,

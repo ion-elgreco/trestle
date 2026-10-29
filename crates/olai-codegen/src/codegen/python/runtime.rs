@@ -5,14 +5,12 @@ use quote::quote;
 
 use crate::codegen::format_tokens_static;
 
-/// The `runtime.rs` file. With `async_methods`, it also has `init_async_runtime`, which the
-/// generated `register` calls.
+/// The `runtime.rs` file. With `async_methods`, it also has the `init_async_runtime` that
+/// `register` calls.
 pub(crate) fn generate(async_methods: bool) -> String {
     let init_async = async_methods.then(|| {
         quote! {
-            /// Make [`rt`] the runtime of `pyo3-async-runtimes`, so that the `_async` methods run
-            /// on it. The generated `register` calls it; a second call keeps the runtime already
-            /// installed.
+            /// Make [`rt`] the runtime of `pyo3-async-runtimes`. A second call is a no-op.
             pub fn init_async_runtime() {
                 let _ = ::pyo3_async_runtimes::tokio::init_with_runtime(rt());
             }
@@ -20,15 +18,13 @@ pub(crate) fn generate(async_methods: bool) -> String {
     });
 
     let tokens = quote! {
-        //! The Tokio runtime of the bindings: one multi-thread runtime, made on first use. The
-        //! methods block on it, and the `_async` methods run on it. It panics in a forked child,
-        //! where Tokio's thread pool does not work.
+        //! The Tokio runtime of the bindings, made on first use.
 
         use std::sync::OnceLock;
 
         use tokio::runtime::{Builder, Runtime};
 
-        /// The runtime. It panics in a forked child process.
+        /// The runtime. It panics in a forked child, where Tokio's thread pool does not work.
         pub fn rt() -> &'static Runtime {
             static RUNTIME: OnceLock<Runtime> = OnceLock::new();
             static PID: OnceLock<u32> = OnceLock::new();
@@ -36,7 +32,6 @@ pub(crate) fn generate(async_methods: bool) -> String {
             let runtime_pid = *PID.get_or_init(|| pid);
             if pid != runtime_pid {
                 panic!(
-                    // The continuation lines line up with the generated `panic!` argument.
                     "Forked process detected: current PID is {pid} but the tokio runtime was \
              created by {runtime_pid}. The tokio runtime does not support forked processes \
              (https://github.com/tokio-rs/tokio/issues/4301). When using Python \

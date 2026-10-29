@@ -473,8 +473,7 @@ impl SetterRender for NapiBackend {
         if matches!(setter.field_type.base_type, BaseType::Map(_, _))
             || setter.field_type.is_repeated
         {
-            // Maps and repeated fields arrive `Option`-wrapped: one left out is the empty
-            // collection, which the request holds anyway.
+            // A map or list left out is the empty collection.
             quote! { .#with_method(#param_ident.unwrap_or_default()) }
         } else if let BaseType::Enum(enum_name) = &setter.field_type.base_type {
             // Enums cross as `Option<i32>`; convert to `Option<E>` (the bare enum the builder's

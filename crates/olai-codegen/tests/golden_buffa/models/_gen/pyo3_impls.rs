@@ -1,5 +1,5 @@
 // @generated — do not edit by hand.
-/// `CatalogType` of Python: a member of `example._enums.CatalogType`, or its name.
+/// A member of `example._enums.CatalogType`, or its name.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PyCatalogType(pub super::catalog::v1::CatalogType);
 impl PyCatalogType {
@@ -98,7 +98,7 @@ impl ::pyo3_stub_gen::PyStubType for PyCatalogType {
     }
 }
 
-/// `GetSchemaRequestView` of Python: a member of `example._enums.GetSchemaRequestView`, or its name.
+/// A member of `example._enums.GetSchemaRequestView`, or its name.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PyGetSchemaRequestView(pub super::schemas::v1::get_schema_request::View);
 impl PyGetSchemaRequestView {
@@ -201,7 +201,7 @@ impl ::pyo3_stub_gen::PyStubType for PyGetSchemaRequestView {
     }
 }
 
-/// `SchemaType` of Python: a member of `example._enums.SchemaType`, or its name.
+/// A member of `example._enums.SchemaType`, or its name.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PySchemaType(pub super::schemas::v1::SchemaType);
 impl PySchemaType {
@@ -1912,8 +1912,7 @@ for super::tags::v1::TouchTagAssignmentRequest {
     }
 }
 
-/// `Name(field=value, …)` with the `repr` of each attribute in `fields`, without the
-/// ones that are `None`. A field marked `true` (`debug_redact` in the proto) shows `'***'`.
+/// `Name(field=value, …)` without the `None` fields; a redacted field shows `'***'`.
 fn __python_repr(
     obj: &::pyo3::Bound<'_, ::pyo3::PyAny>,
     fields: &[(&str, bool)],

@@ -1,10 +1,6 @@
-//! The plain `reqwest` transport for generated REST clients.
-//!
-//! Selected with `transport_type_path =` [`REQWEST_TRANSPORT_TYPE_PATH`]. The generator then emits
-//! `transport.rs` into the client output: an `HttpClient` that wraps a `reqwest::Client`, an
-//! optional bearer token and an optional `User-Agent`, with the per-verb builder methods the
-//! client bodies call. It has no cloud credential providers and no retries, and it builds for
-//! native targets and `wasm32` alike (reqwest uses the browser `fetch` there).
+//! The plain `reqwest` transport of generated REST clients, selected with
+//! `transport_type_path =` [`REQWEST_TRANSPORT_TYPE_PATH`]: a `reqwest::Client` with an optional
+//! bearer token and `User-Agent`. No credential providers, no retries; builds for `wasm32` too.
 
 use quote::quote;
 
@@ -13,8 +9,8 @@ use super::format_tokens_static;
 /// Transport type path that selects the generated `reqwest` transport.
 pub const REQWEST_TRANSPORT_TYPE_PATH: &str = "crate::codegen::transport::HttpClient";
 
-/// The `transport.rs` file of the client output. With `user_agent`, the default transport sends
-/// `<user_agent>/<version of the client crate>` as its `User-Agent`, except in the browser.
+/// The `transport.rs` file. With `user_agent`, the default transport sends
+/// `<user_agent>/<client crate version>`, except in the browser.
 pub(crate) fn generate(user_agent: Option<&str>) -> String {
     let (derive, default) = match user_agent {
         None => (quote! { #[derive(Clone, Default)] }, quote! {}),
@@ -53,7 +49,7 @@ pub(crate) fn generate(user_agent: Option<&str>) -> String {
 
         #default
 
-        // Hand-written so that the token never shows up in logs or panic messages.
+        // Hand-written to redact the token.
         impl ::std::fmt::Debug for HttpClient {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 f.debug_struct("HttpClient")
@@ -64,8 +60,7 @@ pub(crate) fn generate(user_agent: Option<&str>) -> String {
         }
 
         impl HttpClient {
-            /// A transport that sends its requests with `client`, without a token or a
-            /// `User-Agent` of its own.
+            /// A transport over `client`, without a token or `User-Agent`.
             pub fn new(client: reqwest::Client) -> Self {
                 Self { client, token: None, user_agent: None }
             }

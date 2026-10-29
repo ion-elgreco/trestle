@@ -1,13 +1,5 @@
-# Opt-in end-to-end test of the generated REST client with the plain reqwest transport, the
-# generated error module and the buffa JSON rewrites (snake_case names, int64 as numbers),
-# against a local axum server.
-#
-# Excluded from the workspace (see the root Cargo.toml `exclude` list), like buffa_e2e. Run it
-# explicitly:
-#
-#     cargo test --manifest-path crates/olai-codegen/tests/rest_client_e2e/Cargo.toml
-#
-# Requires `protoc` on PATH: build.rs compiles the proto with it and buffa-build invokes it.
+# Opt-in end-to-end test of the generated REST client against a local axum server. Excluded from
+# the root workspace like buffa_e2e; needs `protoc` on PATH. See README.md.
 [workspace]
 members = ["py"]
 
@@ -43,5 +35,5 @@ buffa-build = "0.7"
 protobuf = "3"
 
 [package.metadata.cargo-machete]
-# Exercised only through the build-time generated models and client.
+# Used only by the generated code.
 ignored = ["buffa-types", "futures", "serde", "pyo3", "pyo3-stub-gen"]

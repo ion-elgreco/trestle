@@ -230,8 +230,8 @@ pub enum Transport {
     Cloud,
     /// `olai_http_wasm::WasmClient` — browser-buildable transport. Requires buffa.
     Wasm,
-    /// A generated `reqwest` transport (`codegen/transport.rs`) with an optional bearer token:
-    /// no cloud credential providers, no retries, builds for native and `wasm32`.
+    /// A generated plain `reqwest` transport (`codegen/transport.rs`) with an optional bearer
+    /// token; builds for native and `wasm32`.
     Reqwest,
 }
 
@@ -276,8 +276,7 @@ pub struct RustClient {
     /// `"my_proto::connect_gen::my::pkg::v1"`). Required when `protocols` includes `connect`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect_client_path: Option<String>,
-    /// Parse responses with buffa's `ignore_unknown_enum_values`: an unknown enum name becomes
-    /// the zero value instead of failing the response. Buffa only.
+    /// An unknown enum name in a response becomes the zero value instead of failing. Buffa only.
     #[serde(default)]
     pub ignore_unknown_enum_values: bool,
     /// Generate the client error module (`codegen/error.rs`). Without it, the crate supplies
@@ -287,12 +286,10 @@ pub struct RustClient {
     /// RPCs (`package.Service.Method`) whose request body is sent form-encoded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub form_encoded_methods: Vec<String>,
-    /// RPCs (`package.Service.Method`) whose request body keeps the fields that go in the URL
-    /// path, for APIs that want them in both places.
+    /// RPCs (`package.Service.Method`) whose request body keeps the path fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path_fields_in_body_methods: Vec<String>,
-    /// The product of the `User-Agent` that the `reqwest` transport sends by default:
-    /// `<product>/<version of the client crate>`. Not sent in the browser.
+    /// The `User-Agent` product of the `reqwest` transport (`<product>/<client crate version>`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
 }
@@ -301,25 +298,25 @@ pub struct RustClient {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ErrorModule {
-    /// Key of the error code. Its lowerCamelCase form is also read.
+    /// Key of the error code; its lowerCamelCase form is also read.
     #[serde(default = "default_code_field")]
     pub code_field: String,
     /// Key of the message.
     #[serde(default = "default_message_field")]
     pub message_field: String,
-    /// Key of the details array; `null` when the body has none.
+    /// Key of the details array, or `null`.
     #[serde(default = "default_details_field")]
     pub details_field: Option<String>,
-    /// Fully-qualified proto enum whose values are the error codes.
+    /// Fully-qualified proto enum of the error codes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_enum: Option<String>,
-    /// More keys of the code, read in order when `code_field` is not in the body.
+    /// More keys of the code, tried in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub more_code_fields: Vec<String>,
-    /// More keys of the message, read in order when `message_field` is not in the body.
+    /// More keys of the message, tried in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub more_message_fields: Vec<String>,
-    /// Keys that hold the whole error object in some answers (`{"error": {...}}`).
+    /// Keys under which some answers nest the error object (`{"error": {...}}`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub envelope_fields: Vec<String>,
 }
@@ -359,8 +356,8 @@ fn default_protocols() -> Vec<ClientProtocol> {
 /// The generated API is frozen model classes with a Python-style `repr`, keyword constructors on
 /// the input models, `enum.StrEnum` enums (Python 3.11+) in `<package>/_enums.py`,
 /// `pyo3-stub-gen` annotations (the bindings crate writes the `.pyi`), a Tokio runtime that the
-/// methods block on, and PyO3 exception classes for the client errors (the base class is
-/// `bindings.error_base_class`), which need `clients.rust.error_module`.
+/// methods block on, and PyO3 exception classes for the client errors, which need
+/// `clients.rust.error_module`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PythonClient {
@@ -382,7 +379,7 @@ pub struct PythonClient {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PythonOptions {
-    /// The extension module (e.g. `my_pkg._core`): classes go in `<module>.<service>`.
+    /// The extension module (e.g. `my_pkg._core`); classes go in `<module>.<service>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module: Option<String>,
     /// Every client method also gets an `_async` twin that returns an `asyncio.Future`.
@@ -391,12 +388,12 @@ pub struct PythonOptions {
     /// Optional parameters are keyword-only.
     #[serde(default)]
     pub keyword_only: bool,
-    /// A public module `<package>/<service>.py` per submodule of `module`, which re-exports
-    /// its classes and enums. Needs `module`.
+    /// A public module `<package>/<service>.py` per submodule of `module`, re-exporting its
+    /// classes and enums. Needs `module`.
     #[serde(default)]
     pub public_modules: bool,
-    /// The product of the Python client's `User-Agent`: `<product>/<version of the binding
-    /// crate>`. Needs the `reqwest` transport.
+    /// The `User-Agent` product of the Python client (`<product>/<binding crate version>`).
+    /// Needs the `reqwest` transport.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
 }

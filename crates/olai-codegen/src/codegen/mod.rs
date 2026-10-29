@@ -326,8 +326,8 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
     Ok(())
 }
 
-/// Whether a message has a free-form JSON field (`google.protobuf.Value`, `Struct`,
-/// `ListValue`), directly, in a map or in a oneof.
+/// Whether a project message has a free-form JSON field (`google.protobuf.Value`, `Struct`,
+/// `ListValue`), also as a map value or oneof variant.
 pub(crate) fn metadata_has_json_fields(metadata: &CodeGenMetadata) -> bool {
     metadata
         .messages
@@ -540,7 +540,7 @@ fn generate_client_code(
     let mut files = HashMap::new();
     let protocols = config.client_protocols.selected();
     let multi = config.client_protocols.is_multi();
-    // The module path and type of every resource-scoped client, re-exported from the client root.
+    // Module path and type of each resource-scoped client, for the root re-exports.
     let mut resource_clients = Vec::new();
 
     for service in &plan.services {
@@ -749,9 +749,8 @@ pub fn main_module(services: &[ServicePlan]) -> String {
     format_tokens_static(tokens)
 }
 
-/// The client root `mod.rs`. `resource_clients` are the module path (`catalogs`, or
-/// `catalogs/rest` with both protocols) and type of each resource-scoped client, re-exported
-/// here so that a crate can export the whole client with `pub use codegen::*;`.
+/// The client root `mod.rs`. It re-exports the `resource_clients` (module path and type) so a
+/// crate can export the whole client with `pub use codegen::*;`.
 fn generate_client_main_module(
     services: &[ServicePlan],
     config: &CodeGenConfig,
@@ -846,7 +845,6 @@ fn generate_client_main_module(
         quote! {}
     };
 
-    // The generated transport and error module, and the path encoder of the clients.
     let transport_module = config
         .uses_reqwest_transport()
         .then(|| quote! { pub mod transport; });
@@ -884,8 +882,7 @@ fn generate_client_main_module(
 /// the includes are plain sibling references.
 ///
 /// When `include_labels` is `true`, also emits `pub mod labels; pub use labels::{ObjectLabel, Resource};`.
-/// When `include_extractors` is `true`, also declares the Axum extractors of the common
-/// output, `pub mod extractors;`.
+/// When `include_extractors` is `true`, also declares `pub mod extractors;`.
 ///
 /// `metadata` is used to discover all resource-annotated messages (even those not returned
 /// directly by an RPC) so they can be included in `pub use` re-exports.
@@ -1039,12 +1036,8 @@ pub fn generate_models_mod(
     // These are inner attributes, so they cover the descendant `pub mod <svc>::<v1>`
     // modules the per-package files are pasted into.
     let lint_allows = match runtime {
-        // The buffa model plugin emits enum variants with their proto SCREAMING_SNAKE
-        // names (`non_camel_case_types`) and explicit `Default` impls a `#[derive]`
-        // could replace (`clippy::derivable_impls`); a message without fields decodes
-        // through a `match` with only the `_` arm (`clippy::match_single_binding`). The
-        // generated files carry no allows of their own, so silence these here, as buffa's
-        // own include file does, to keep `clippy -D warnings` green.
+        // The buffa model files carry no allows of their own, so silence their lints here,
+        // as buffa's own include file does.
         Runtime::Buffa => quote! {
             #![allow(non_camel_case_types)]
             #![allow(clippy::derivable_impls)]
@@ -1336,9 +1329,7 @@ impl ServiceHandler<'_> {
             .resolve(&self.models_segment(), &self.models_version())
     }
 
-    /// The `use` globs of the models of the other packages whose messages the RPCs of this
-    /// service take or return (a response message shared by two packages, say). Well-known
-    /// `google.*` types are not models.
+    /// `use` globs for the models of other packages that this service's RPCs take or return.
     pub(crate) fn foreign_models_imports(&self) -> Vec<TokenStream> {
         let template = ModelsPath::from_template(&self.config.models_path_template);
         self.methods()
@@ -1377,9 +1368,8 @@ impl ServiceHandler<'_> {
     }
 }
 
-/// The package of a fully qualified message name (`.unitycatalog.shares.v1.ShareInfo` →
-/// `unitycatalog.shares.v1`): its segments up to the first one that starts with an uppercase
-/// letter, as proto packages are lowercase and message names are not.
+/// The package of a fully qualified message name (`.my.shares.v1.ShareInfo` → `my.shares.v1`):
+/// the lowercase segments before the message names.
 fn message_package(type_name: &str) -> Option<String> {
     let segments: Vec<&str> = type_name
         .trim_start_matches('.')
@@ -1389,9 +1379,8 @@ fn message_package(type_name: &str) -> Option<String> {
     (!segments.is_empty()).then(|| segments.join("."))
 }
 
-/// The models module segment of a proto package: the segment before the version
-/// (`unitycatalog.tags.v1` → `tags`), else the last one (`unitycatalog.tags` → `tags`). `None` for
-/// an empty package.
+/// The models module segment of a proto package: the one before the version (`my.tags.v1` →
+/// `tags`), else the last (`my.tags` → `tags`).
 pub(crate) fn package_models_segment(package: &str) -> Option<&str> {
     let segs: Vec<&str> = package.split('.').filter(|s| !s.is_empty()).collect();
     match segs.as_slice() {
@@ -1401,9 +1390,8 @@ pub(crate) fn package_models_segment(package: &str) -> Option<&str> {
     }
 }
 
-/// The models version segment of a proto package (`unitycatalog.tags.v1` → `v1`,
-/// `unitycatalog.agents.v0alpha1` → `v0alpha1`), where the proto plugin wrote its types. `v1`
-/// when the package carries no recognizable version segment.
+/// The version segment of a proto package (`my.tags.v1` → `v1`, `my.agents.v0alpha1` →
+/// `v0alpha1`); `v1` when it has none.
 pub(crate) fn package_models_version(package: &str) -> &str {
     let segs: Vec<&str> = package.split('.').filter(|s| !s.is_empty()).collect();
     match segs.as_slice() {
@@ -1433,8 +1421,7 @@ pub(crate) struct MethodHandler<'a> {
 }
 
 impl MethodHandler<'_> {
-    /// The key of the query parameter `param` in the query string: its JSON name in a package of
-    /// [`RestClientOptions::json_query_packages`] (see [`QueryParam::key`]).
+    /// The query-string key of `param` (see [`QueryParam::key`]).
     pub(crate) fn query_key<'p>(
         &self,
         param: &'p crate::analysis::QueryParam,
@@ -1549,8 +1536,7 @@ impl MethodHandler<'_> {
     }
 
     /// The type a client call resolves to: the output message, a `Vec` of them for a
-    /// server-streaming method (one per NDJSON line), `bool` for an existence check
-    /// ([`Self::is_existence_check`]), or `()` for `Empty`.
+    /// server-streaming method, `bool` for an existence check, or `()`.
     pub(crate) fn result_type(&self) -> TokenStream {
         match self.output_type() {
             Some(output) if self.plan.metadata.server_streaming => quote! { Vec<#output> },
@@ -1560,8 +1546,7 @@ impl MethodHandler<'_> {
         }
     }
 
-    /// Whether the method is a `HEAD` request without an answer: it tells whether something
-    /// exists, as a `bool` that is `false` for a 404.
+    /// A `HEAD` request without an output: it returns `bool`, `false` for a 404.
     pub(crate) fn is_existence_check(&self) -> bool {
         self.plan.http_method.eq_ignore_ascii_case("head") && self.output_type().is_none()
     }

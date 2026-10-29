@@ -1,8 +1,5 @@
-# The Python bindings of the fixture, as a binding crate builds them. The tests run the generated
-# Python API in an embedded interpreter against a local axum server.
-#
-# Needs a Python with its shared library: set `PYO3_PYTHON` (e.g. a Homebrew python3.12) when the
-# default `python3` is too old or is a uv standalone build.
+# The Python bindings of the fixture, tested in an embedded interpreter. Needs a Python with its
+# shared library: set `PYO3_PYTHON` when the default `python3` is too old or a uv standalone build.
 [package]
 name = "rest-client-e2e-py"
 version = "0.0.0"

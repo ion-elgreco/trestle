@@ -45,7 +45,7 @@ impl TrestleConfig {
             ));
         }
 
-        // The other model rewrites and the unknown-enum option are buffa-only too.
+        // Other buffa-only options.
         if self.generate.proto_lib != ProtoLib::Buffa {
             let buffa_only = [
                 (
@@ -72,20 +72,19 @@ impl TrestleConfig {
             }
         }
 
-        // The generated reqwest transport is one transport for every target; it does not mix
-        // with the cfg-gated CloudClient/WasmClient pair.
+        // The reqwest transport already builds for native and wasm32.
         if let Some(rust) = &self.generate.clients.rust
             && rust.transport == Transport::Reqwest
             && (rust.dual_transport || rust.transport_type_path.is_some())
         {
             return Err(Error::other(
-                "`transport: reqwest` builds for native and wasm32 by itself; drop \
-                 `dual_transport` and `transport_type_path`",
+                "`transport: reqwest` does not combine with `dual_transport` or \
+                 `transport_type_path`",
             ));
         }
 
-        // The Python bindings need the client error module: the Python exception classes raise
-        // its errors.
+        // The Python bindings need the client error module (the exception classes raise its
+        // errors), and the options that build on other options.
         if let Some(python) = &self.generate.clients.python {
             let has_error_module = self
                 .generate
@@ -101,8 +100,7 @@ impl TrestleConfig {
             }
             if python.options.public_modules && python.options.module.is_none() {
                 return Err(Error::other(
-                    "`clients.python.options.public_modules` re-export the submodules of \
-                     `module`: set it",
+                    "`clients.python.options.public_modules` needs `module`",
                 ));
             }
         }

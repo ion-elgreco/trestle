@@ -1,5 +1,4 @@
-// Shared by `build.rs` and `py/build.rs` (each `include!`s it): the generation config of the
-// fixture, with every client and Python option this fixture tests turned on.
+// The generation config of the fixture, `include!`d by `build.rs` and `py/build.rs`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -40,8 +39,7 @@ fn compile_descriptors(out: &Path) -> PathBuf {
     descriptors
 }
 
-/// The generation config. Everything goes under `out`; the Python package files under
-/// `out/pkg/demo`.
+/// The generation config, with every option on. Everything goes under `out`.
 fn demo_config(out: &Path) -> CodeGenConfig {
     let models_dir = out.join("models");
     let gen_dir = models_dir.join("_gen");
@@ -56,7 +54,7 @@ fn demo_config(out: &Path) -> CodeGenConfig {
     }
     CodeGenConfig {
         context_type_path: "crate::Context".into(),
-        // The clients use the `Result` of the generated error module, not this one.
+        // Unused: the clients return the generated error module's `Result`.
         result_type_path: "crate::Result".into(),
         models_path_template: "rest_client_e2e::models::{service}::{version}".into(),
         models_path_crate_template: "crate::models::{service}::{version}".into(),
@@ -122,7 +120,7 @@ fn demo_config(out: &Path) -> CodeGenConfig {
     }
 }
 
-/// The rewrites the `trestle` CLI applies to the buffa output after `buf generate`.
+/// The model rewrites the `trestle` CLI would apply.
 #[allow(dead_code)]
 fn demo_rewrites(config: &CodeGenConfig, metadata: &CodeGenMetadata) -> ModelRewrites {
     ModelRewrites {

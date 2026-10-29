@@ -42,8 +42,7 @@ pub(crate) fn generate(service: &ServiceHandler<'_>) -> Result<String> {
     let foreign_models = service.foreign_models_imports();
     let result_path = service.config.client_result_path();
     let (transport_import, transport_ident) = transport_tokens(service.config);
-    // `encode_path_value` is in the client `mod.rs`: two levels up, three when each protocol has
-    // its own subdirectory.
+    // `encode_path_value` lives in the client root `mod.rs`.
     let encode_import = service
         .rest_methods()
         .any(|m| m.plan.formats_path_values())
@@ -123,16 +122,9 @@ pub(crate) fn transport_tokens(
     }
 }
 
-/// Generate client method implementation. `form_body` sends the request body form-encoded
-/// instead of as JSON. The body leaves out the fields that go in the URL path, as
-/// `google.api.http` maps them, since a strict server rejects fields that it does not know;
-/// `path_fields_in_body` keeps them.
-///
-/// A server-streaming method reads the body as NDJSON, one output message per line. Output fields
-/// with a `response_header` come from the response headers; their body may be empty.
-///
-/// A `raw_body` input field is sent as the request body, as raw bytes; a `raw_body` output field
-/// takes the bytes of the response body.
+/// Generate a client method. `form_body` sends the request body form-encoded instead of as
+/// JSON; `path_fields_in_body` keeps the path fields in the body, which `google.api.http`
+/// otherwise leaves out.
 pub fn client_method(
     method: MethodHandler<'_>,
     form_body: bool,
@@ -147,7 +139,6 @@ pub fn client_method(
     let query_handling = generate_query_parameters(&method);
     let error_module = method.config.client_error_module();
     let result_type = method.result_type();
-    // A request with no path value, query parameter or body is not read.
     let request_ident = if method.plan.formats_path_values()
         || has_query_params
         || method.plan.has_request_body
@@ -158,8 +149,7 @@ pub fn client_method(
         format_ident!("_request")
     };
 
-    // The path values are in the URL, so the body leaves them out: it is a copy of the request
-    // with those fields at their defaults, which the JSON and form serializers skip.
+    // Path fields go in the URL, not the body: send a copy with them reset to their defaults.
     let path_fields: Vec<_> = if method.plan.has_request_body
         && method.plan.formats_path_values()
         && !path_fields_in_body
@@ -196,7 +186,6 @@ pub fn client_method(
         (None, false, _) => quote! {},
     };
 
-    // The fields in request headers, when they are set.
     let send = if method.plan.request_headers.is_empty() {
         quote! { let response = self.client.#http_method(url)#body_handling.send().await?; }
     } else {
@@ -224,7 +213,7 @@ pub fn client_method(
         None if method.is_existence_check() => quote! { Ok(true) },
         None => quote! { Ok(()) },
     };
-    // An existence check answers `false` for a 404 instead of failing.
+    // An existence check returns `false` on 404.
     let not_found = method.is_existence_check().then(|| {
         quote! {
             if response.status().as_u16() == 404 {
@@ -342,8 +331,7 @@ fn read_output(
     })
 }
 
-/// The statement that sets an output field from its response header, when the header is there and
-/// parses.
+/// Set an output field from its response header, when present and parsable.
 fn header_assignment(method: &MethodHandler<'_>, field: &MessageField) -> Result<TokenStream> {
     let field_ident = crate::utils::field_ident(&field.name);
     let header = field.response_header.as_deref().unwrap_or_default();
@@ -427,14 +415,12 @@ fn generate_url_formatting(
     }
 }
 
-/// The helper of the client `mod.rs` that percent-encodes path values, per the gRPC transcoding
-/// rules: every byte except the unreserved `A-Z a-z 0-9 - . _ ~` is encoded, and `/` is kept only
-/// for values bound to a multi-segment pattern.
+/// The `encode_path_value` helper of the client `mod.rs`: percent-encoding per gRPC transcoding,
+/// with `/` kept only for multi-segment patterns.
 pub(crate) fn encode_path_value_fn() -> TokenStream {
     quote! {
-        /// Percent-encode a value for a URL path. `keep_slash` keeps `/`, for a value that
-        /// spans several path segments; such a value follows a `/` of the template, so its own
-        /// leading `/` is dropped.
+        /// Percent-encode a URL path value. `keep_slash` keeps `/` (for a multi-segment value)
+        /// and drops a leading one.
         fn encode_path_value(value: &impl ::std::fmt::Display, keep_slash: bool) -> String {
             use ::std::fmt::Write as _;
             let value = value.to_string();

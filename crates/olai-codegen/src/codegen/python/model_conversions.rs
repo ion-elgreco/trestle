@@ -120,11 +120,9 @@ pub(crate) fn generate_pyo3_impls(
     format_tokens(tokens)
 }
 
-/// The expression that converts the Python object `value` (a `Bound<PyAny>`) into the Rust
-/// value of a free-form JSON field of type `ty`: a single value, a `Vec` from a list, or a map
-/// from a dict. For a method argument (`arg`), a list or map is collected into a `Vec` (of
-/// pairs, for a map): the client methods and builders take an `impl IntoIterator`, which leaves
-/// nothing to infer the collection from.
+/// Convert the Python object `value` (a `Bound<PyAny>`) into the free-form JSON field type `ty`.
+/// For a method argument (`arg`), a list or map is collected into a `Vec`, as the client takes
+/// an `impl IntoIterator` that leaves nothing to infer the collection from.
 pub(crate) fn json_from_py(
     json: JsonType,
     ty: &UnifiedType,
@@ -162,9 +160,7 @@ pub(crate) fn json_from_py(
     }
 }
 
-/// The conversions between Python objects and the free-form JSON types of buffa
-/// (`google.protobuf.Value`, `Struct`, `ListValue`), for the models and the bindings. A whole
-/// number reads as an `int`; Python numbers become JSON numbers.
+/// Conversions between Python objects and buffa's `google.protobuf.Value`/`Struct`/`ListValue`.
 fn json_conversions() -> TokenStream {
     quote! {
         /// A JSON value as a Python object: `None`, `bool`, `int` for a whole number, `float`,
@@ -298,19 +294,15 @@ pub(crate) fn python_class_name(fq_name: &str) -> String {
     extract_qualified_type_name(fq_name)
 }
 
-/// The models that the bindings wrap: one list for the wrappers of `pyo3_impls.rs`, the classes
-/// that `register` adds, and the enums of `_enums.py`.
+/// The models that the bindings wrap, shared by `pyo3_impls.rs`, `register` and `_enums.py`.
 pub(crate) struct ModelClasses<'a> {
-    /// The project's own packages, taken straight from the plan's services: the same set whose
-    /// model modules `generate_models_mod` emits. Types in any other package (google, gnostic,
-    /// ...) are not in our crate and get no wrapper (orphan rule, and no in-crate path).
+    /// The project's own packages (those of the plan's services). Types of other packages
+    /// (google, gnostic, ...) get no wrapper: orphan rule, and no in-crate path.
     packages: BTreeSet<&'a str>,
     /// The project enums that have values, sorted by name.
     pub(crate) enums: Vec<&'a String>,
-    /// The project messages, sorted by name. Request and response messages cross the FFI
-    /// boundary too, so every message is here, not just resource-annotated ones. With
-    /// [`PythonOptions::module`], only the messages that Python sees (see
-    /// [`surfaced_messages`]).
+    /// The project messages, sorted by name; with [`PythonOptions::module`], only the ones
+    /// Python sees (see [`surfaced_messages`]).
     messages: Vec<&'a String>,
     /// Messages that a request takes; see [`input_messages`].
     inputs: BTreeSet<String>,
@@ -354,8 +346,8 @@ impl<'a> ModelClasses<'a> {
         }
     }
 
-    /// The `#[pyclass]` wrapper types, with the Python submodule segment of their package: the
-    /// messages (the enums are `str` classes).
+    /// The `#[pyclass]` wrappers with their package segment: the messages (the enums are `str`
+    /// classes).
     pub(crate) fn pyclasses(&self) -> impl Iterator<Item = (&'a str, proc_macro2::Ident)> {
         self.messages.iter().filter_map(|name| {
             let package = package_of(name, &self.packages)?;
@@ -363,8 +355,7 @@ impl<'a> ModelClasses<'a> {
         })
     }
 
-    /// The Python names of the enums and the messages, with the Python submodule segment of
-    /// their package and whether they are enums.
+    /// The Python class names with their package segment and whether they are enums.
     pub(crate) fn public_names(&self) -> impl Iterator<Item = (&'a str, String, bool)> {
         let enums = self.enums.iter().map(|name| (*name, true));
         let messages = self.messages.iter().map(|name| (*name, false));
@@ -379,18 +370,17 @@ impl<'a> ModelClasses<'a> {
     }
 }
 
-/// Whether an enum value has no Python member: the zero value named `*_UNSPECIFIED`, which a
-/// field holding it reads as `None`.
+/// Whether an enum value has no Python member: the zero `*_UNSPECIFIED` value, which a field
+/// holding it reads as `None`.
 pub(crate) fn hidden_value(value: &EnumValue) -> bool {
     value.number == 0 && value.name.ends_with("_UNSPECIFIED")
 }
 
-/// Whether the enum `info` has a hidden zero value (see [`hidden_value`]).
 fn has_hidden_zero(info: &EnumInfo) -> bool {
     info.values.iter().any(hidden_value)
 }
 
-/// The proto package of a project type, the longest project package that prefixes it.
+/// The longest project package that prefixes `fq_name`.
 fn package_of<'a>(fq_name: &str, project_packages: &BTreeSet<&'a str>) -> Option<&'a str> {
     let stripped = fq_name.strip_prefix('.').unwrap_or(fq_name);
     project_packages
@@ -404,9 +394,8 @@ fn package_of<'a>(fq_name: &str, project_packages: &BTreeSet<&'a str>) -> Option
         .copied()
 }
 
-/// The messages that a request takes: the message types of the fields of every RPC input
-/// message, and every message reachable from them (fields, map values, oneof variants). The
-/// input messages themselves are not included; their fields become method parameters.
+/// The messages that a request takes: the message types of the RPC input fields and everything
+/// reachable from them. The input messages themselves become method parameters, not classes.
 fn input_messages(services: &[&ServicePlan], metadata: &CodeGenMetadata) -> BTreeSet<String> {
     let mut queue = Vec::new();
     for method in services.iter().flat_map(|s| &s.methods) {
@@ -420,9 +409,8 @@ fn input_messages(services: &[&ServicePlan], metadata: &CodeGenMetadata) -> BTre
     reachable(queue, metadata)
 }
 
-/// The messages that Python sees: the `inputs` (see [`input_messages`]), the RPC output
-/// messages, and every message reachable from those outputs. Request messages are not among
-/// them.
+/// The messages that Python sees: the `inputs`, the RPC outputs, and everything reachable from
+/// those outputs.
 fn surfaced_messages(
     services: &[&ServicePlan],
     metadata: &CodeGenMetadata,
@@ -439,7 +427,7 @@ fn surfaced_messages(
     surfaced
 }
 
-/// `start` and every message reachable from it through fields, map values and oneof variants.
+/// `start` and every message reachable from it.
 fn reachable(start: Vec<String>, metadata: &CodeGenMetadata) -> BTreeSet<String> {
     let mut queue = start;
     let mut seen = BTreeSet::new();
@@ -454,7 +442,7 @@ fn reachable(start: Vec<String>, metadata: &CodeGenMetadata) -> BTreeSet<String>
     seen
 }
 
-/// Push the message types of the fields of `info`: field types, map values and oneof variants.
+/// Push the message types of the fields of `info` (including map values and oneof variants).
 fn push_field_messages(info: &MessageInfo, queue: &mut Vec<String>) {
     for field in &info.fields {
         let types = std::iter::once(&field.unified_type)
@@ -493,11 +481,10 @@ impl Ctx<'_> {
     }
 }
 
-/// The shared `repr` helper of the Python-style `__repr__`.
+/// The shared helper of the Python-style `__repr__`.
 fn python_repr_fn() -> TokenStream {
     quote! {
-        /// `Name(field=value, …)` with the `repr` of each attribute in `fields`, without the
-        /// ones that are `None`. A field marked `true` (`debug_redact` in the proto) shows `'***'`.
+        /// `Name(field=value, …)` without the `None` fields; a redacted field shows `'***'`.
         fn __python_repr(
             obj: &::pyo3::Bound<'_, ::pyo3::PyAny>,
             fields: &[(&str, bool)],
@@ -524,8 +511,8 @@ fn python_repr_fn() -> TokenStream {
 // Enum wrappers
 // ---------------------------------------------------------------------------
 
-/// Emit the bridge of a proto enum to its `enum.StrEnum` class in `_enums.py`: a newtype over
-/// the bare Rust enum that Python takes as a member or a name, and gives back as a member.
+/// Emit the bridge of a proto enum to its `enum.StrEnum` class in `_enums.py`: a newtype that
+/// extracts from a member or a name and converts back into a member.
 fn str_enum_wrapper(
     fq_name: &str,
     info: &EnumInfo,
@@ -587,9 +574,7 @@ fn str_enum_wrapper(
         }
     };
 
-    let doc = format!(
-        " `{class_name}` of Python: a member of `{enums_module}.{class_name}`, or its name."
-    );
+    let doc = format!(" A member of `{enums_module}.{class_name}`, or its name.");
     Ok(quote! {
         #[doc = #doc]
         #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -727,8 +712,8 @@ fn message_wrapper(
         .has_constructor(fq_name)
         .then(|| constructor(&accessors, &oneofs, &inner, ctx.options.keyword_only));
 
-    // The Python names: a raw identifier (`r#type`) is `type` in Python.
-    let fields = accessors
+    // `r#type` is `type` in Python.
+    let repr_fields = accessors
         .iter()
         .map(|a| (a.ident.clone(), a.sensitive))
         .chain(
@@ -768,7 +753,7 @@ fn message_wrapper(
             #(#oneof_getters)*
 
             fn __repr__(slf: &::pyo3::Bound<'_, Self>) -> ::pyo3::PyResult<::std::string::String> {
-                __python_repr(slf.as_any(), &[#(#fields),*])
+                __python_repr(slf.as_any(), &[#(#repr_fields),*])
             }
         }
 
@@ -882,22 +867,22 @@ struct FieldAccessor {
     /// path derefs the box and the write path re-boxes. Always `false` for buffa.
     is_boxed: bool,
     /// Whether the field is an enum whose zero value has no Python member (see
-    /// [`hidden_value`]): that value reads as `None`.
+    /// [`hidden_value`]).
     hidden_zero: bool,
-    /// Documentation carried from the proto field, for the getter.
+    /// The proto field comment, for the getter.
     documentation: Option<String>,
-    /// The free-form JSON type of the field (buffa only): Python sees plain JSON objects.
+    /// The free-form JSON type of the field (buffa only).
     json: Option<JsonType>,
-    /// Whether the proto marks the field `REQUIRED`: a required argument of the constructor
-    /// with [`PythonOptions::keyword_only`](crate::PythonOptions::keyword_only).
+    /// Whether the proto marks the field `REQUIRED` (a positional constructor argument with
+    /// [`PythonOptions::keyword_only`](crate::PythonOptions::keyword_only)).
     required: bool,
-    /// Whether the proto marks the field `debug_redact`: the Python repr hides its value.
+    /// Whether the proto marks the field `debug_redact` (hidden in the Python repr).
     sensitive: bool,
 }
 
 impl FieldAccessor {
-    /// The name of the getter function. A raw identifier (`r#type`) becomes `get_type`: PyO3 and
-    /// pyo3-stub-gen both drop the `get_` prefix, while pyo3-stub-gen would keep the `r#`.
+    /// The getter function name. A raw identifier (`r#type`) becomes `get_type`, as PyO3 drops
+    /// the `get_` prefix but pyo3-stub-gen would keep the `r#`.
     fn getter_ident(&self) -> proc_macro2::Ident {
         let name = syn::ext::IdentExt::unraw(&self.ident).to_string();
         if self.ident == name {
@@ -950,9 +935,7 @@ impl FieldAccessor {
         }
     }
 
-    /// The Python type of a free-form JSON field, for the stubs: `dict[str, typing.Any]` for a
-    /// `Struct`, `list[typing.Any]` for a `ListValue`, in a `list` or `dict` when repeated or a
-    /// map.
+    /// The stub type of a free-form JSON field.
     fn json_stub_type(&self, json: JsonType) -> String {
         let item = match json {
             JsonType::Value => "typing.Any",
@@ -970,8 +953,7 @@ impl FieldAccessor {
         }
     }
 
-    /// The `#[getter]` of a free-form JSON field: a Python object (`None`, `bool`, `int`,
-    /// `float`, `str`, `list` or `dict`).
+    /// The `#[getter]` of a free-form JSON field, which returns a plain Python object.
     fn json_getter(&self, json: JsonType) -> TokenStream {
         let ident = &self.ident;
         let getter = self.getter_ident();
@@ -1020,8 +1002,7 @@ impl FieldAccessor {
         }
     }
 
-    /// The expression that converts the Python object `value` (a `Bound<PyAny>`) into the
-    /// Rust value of a free-form JSON field.
+    /// Convert the Python object `value` into the field's free-form JSON type.
     fn json_store(&self, json: JsonType) -> TokenStream {
         json_from_py(json, &self.ty, quote! { value }, false)
     }
@@ -1054,14 +1035,13 @@ impl FieldAccessor {
         base
     }
 
-    /// A singular, non-`optional` enum field with a hidden zero value: Python-visible as
-    /// `Optional[...]`, `None` for the zero value.
+    /// A singular, non-`optional` enum field with a hidden zero value: `Optional[...]` in Python.
     fn is_hidden_zero_enum(&self) -> bool {
         self.hidden_zero && !self.ty.is_repeated && !self.ty.is_optional
     }
 
-    /// With a hidden zero value, the filter that drops it from the known values of the enum:
-    /// for an `Option` or an iterator of the bare Rust enum.
+    /// The `.filter(..)` that drops a hidden zero value from an `Option` or iterator of the
+    /// bare Rust enum.
     fn hidden_zero_filter(&self) -> Option<TokenStream> {
         let inner = self.inner_rust_path.as_ref();
         self.hidden_zero.then(|| match self.runtime {
@@ -1120,8 +1100,8 @@ impl FieldAccessor {
         }
     }
 
-    /// The return type and body of the getter of a singular `bytes` field: a `Cow` that lends the
-    /// bytes, which PyO3 copies into `bytes` once, and the stubs show as `bytes`.
+    /// The return type and body of a singular `bytes` getter: a borrowed `Cow`, which PyO3 copies
+    /// into `bytes` once.
     fn bytes_getter(&self) -> (TokenStream, TokenStream) {
         let ident = &self.ident;
         match self.is_optional_scalar() {
@@ -1136,8 +1116,7 @@ impl FieldAccessor {
         }
     }
 
-    /// The type that a constructor argument takes: the Python-visible type, but `bytes` for a
-    /// singular `bytes` field.
+    /// The type a constructor argument takes: [`Self::py_type`], but `PyBackedBytes` for `bytes`.
     fn input_type(&self) -> TokenStream {
         match self.ty.is_singular_bytes() {
             true => super::bindings::py_bytes_input(self.is_optional_scalar()),
@@ -1695,21 +1674,14 @@ fn read_map(access: &TokenStream, value: &UnifiedType, in_project: bool) -> Toke
     }
 }
 
-/// The keyword `#[new]` constructor: every plain field is an optional keyword
-/// argument defaulting to `None`, and each oneof is *flattened* into one optional
-/// keyword arg per variant (matching the hand-written constructors downstream
-/// adopters used, see issue #99). Provided values are stored; omitted ones fall
-/// back to the inner type's `Default`. If more than one variant of the same oneof
-/// is supplied, the last one in proto declaration order wins.
-/// `let value = <argument>;`, which the store expressions read; nothing for an argument that is
-/// itself named `value`.
+/// `let value = <argument>;` for the store expressions; nothing for an argument named `value`.
 fn bind_value(ident: &proc_macro2::Ident) -> Option<TokenStream> {
     (ident != "value").then(|| quote! { let value = #ident; })
 }
 
-/// The `#[new]` constructor of an input model. Every argument is optional (`None`), except, with
-/// `keyword_only`, the `REQUIRED` fields: they come first, as required arguments, and the others
-/// are keyword-only.
+/// The keyword `#[new]` constructor: every plain field is an optional keyword argument, and each
+/// oneof is flattened into one optional argument per variant (the last one given wins). With
+/// `keyword_only`, the `REQUIRED` fields come first as positional arguments.
 fn constructor(
     accessors: &[FieldAccessor],
     oneofs: &[OneofAccessor],
@@ -1729,8 +1701,8 @@ fn constructor(
     let (required, optional): (Vec<&FieldAccessor>, Vec<&FieldAccessor>) =
         accessors.iter().partition(is_required);
 
-    // A required argument is the bare Python type: a field whose Python type is an `Option`
-    // (a singular message, an explicit-presence scalar) takes its inner type.
+    // A required argument takes the bare type, without the `Option` of a singular message or
+    // explicit-presence scalar.
     let required_params = required.iter().map(|a| {
         let ident = &a.ident;
         if a.json.is_some() {
@@ -1743,10 +1715,8 @@ fn constructor(
         };
         quote! { #ident: #ty }
     });
-    // Optional plain fields: fields whose Python type is *already* `Option<..>`
-    // (singular messages, explicit-presence scalars) must not be double-wrapped —
-    // `Option<Option<T>>` makes pyo3's `#[new]` arg-coercion ambiguous. For those
-    // the single `Option` already encodes the "omitted/None" keyword default.
+    // A field whose Python type is already `Option<..>` is not wrapped again: pyo3 cannot coerce
+    // an `Option<Option<T>>` argument.
     let optional_params = optional.iter().map(|a| {
         let ident = &a.ident;
         if a.json.is_some() {
@@ -1759,12 +1729,11 @@ fn constructor(
             quote! { #ident: ::core::option::Option<#ty> }
         }
     });
-    // One `Option<PyPayload>` param per oneof variant, flattened across all oneofs.
     let oneof_params = oneofs.iter().flat_map(OneofAccessor::ctor_params);
     let params = required_params.chain(optional_params).chain(oneof_params);
 
-    // The required arguments, then `*` with `keyword_only`, then `<name> = None` for every
-    // other plain field and every oneof variant, in order.
+    // Signature: the required arguments, `*` with `keyword_only`, then `<name> = None` for the
+    // other fields and the oneof variants.
     let optional_idents: Vec<proc_macro2::Ident> = optional
         .iter()
         .map(|a| a.ident.clone())
@@ -1789,8 +1758,7 @@ fn constructor(
             Some(json) => a.json_store(json),
             None => a.write_expr(),
         };
-        // The store expressions read `value`: the `Option` that an optional argument would be,
-        // for a field whose Python type is an `Option`.
+        // The store expression of an `Option` field reads an `Option`.
         if a.json.is_none() && a.py_type_is_optional() {
             quote! {
                 {
@@ -1821,8 +1789,7 @@ fn constructor(
         // Bind `value` for the store expression.
         let store = a.write_expr();
         if a.py_type_is_optional() {
-            // `value` is the whole (already-`Option`) argument; store unconditionally
-            // (an omitted kwarg arrives as `None`, the field's natural absent value).
+            // The whole `Option` argument is stored; an omitted one is `None`.
             let bind = bind_value(ident);
             quote! {
                 {
@@ -1839,7 +1806,7 @@ fn constructor(
         }
     });
     let oneof_assigns = oneofs.iter().flat_map(OneofAccessor::ctor_assigns);
-    // Converting a free-form JSON argument can fail.
+    // A free-form JSON argument can fail to convert.
     let (ret, result) = if accessors.iter().any(|a| a.json.is_some()) {
         (
             quote! { ::pyo3::PyResult<Self> },

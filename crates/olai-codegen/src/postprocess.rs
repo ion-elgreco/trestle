@@ -1,23 +1,15 @@
-//! Rewrites of the buffa model output.
+//! Rewrites of the buffa model output, whose JSON choices are fixed in the buf plugin:
 //!
-//! The buffa buf plugin writes the model types (`<package>.rs`) before trestle runs. Two of its
-//! JSON choices are fixed in the plugin, so trestle rewrites its output in place:
+//! - **Field names.** [`JsonFieldNames::Proto`] serializes the snake_case proto names instead of
+//!   lowerCamelCase (both are still read). An explicit `json_name` is kept.
+//! - **64-bit integers.** `int64_module` points buffa's string helpers at the `json_int64`
+//!   module, which writes numbers.
+//! - **Free-form JSON.** `json_value_module` makes `google.protobuf.Value`/`Struct`/`ListValue`
+//!   fields write whole numbers as integers (`1`, not `1.0`).
+//! - **Field options** ([`field_options`]): explicit `json_name`s and
+//!   `(olai.trestle.v1.emit_unpopulated)`.
 //!
-//! - **Field names.** buffa serializes the lowerCamelCase proto3-JSON names. With
-//!   [`JsonFieldNames::Proto`] the default names become the snake_case proto names (camelCase is
-//!   still read). A field with an explicit `json_name` that differs from the default keeps it.
-//! - **64-bit integers.** buffa writes `int64`/`uint64` as quoted strings. With
-//!   `int64_module = Some(path)` the models write numbers through the `json_int64` helper module
-//!   (see [`RestClientOptions::json_int64_as_number`](crate::RestClientOptions)).
-//! - **Free-form JSON.** buffa writes every number of a `google.protobuf.Value`, `Struct` or
-//!   `ListValue` as an `f64` (`1.0`). With `json_value_module = Some(path)` those fields write
-//!   whole numbers as integers through the `json_value` helper module.
-//! - **Field options** ([`ModelRewrites::fields`], from [`field_options`]): a field whose proto
-//!   writes out a `json_name` keeps that name, even when it equals the default one; a field with
-//!   `(olai.trestle.v1.emit_unpopulated)` is sent even when empty, zero or `false`.
-//!
-//! The rewrites are idempotent: rewritten output does not match again. They leave alone the
-//! files that trestle writes into the models directory itself.
+//! The rewrites are idempotent and skip the files trestle writes itself.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -64,24 +56,22 @@ pub struct ModelRewrites {
     pub fields: BTreeMap<String, PackageFields>,
 }
 
-/// The fields of one proto package whose JSON the proto sets, keyed `Message.field` (the simple
-/// message name and the proto field name).
+/// The fields of one proto package with JSON options, keyed `Message.field`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PackageFields {
-    /// The `json_name` that the proto writes out, by field.
+    /// Explicit `json_name`s, by field.
     pub json_names: BTreeMap<String, String>,
     /// The fields with `(olai.trestle.v1.emit_unpopulated)`.
     pub emit_unpopulated: BTreeSet<String>,
 }
 
-/// The fields of `metadata` whose JSON the proto sets, by package, for [`ModelRewrites::fields`].
+/// The fields of `metadata` with JSON options, by package, for [`ModelRewrites::fields`].
 pub fn field_options(
     metadata: &crate::parsing::CodeGenMetadata,
 ) -> BTreeMap<String, PackageFields> {
     let mut packages: BTreeMap<String, PackageFields> = BTreeMap::new();
     for message in metadata.messages.values() {
         let name = message.name.trim_start_matches('.');
-        // The package is the lowercase segments before the message names.
         let package = name
             .split('.')
             .take_while(|s| s.starts_with(|c: char| c.is_ascii_lowercase()))
@@ -119,9 +109,8 @@ impl ModelRewrites {
             && self.fields.is_empty()
     }
 
-    /// The field-name style of the model file `file_name`: `<package>.rs` (one file per package,
-    /// as the buf plugin writes) or `<package>.<proto file>.rs` (one per proto file, as
-    /// buffa-build writes).
+    /// The field-name style of the model file `file_name`: `<package>.rs` (the buf plugin) or
+    /// `<package>.<proto file>.rs` (buffa-build).
     fn field_names_for(&self, file_name: &str) -> JsonFieldNames {
         let Some(stem) = file_name.strip_suffix(".rs") else {
             return self.field_names;
@@ -163,8 +152,7 @@ impl ModelRewrites {
         out
     }
 
-    /// Rewrite the model files under the models directory `dir` in place: every `.rs` file but
-    /// the ones trestle writes. Returns the number of files changed.
+    /// Rewrite the model files under `dir` in place. Returns the number of files changed.
     pub fn rewrite_dir(&self, dir: &Path) -> Result<usize> {
         if self.is_empty() || !dir.exists() {
             return Ok(0);
@@ -186,7 +174,7 @@ impl ModelRewrites {
     }
 }
 
-/// Every `.rs` file under `dir`, recursively, in sorted order, without the [`TRESTLE_FILES`].
+/// Every `.rs` file under `dir`, sorted, without the [`TRESTLE_FILES`].
 fn model_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
@@ -212,9 +200,8 @@ fn model_files(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-/// Swap the `rename`/`alias` values of each `#[serde(...)]` attribute whose `rename` is the
-/// default proto3-JSON name of its `alias` (the proto name), so serialization uses the proto
-/// name. An explicit `json_name` (e.g. `metadata-location`) differs from the default and is kept.
+/// Swap `rename`/`alias` in each `#[serde(...)]` whose `rename` is the default proto3-JSON name
+/// of its `alias`, so serialization uses the proto name. An explicit `json_name` is kept.
 fn swap_serde_renames(src: &str) -> String {
     // One `#[serde( ... )]` attribute; the body never contains `)]`.
     static SERDE_ATTR: LazyLock<Regex> =
@@ -233,9 +220,7 @@ fn swap_serde_renames(src: &str) -> String {
             };
             let rename_val = rn["v"].to_string();
             let alias_val = al["v"].to_string();
-            // Only the default JSON name is swapped. This also makes the rewrite idempotent: after
-            // a swap `rename` is the proto name, which is not the default JSON name of the new
-            // (camelCase) alias.
+            // Swap only the default JSON name; this also keeps a second run a no-op.
             if rename_val == alias_val || rename_val != lower_camel(&alias_val) {
                 return whole.to_string();
             }
@@ -246,8 +231,8 @@ fn swap_serde_renames(src: &str) -> String {
         .into_owned()
 }
 
-/// Convert the `serialize_entry("camelCase", …)` JSON names in the `*View` `Serialize` impls to
-/// snake_case. Only default proto3-JSON names are converted (see [`swap_serde_renames`]).
+/// Convert the default `serialize_entry("camelCase", …)` names of the `*View` `Serialize` impls
+/// to snake_case.
 fn snakeify_serialize_entries(src: &str) -> String {
     static ENTRY: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"serialize_entry\("(?P<name>[^"]*)""#).expect("valid regex"));
@@ -266,8 +251,7 @@ fn snakeify_serialize_entries(src: &str) -> String {
         .into_owned()
 }
 
-/// Point buffa's 64-bit integer JSON helpers (`int64`, `opt_int64`, `uint64`, `opt_uint64`) at
-/// `module`, which writes JSON numbers.
+/// Point buffa's `int64`, `opt_int64`, `uint64` and `opt_uint64` helpers at `module`.
 fn int64_helpers_to(src: &str, module: &str) -> String {
     static HELPER: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"::buffa::json_helpers::(?P<name>(?:opt_)?u?int64)\b").expect("valid regex")
@@ -279,10 +263,8 @@ fn int64_helpers_to(src: &str, module: &str) -> String {
         .into_owned()
 }
 
-/// Give the fields of `fields` their JSON: the `json_name` that the proto writes out as the
-/// `rename` (after [`swap_serde_renames`], which cannot tell it from a default name), and no
-/// `skip_serializing_if` for an `emit_unpopulated` field. A field is found by the `pub struct`
-/// above it and its name.
+/// Apply the field options: an explicit `json_name` becomes the `rename` (restoring what
+/// [`swap_serde_renames`] may have swapped), and `emit_unpopulated` drops `skip_serializing_if`.
 fn apply_field_options(src: &str, fields: &PackageFields) -> String {
     static STRUCT: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^\s*pub struct (\w+)").expect("valid regex"));
@@ -310,7 +292,6 @@ fn apply_field_options(src: &str, fields: &PackageFields) -> String {
                 let attrs = attribute_lines(&lines, i);
                 let mut text = lines[attrs.clone()].join("\n");
                 if let Some(json) = json {
-                    // The proto name stays readable, as proto3 JSON asks.
                     text = RENAME
                         .replace(&text, format!(r#"rename = "{json}""#))
                         .into_owned();
@@ -334,9 +315,8 @@ fn apply_field_options(src: &str, fields: &PackageFields) -> String {
     out
 }
 
-/// Point the repeated `int64`/`uint64` fields and the maps with such values at the
-/// `repeated_int64` and `map_int64` helpers of `module`: buffa sends them through its generic
-/// `proto_seq` and `proto_map`, which write quoted strings.
+/// Point repeated `int64`/`uint64` fields and maps of them at the `repeated_int64` and
+/// `map_int64` helpers of `module`, instead of buffa's `proto_seq`/`proto_map`.
 fn int64_containers_to(src: &str, module: &str) -> String {
     let lines: Vec<&str> = src.lines().collect();
     let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
@@ -373,8 +353,8 @@ fn int64_containers_to(src: &str, module: &str) -> String {
     out
 }
 
-/// The declaration of the field at line `start`, whitespace collapsed (`pub a: Vec<i64>,`), and
-/// the line it ends on: up to the `,` outside the type's `<..>`.
+/// The field declaration at line `start`, whitespace collapsed (`pub a: Vec<i64>,`), and the
+/// line it ends on.
 fn declaration(lines: &[&str], start: usize) -> (String, usize) {
     let mut end = start;
     let mut decl = String::new();
@@ -394,10 +374,8 @@ fn declaration(lines: &[&str], start: usize) -> (String, usize) {
     (decl, end)
 }
 
-/// Give each free-form JSON field (`google.protobuf.Value`, `Struct`, `ListValue`; singular,
-/// repeated or a map value) a `serialize_with` of `module`, which writes whole numbers as
-/// integers. A field declaration can span lines, so the field types are read with their
-/// whitespace collapsed. Fields that already have a `serialize_with` are left alone.
+/// Give each free-form JSON field (singular, repeated or map value) a `serialize_with` of
+/// `module`, unless it has one already.
 fn json_value_serializers(src: &str, module: &str) -> String {
     const JSON: &str = "::buffa_types::google::protobuf::";
     let lines: Vec<&str> = src.lines().collect();
@@ -407,7 +385,7 @@ fn json_value_serializers(src: &str, module: &str) -> String {
         let line = lines[i];
         let trimmed = line.trim_start();
         if trimmed.starts_with("pub ") && trimmed.contains(": ") && line.contains(JSON) || {
-            // A type that starts on the next lines, as rustfmt breaks a long `HashMap<..>`.
+            // A type that rustfmt broke onto the next lines.
             trimmed.starts_with("pub ") && trimmed.ends_with('<')
         } {
             let (decl, end) = declaration(&lines, i);
@@ -449,8 +427,8 @@ fn json_value_serializers(src: &str, module: &str) -> String {
     out
 }
 
-/// Whether the serde attributes `attrs` set `key` (`with`, `serialize_with`): the key as a
-/// whole word, so `deserialize_with` sets neither.
+/// Whether the serde attributes `attrs` set `key` as a whole word (`deserialize_with` does not
+/// set `with`).
 fn has_serde_key(attrs: &str, key: &str) -> bool {
     attrs.match_indices(key).any(|(at, _)| {
         let before = attrs[..at].chars().next_back();
@@ -459,8 +437,7 @@ fn has_serde_key(attrs: &str, key: &str) -> bool {
     })
 }
 
-/// The attributes above the field declaration at line `field`: doc comments are skipped, and an
-/// attribute that spans lines is read whole.
+/// The attributes above the field declaration at line `field`, as one string.
 fn field_attributes(lines: &[&str], field: usize) -> String {
     attribute_lines(lines, field)
         .map(|j| lines[j].trim())
@@ -475,7 +452,7 @@ fn attribute_lines(lines: &[&str], field: usize) -> std::ops::Range<usize> {
         if prev.starts_with("//") || prev.starts_with("#[") && prev.ends_with(']') {
             j -= 1;
         } else if prev.ends_with(")]") {
-            // The end of an attribute that spans lines: up to its `#[`.
+            // A multi-line attribute: back up to its `#[`.
             let mut k = j - 1;
             while k > 0 && !lines[k].trim_start().starts_with("#[") {
                 k -= 1;
@@ -502,13 +479,9 @@ fn camel_to_snake(name: &str) -> String {
     out
 }
 
-/// Put blank lines between the items of a pretty-printed Rust file. prettyplease prints none,
-/// and rustfmt keeps blank lines but never adds them.
-///
-/// A blank line goes before an item (an attribute, a doc comment, or an item keyword) that
-/// follows, at the same indentation, a closing `}` or the end of a `use` group; and after the
-/// inner attributes and docs of the file. That covers the items of a module and the functions
-/// of an `impl`. A file that already has these blank lines is returned unchanged.
+/// Put blank lines between the items of a pretty-printed Rust file (prettyplease prints none;
+/// rustfmt keeps them but never adds them): before an item that follows a `}` or a `use` group
+/// at the same indentation, and after the file's inner attributes. Idempotent.
 pub fn space_items(src: &str) -> String {
     let lines: Vec<&str> = src.lines().collect();
     let mut out = String::with_capacity(src.len() + src.len() / 16);

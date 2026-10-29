@@ -104,8 +104,8 @@ pub(super) fn process_message(
         // Extract resource_reference annotation (ext 1055)
         let resource_reference = extract_resource_reference(field)?;
 
-        // protoc fills in `json_name` for every field; only a name the proto writes out has a
-        // source location (field 10 of the field descriptor).
+        // protoc fills in `json_name` for every field; only an explicit one has a source location
+        // (field 10 of the field descriptor).
         let json_name_path = [field_path.as_slice(), &[10]].concat();
         let json_name = source_code_info
             .is_some_and(|info| info.location.iter().any(|l| l.path == json_name_path))
@@ -219,8 +219,7 @@ pub(super) fn process_message(
     Ok(())
 }
 
-/// A `bool` option of trestle on a field, such as `(olai.trestle.v1.emit_unpopulated)`, by its
-/// extension number: whether it is set to `true`.
+/// Whether the `bool` field option with extension number `number` is set to `true`.
 fn bool_option(field: &FieldDescriptorProto, number: u32) -> bool {
     field.options.as_ref().is_some_and(|options| {
         options.unknown_fields().iter().any(|(n, value)| {
@@ -229,8 +228,7 @@ fn bool_option(field: &FieldDescriptorProto, number: u32) -> bool {
     })
 }
 
-/// A `string` option of trestle on a field, such as `(olai.trestle.v1.response_header)`, by its
-/// extension number.
+/// The `string` field option with extension number `number`.
 fn string_option(field: &FieldDescriptorProto, number: u32) -> Option<String> {
     let options = field.options.as_ref()?;
     options

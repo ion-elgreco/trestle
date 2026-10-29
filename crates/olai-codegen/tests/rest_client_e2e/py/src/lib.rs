@@ -1,4 +1,4 @@
-//! The generated Python bindings, mounted as a binding crate mounts them: under `crate::codegen`.
+//! The generated Python bindings, mounted under `crate::codegen` as a binding crate mounts them.
 
 include!(concat!(env!("OUT_DIR"), "/python_mod.rs"));
 

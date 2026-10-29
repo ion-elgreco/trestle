@@ -155,7 +155,7 @@ impl GenerateConfig {
             path_fields_in_body_methods: rust
                 .map(|r| r.path_fields_in_body_methods.clone())
                 .unwrap_or_default(),
-            // A package whose JSON names are lowerCamelCase sends its query keys so too.
+            // A lowerCamelCase package sends its query keys in lowerCamelCase too.
             json_query_packages: self
                 .json_field_names_by_package
                 .iter()
@@ -288,9 +288,8 @@ impl GenerateConfig {
     }
 }
 
-/// Lower the Python client config; the package directory is resolved (and created) like the
-/// outputs. The exception classes of the error module take `error_base_class`
-/// (`bindings.error_base_class`).
+/// Lower the Python client config. The package directory is resolved like the outputs; the base
+/// exception class is `bindings.error_base_class`.
 fn lower_python(
     python: &super::PythonClient,
     error_base_class: Option<&str>,
