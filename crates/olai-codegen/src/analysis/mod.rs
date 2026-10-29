@@ -473,6 +473,7 @@ pub(crate) fn analyze_method(
     let scoped_verb = types::scoped_verb(&request_type);
     let (raw_request_body, raw_response_body) = raw_bodies(metadata, method, &input_fields)?;
     let request_headers = request_headers(method, &input_fields)?;
+    let status_field = status_field(metadata, method)?;
 
     Ok(MethodPlan {
         metadata: method.clone(),
@@ -493,7 +494,31 @@ pub(crate) fn analyze_method(
         raw_request_body,
         raw_response_body,
         request_headers,
+        status_field,
     })
+}
+
+/// The response field with the HTTP status of the answer (`(olai.trestle.v1.http_status)`): one
+/// singular `int32` at most.
+fn status_field(metadata: &CodeGenMetadata, method: &MethodMetadata) -> Result<Option<String>> {
+    let output_fields = metadata.get_message_fields(&method.output_type);
+    let mut fields = output_fields.iter().filter(|f| f.http_status);
+    let Some(field) = fields.next() else {
+        return Ok(None);
+    };
+    let fail = |message: &str| {
+        Err(crate::Error::Build(format!(
+            "method `{}`: the status field `{}` {message}",
+            method.method_name, field.name
+        )))
+    };
+    if fields.next().is_some() {
+        return fail("is not the only one: an output has one status");
+    }
+    if !matches!(field.unified_type.base_type, BaseType::Int32) || field.unified_type.is_repeated {
+        return fail("must be an `int32`");
+    }
+    Ok(Some(field.name.clone()))
 }
 
 /// The request fields that go in HTTP request headers (`(olai.trestle.v1.request_header)`), with
@@ -525,8 +550,9 @@ fn request_headers(
 
 /// The fields that are the raw request and response bodies of a method
 /// (`(olai.trestle.v1.raw_body)`): singular `bytes` fields. In the request, the field that the
-/// rule's `body` names. In the response of a method that does not stream, beside fields that come
-/// from response headers only.
+/// rule's `body` names; a client stream (`rpc X(stream T)`) must have one, as its chunks. In the
+/// response, beside fields that come from response headers or hold the status only; the messages
+/// of a server stream are the chunks.
 fn raw_bodies(
     metadata: &CodeGenMetadata,
     method: &MethodMetadata,
@@ -539,6 +565,9 @@ fn raw_bodies(
         )))
     };
     let request = match input_fields.iter().find(|f| f.raw_body) {
+        None if method.client_streaming => {
+            return fail("a client stream needs a raw body field for its chunks".to_string());
+        }
         None => None,
         Some(f) if !f.unified_type.is_singular_bytes() => {
             return fail(format!("the raw body `{}` must be `bytes`", f.name));
@@ -557,16 +586,13 @@ fn raw_bodies(
         Some(f) if !f.unified_type.is_singular_bytes() => {
             return fail(format!("the raw body `{}` must be `bytes`", f.name));
         }
-        Some(_) if method.server_streaming => {
-            return fail("a streamed output has no raw body".to_string());
-        }
         Some(f)
             if output_fields
                 .iter()
-                .any(|o| o.name != f.name && o.response_header.is_none()) =>
+                .any(|o| o.name != f.name && o.response_header.is_none() && !o.http_status) =>
         {
             return fail(format!(
-                "the other fields of an output with the raw body `{}` must come from response headers",
+                "the other fields of an output with the raw body `{}` must come from response headers or hold the status",
                 f.name
             ));
         }
@@ -619,6 +645,7 @@ fn analyze_routeless_method(
         raw_request_body: None,
         raw_response_body: None,
         request_headers: Vec::new(),
+        status_field: None,
     })
 }
 
@@ -835,6 +862,7 @@ mod tests {
             input_type: "GetCatalogRequest".to_string(),
             output_type: "Catalog".to_string(),
             server_streaming: false,
+            client_streaming: false,
             no_side_effects: false,
             response_status: None,
             operation: None,
@@ -888,6 +916,7 @@ mod tests {
             input_type: "UpdateCatalogRequest".to_string(),
             output_type: "Catalog".to_string(),
             server_streaming: false,
+            client_streaming: false,
             no_side_effects: false,
             response_status: None,
             operation: None,
@@ -923,6 +952,7 @@ mod tests {
             input_type: "".to_string(),
             output_type: "".to_string(),
             server_streaming: false,
+            client_streaming: false,
             no_side_effects: false,
             response_status: None,
             operation: None,
@@ -974,6 +1004,7 @@ mod tests {
             input_type: "DoThingRequest".to_string(),
             output_type: "DoThingResponse".to_string(),
             server_streaming: false,
+            client_streaming: false,
             no_side_effects: false,
             response_status: None,
             operation: None,
@@ -1036,6 +1067,7 @@ mod tests {
             input_type: "MakeReq".to_string(),
             output_type: "MakeResp".to_string(),
             server_streaming: false,
+            client_streaming: false,
             no_side_effects: false,
             response_status: None,
             operation: None,
@@ -1061,6 +1093,7 @@ mod tests {
             request_header: None,
             emit_unpopulated: false,
             raw_body: false,
+            http_status: false,
             unified_type: UnifiedType {
                 base_type: BaseType::String,
                 is_optional: optional,
@@ -1083,6 +1116,7 @@ mod tests {
             request_header: None,
             emit_unpopulated: false,
             raw_body: false,
+            http_status: false,
             unified_type: UnifiedType {
                 base_type: BaseType::String,
                 is_optional: false,
@@ -1103,6 +1137,7 @@ mod tests {
             input_type: "".to_string(),
             output_type: "".to_string(),
             server_streaming: false,
+            client_streaming: false,
             no_side_effects: false,
             response_status: None,
             operation: None,
@@ -1282,6 +1317,7 @@ mod tests {
                     request_header: None,
                     emit_unpopulated: false,
                     raw_body: false,
+                    http_status: false,
                     unified_type: UnifiedType {
                         base_type: BaseType::String,
                         is_optional: false,
@@ -1314,6 +1350,7 @@ mod tests {
                         request_header: None,
                         emit_unpopulated: false,
                         raw_body: false,
+                        http_status: false,
                         unified_type: UnifiedType {
                             base_type: BaseType::String,
                             is_optional: false,
@@ -1335,6 +1372,7 @@ mod tests {
                         request_header: None,
                         emit_unpopulated: false,
                         raw_body: false,
+                        http_status: false,
                         unified_type: UnifiedType {
                             base_type: BaseType::String,
                             is_optional: false,
@@ -1372,6 +1410,7 @@ mod tests {
                     input_type: "ListCatalogsRequest".to_string(),
                     output_type: "ListCatalogsResponse".to_string(),
                     server_streaming: false,
+                    client_streaming: false,
                     no_side_effects: false,
                     response_status: None,
                     operation: None,
@@ -1391,6 +1430,7 @@ mod tests {
                     input_type: "GetCatalogRequest".to_string(),
                     output_type: "Catalog".to_string(),
                     server_streaming: false,
+                    client_streaming: false,
                     no_side_effects: false,
                     response_status: None,
                     operation: None,
@@ -1419,6 +1459,7 @@ mod tests {
                     input_type: "ListSchemasRequest".to_string(),
                     output_type: "ListSchemasResponse".to_string(),
                     server_streaming: false,
+                    client_streaming: false,
                     no_side_effects: false,
                     response_status: None,
                     operation: None,
@@ -1438,6 +1479,7 @@ mod tests {
                     input_type: "GetSchemaRequest".to_string(),
                     output_type: "Schema".to_string(),
                     server_streaming: false,
+                    client_streaming: false,
                     no_side_effects: false,
                     response_status: None,
                     operation: None,
@@ -1466,6 +1508,7 @@ mod tests {
                     input_type: "ListTablesRequest".to_string(),
                     output_type: "ListTablesResponse".to_string(),
                     server_streaming: false,
+                    client_streaming: false,
                     no_side_effects: false,
                     response_status: None,
                     operation: None,
@@ -1485,6 +1528,7 @@ mod tests {
                     input_type: "GetTableRequest".to_string(),
                     output_type: "Table".to_string(),
                     server_streaming: false,
+                    client_streaming: false,
                     no_side_effects: false,
                     response_status: None,
                     operation: None,

@@ -334,9 +334,10 @@ fn collect_parameter_documentation(method: &MethodHandler<'_>) -> Vec<(String, S
     param_docs
 }
 
-/// The annotation of a method's result: a `List` for a server-streaming method.
+/// The annotation of a method's result: a `List` for a server-streaming method, but not for a
+/// stream of raw bytes, which the binding reads whole.
 fn streamed_annotation(method: &MethodHandler<'_>, annotation: String) -> String {
-    if method.plan.metadata.server_streaming {
+    if method.plan.metadata.server_streaming && method.plan.raw_response_body.is_none() {
         format!("List[{annotation}]")
     } else {
         annotation

@@ -64,4 +64,21 @@ pub trait CatalogHandler<Cx = crate::Context>: Send + Sync + 'static {
         request: StreamCatalogEventsRequest,
         context: Cx,
     ) -> Result<::futures::stream::BoxStream<'static, Result<CatalogEvent>>>;
+    /// Read the export of a catalog: over REST the raw bytes of the answer, chunk by chunk, with
+    /// the status and the headers from the first chunk.
+    async fn download_catalog_export(
+        &self,
+        request: DownloadCatalogExportRequest,
+        context: Cx,
+    ) -> Result<::futures::stream::BoxStream<'static, Result<CatalogExportChunk>>>;
+    /// Write the import of a catalog: over REST the raw request body, chunk by chunk.
+    async fn upload_catalog_import(
+        &self,
+        request: UploadCatalogImportRequest,
+        contents: ::futures::stream::BoxStream<
+            'static,
+            ::std::io::Result<axum::body::Bytes>,
+        >,
+        context: Cx,
+    ) -> Result<DeleteCatalogResponse>;
 }

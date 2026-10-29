@@ -919,12 +919,71 @@ fn generate_client_main_module(
         }
     });
 
+    // The streams of the calls that send or read raw bytes as a stream.
+    let streams = services
+        .iter()
+        .flat_map(|s| &s.methods)
+        .any(|m| {
+            (m.metadata.server_streaming && m.raw_response_body.is_some())
+                || (m.metadata.client_streaming && m.raw_request_body.is_some())
+        })
+        .then(|| {
+            quote! {
+                /// The messages of a call that streams them, such as the chunks of a file.
+                #[cfg(not(target_arch = "wasm32"))]
+                pub type Streamed<T> = ::futures::stream::BoxStream<'static, error::Result<T>>;
+                /// The messages of a call that streams them, such as the chunks of a file.
+                #[cfg(target_arch = "wasm32")]
+                pub type Streamed<T> = ::futures::stream::LocalBoxStream<'static, error::Result<T>>;
+
+                /// The bytes that a call streams, such as the contents of a file to upload.
+                #[cfg(not(target_arch = "wasm32"))]
+                pub type ByteStream =
+                    ::futures::stream::BoxStream<'static, ::std::io::Result<::bytes::Bytes>>;
+                /// The bytes that a call streams, such as the contents of a file to upload.
+                #[cfg(target_arch = "wasm32")]
+                pub type ByteStream =
+                    ::futures::stream::LocalBoxStream<'static, ::std::io::Result<::bytes::Bytes>>;
+
+                /// What a call takes as its stream of bytes: a stream, or bytes in hand.
+                pub trait IntoByteStream {
+                    fn into_byte_stream(self) -> ByteStream;
+                }
+
+                impl IntoByteStream for ByteStream {
+                    fn into_byte_stream(self) -> ByteStream {
+                        self
+                    }
+                }
+
+                impl IntoByteStream for ::bytes::Bytes {
+                    fn into_byte_stream(self) -> ByteStream {
+                        Box::pin(::futures::stream::once(::std::future::ready(Ok(self))))
+                    }
+                }
+
+                impl IntoByteStream for Vec<u8> {
+                    fn into_byte_stream(self) -> ByteStream {
+                        ::bytes::Bytes::from(self).into_byte_stream()
+                    }
+                }
+
+                impl IntoByteStream for &[u8] {
+                    fn into_byte_stream(self) -> ByteStream {
+                        ::bytes::Bytes::copy_from_slice(self).into_byte_stream()
+                    }
+                }
+            }
+        });
+
     let tokens = quote! {
         #(#service_modules)*
 
         #(#resource_exports)*
 
         #protocol
+
+        #streams
 
         #aggregate_module
         #transport_module
@@ -1605,10 +1664,16 @@ impl MethodHandler<'_> {
     }
 
     /// The type a client call resolves to: the output message, a `Vec` of them for a
-    /// server-streaming method (one per NDJSON line), `bool` for an existence check
+    /// server-streaming method (one per NDJSON line) or a stream of them when they carry raw
+    /// bytes (`Streamed<T>` of the client root), `bool` for an existence check
     /// ([`Self::is_existence_check`]), or `()` for `Empty`.
     pub(crate) fn result_type(&self) -> TokenStream {
         match self.output_type() {
+            Some(output)
+                if self.plan.metadata.server_streaming && self.plan.raw_response_body.is_some() =>
+            {
+                quote! { super::super::Streamed<#output> }
+            }
             Some(output) if self.plan.metadata.server_streaming => quote! { Vec<#output> },
             Some(output) => quote! { #output },
             None if self.is_existence_check() => quote! { bool },
@@ -1634,6 +1699,24 @@ impl MethodHandler<'_> {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The output field that holds the HTTP status of the answer
+    /// (`(olai.trestle.v1.http_status)`).
+    pub(crate) fn status_field(&self) -> Option<&MessageField> {
+        let name = self.plan.status_field.as_deref()?;
+        self.output_message()?
+            .info
+            .fields
+            .iter()
+            .find(|f| f.name == name)
+    }
+
+    /// Whether the method streams raw bytes: a server stream whose messages carry the raw
+    /// response body, or a client stream whose messages carry the raw request body.
+    pub(crate) fn streams_raw_body(&self) -> bool {
+        (self.plan.metadata.server_streaming && self.plan.raw_response_body.is_some())
+            || (self.plan.metadata.client_streaming && self.plan.raw_request_body.is_some())
     }
 
     pub(crate) fn list_output_field(&self) -> Option<&MessageField> {

@@ -95,6 +95,7 @@ fn process_method(
         http_pattern,
         documentation: method_documentation,
         server_streaming: method.server_streaming(),
+        client_streaming: method.client_streaming(),
         no_side_effects: no_side_effects(method),
         response_status: response_status(method),
     };

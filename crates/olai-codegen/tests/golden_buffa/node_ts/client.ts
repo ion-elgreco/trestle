@@ -128,6 +128,11 @@ export interface GetCatalogStatusOptions {
   ifNoneMatch?: string;
 }
 
+export interface DownloadCatalogExportOptions {
+  /** The bytes to read, in the `Range` header. */
+  range?: string;
+}
+
 export class CatalogClient {
   private readonly inner: NativeCatalogClient;
 

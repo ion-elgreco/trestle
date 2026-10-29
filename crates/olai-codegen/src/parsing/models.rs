@@ -90,6 +90,9 @@ pub struct MessageField {
     /// Whether the field is the raw HTTP body of its message (`(olai.trestle.v1.raw_body)`): the
     /// bytes of a request body, or of a response body, instead of JSON.
     pub raw_body: bool,
+    /// Whether the field holds the HTTP status of the answer (`(olai.trestle.v1.http_status)`):
+    /// an `int32` of a response message, out of the JSON body.
+    pub http_status: bool,
     /// Language-agnostic type; carries `is_optional` and `is_repeated` flags.
     pub unified_type: UnifiedType,
     pub documentation: Option<String>,
@@ -171,6 +174,9 @@ pub struct MethodMetadata {
     /// A server-streaming RPC (`returns (stream T)`): over REST, an NDJSON answer with one `T`
     /// per line.
     pub server_streaming: bool,
+    /// A client-streaming RPC (`rpc X(stream T)`): over REST, the raw request body as a stream
+    /// of chunks of the raw-body field of `T`.
+    pub client_streaming: bool,
     /// `option idempotency_level = NO_SIDE_EFFECTS`: a read. Over Connect it may be a GET, and
     /// a server need not record it as a change.
     pub no_side_effects: bool,
@@ -229,6 +235,7 @@ mod tests {
             input_type: ".test.TestRequest".to_string(),
             output_type: ".test.TestResponse".to_string(),
             server_streaming: false,
+            client_streaming: false,
             no_side_effects: false,
             response_status: None,
             operation: None,

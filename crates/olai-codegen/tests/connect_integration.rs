@@ -26,6 +26,7 @@ fn string_field(name: &str, required: bool) -> MessageField {
         request_header: None,
         emit_unpopulated: false,
         raw_body: false,
+        http_status: false,
         unified_type: UnifiedType {
             base_type: BaseType::String,
             is_optional: !required,
@@ -69,6 +70,7 @@ fn connect_metadata() -> CodeGenMetadata {
         input_type: "GetThingRequest".to_string(),
         output_type: "Thing".to_string(),
         server_streaming: false,
+        client_streaming: false,
         no_side_effects: false,
         response_status: None,
         operation: None,

@@ -236,6 +236,27 @@ async fn get_blob(Path(path): Path<String>, headers: HeaderMap) -> Vec<u8> {
     }
 }
 
+/// The blob of [`get_blob`], in chunks of four bytes, with its size in `Content-Length` and
+/// status 206 for a range.
+async fn stream_blob(Path(path): Path<String>, headers: HeaderMap) -> Response {
+    let (status, body) = match headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
+        Some(range) => (StatusCode::PARTIAL_CONTENT, format!("range:{range}")),
+        None => (StatusCode::OK, format!("blob:{path}")),
+    };
+    let size = body.len().to_string();
+    let chunks: Vec<Result<Bytes, std::convert::Infallible>> = body
+        .as_bytes()
+        .chunks(4)
+        .map(|chunk| Ok(Bytes::copy_from_slice(chunk)))
+        .collect();
+    (
+        status,
+        [(header::CONTENT_LENGTH, size)],
+        axum::body::Body::from_stream(futures::stream::iter(chunks)),
+    )
+        .into_response()
+}
+
 /// Start the demo server on a free port; returns its base URL and what it saw.
 async fn serve() -> (url::Url, Seen) {
     let seen = Seen::default();
@@ -251,6 +272,10 @@ async fn serve() -> (url::Url, Seen) {
         .route("/api/v1/widget-lines", get(stream_widgets))
         .route("/api/v1/widgets/{name}/version", get(widget_version))
         .route("/api/v1/blobs/{*path}", put(put_blob).get(get_blob))
+        .route(
+            "/api/v1/blob-streams/{*path}",
+            put(put_blob).get(stream_blob),
+        )
         .route("/auth/tokens", post(exchange_token))
         .with_state(seen.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -582,6 +607,61 @@ async fn raw_bodies_and_paths_of_several_segments() {
         .await
         .unwrap();
     assert_eq!(part.data, b"range:bytes=0-1");
+}
+
+#[tokio::test]
+async fn streams_of_raw_bytes() {
+    use futures::StreamExt;
+
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    // The chunks of a stream are the request body; bytes in hand go as one chunk.
+    let chunks: crate::codegen::ByteStream = Box::pin(futures::stream::iter([
+        Ok(Bytes::from_static(b"ab")),
+        Ok(Bytes::from_static(b"cd")),
+    ]));
+    client
+        .upload_blob("a/b.bin", chunks)
+        .with_overwrite(true)
+        .await
+        .unwrap();
+    client.upload_blob("c.bin", vec![1, 2]).await.unwrap();
+    assert_eq!(
+        seen.all(),
+        [
+            "PUT /api/v1/blob-streams/a/b.bin application/octet-stream [97, 98, 99, 100]",
+            "PUT /api/v1/blob-streams/c.bin application/octet-stream [1, 2]",
+        ]
+    );
+    // A chunk that fails ends the upload with its error.
+    let failing: crate::codegen::ByteStream = Box::pin(futures::stream::iter([
+        Ok(Bytes::from_static(b"a")),
+        Err(std::io::Error::other("the disk is gone")),
+    ]));
+    let error = client.upload_blob("d.bin", failing).await.unwrap_err();
+    assert!(matches!(error, Error::Http(_)), "{error:?}");
+
+    // The chunks of a download carry the headers and the status of the answer.
+    let mut chunks = client.stream_blob("x/y").await.unwrap();
+    let mut data = Vec::new();
+    let mut answers = Vec::new();
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk.unwrap();
+        data.extend(chunk.data);
+        answers.push((chunk.status, chunk.size));
+    }
+    // The transport may join the chunks of the server; each carries the answer's values.
+    assert_eq!(data, b"blob:x/y");
+    assert!(!answers.is_empty());
+    assert!(answers.iter().all(|a| *a == (Some(200), Some(8))), "{answers:?}");
+    let mut part = client
+        .stream_blob("x/y")
+        .with_range("bytes=0-1".to_string())
+        .await
+        .unwrap();
+    let first = part.next().await.unwrap().unwrap();
+    assert_eq!(first.status, Some(206));
+    assert!(b"range:bytes=0-1".starts_with(&first.data), "{:?}", first.data);
 }
 
 #[tokio::test]

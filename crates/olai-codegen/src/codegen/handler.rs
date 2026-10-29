@@ -115,6 +115,23 @@ pub fn handler_trait_method(
     let method_name = method.plan.base_method_ident();
     let cx_ident = format_ident!("Cx");
 
+    if method.plan.metadata.client_streaming {
+        // The chunks of a client stream, after its first message: the raw request body over
+        // REST, the raw-body field of each message over Connect.
+        let output = match method.output_type() {
+            Some(output_type) => quote! { #output_type },
+            None => quote! { () },
+        };
+        return quote! {
+            #doc_attrs
+            async fn #method_name(
+                &self,
+                request: #input_type,
+                contents: ::futures::stream::BoxStream<'static, ::std::io::Result<axum::body::Bytes>>,
+                context: #cx_ident,
+            ) -> Result<#output>;
+        };
+    }
     if method.plan.has_response {
         let output_type = method.output_type();
         if method.plan.metadata.server_streaming {

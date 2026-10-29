@@ -118,6 +118,7 @@ pub(super) fn process_message(
             request_header: string_option(field, super::TRESTLE_REQUEST_HEADER_EXTENSION),
             emit_unpopulated: bool_option(field, super::TRESTLE_EMIT_UNPOPULATED_EXTENSION),
             raw_body: bool_option(field, super::TRESTLE_RAW_BODY_EXTENSION),
+            http_status: bool_option(field, super::TRESTLE_HTTP_STATUS_EXTENSION),
             unified_type,
             documentation,
             field_behavior,
@@ -146,6 +147,7 @@ pub(super) fn process_message(
             request_header: None,
             emit_unpopulated: false,
             raw_body: false,
+            http_status: false,
             unified_type: UnifiedType {
                 base_type: BaseType::OneOf(enum_type_name.clone()),
                 is_optional: true, // oneof fields are always Option<enum>

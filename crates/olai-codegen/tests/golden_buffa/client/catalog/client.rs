@@ -180,4 +180,77 @@ impl CatalogServiceClient {
         }
         Ok(outputs)
     }
+
+    /// Read the export of a catalog: over REST the raw bytes of the answer, chunk by chunk, with
+    /// the status and the headers from the first chunk.
+    pub async fn download_catalog_export(
+        &self,
+        request: &DownloadCatalogExportRequest,
+    ) -> Result<super::super::Streamed<CatalogExportChunk>> {
+        let formatted_path = format!(
+            "catalogs/{}/export", encode_path_value(& request.name, false)
+        );
+        let url = self.base_url.join(&formatted_path)?;
+        let mut builder = self.client.get(url);
+        if let Some(ref value) = request.range {
+            builder = builder.header("Range", value.as_str());
+        }
+        let response = builder.send().await?;
+        if !response.status().is_success() {
+            return Err(crate::error::parse_error_response(response).await);
+        }
+        let headers = response.headers().clone();
+        let status = i32::from(response.status().as_u16());
+        let chunks = ::futures::StreamExt::map(
+            response.bytes_stream(),
+            move |chunk| -> Result<CatalogExportChunk> {
+                let mut output = CatalogExportChunk {
+                    contents: chunk?.to_vec(),
+                    ..::core::default::Default::default()
+                };
+                output.size = headers
+                    .get("Content-Length")
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse().ok());
+                output.status = Some(status);
+                Ok(output)
+            },
+        );
+        Ok(Box::pin(chunks))
+    }
+
+    /// Write the import of a catalog: over REST the raw request body, chunk by chunk.
+    pub async fn upload_catalog_import(
+        &self,
+        request: &UploadCatalogImportRequest,
+        contents: super::super::ByteStream,
+    ) -> Result<DeleteCatalogResponse> {
+        let formatted_path = format!(
+            "catalogs/{}/import", encode_path_value(& request.name, false)
+        );
+        let url = self.base_url.join(&formatted_path)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let body = reqwest::Body::wrap_stream(contents);
+        #[cfg(target_arch = "wasm32")]
+        let body = {
+            let mut whole = Vec::new();
+            let mut chunks = contents;
+            while let Some(chunk) = ::futures::StreamExt::next(&mut chunks).await {
+                whole.extend_from_slice(&chunk?);
+            }
+            whole
+        };
+        let response = self
+            .client
+            .put(url)
+            .header("content-type", "application/octet-stream")
+            .body(body)
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(crate::error::parse_error_response(response).await);
+        }
+        let result = response.bytes().await?;
+        Ok(serde_json::from_slice(&result)?)
+    }
 }

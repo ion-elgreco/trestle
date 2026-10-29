@@ -21,8 +21,11 @@ pub(crate) fn has_required_fields(metadata: &CodeGenMetadata, message: &str) -> 
     message_info(metadata, message).is_some_and(|info| info.fields.iter().any(is_required))
 }
 
+/// A `REQUIRED` field, but not a raw body (`(olai.trestle.v1.raw_body)`): the server reads that
+/// one from the request body, as a stream when the method streams it, so it is not in the
+/// message that `validate()` sees.
 fn is_required(field: &MessageField) -> bool {
-    field.field_behavior.contains(&FieldBehavior::Required)
+    field.field_behavior.contains(&FieldBehavior::Required) && !field.raw_body
 }
 
 /// The message, by its name with or without the leading dot.

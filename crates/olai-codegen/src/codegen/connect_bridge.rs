@@ -85,6 +85,51 @@ pub(super) fn generate(service: &ServiceHandler<'_>, template: &str) -> Result<S
                         .map_err(|e| ::connectrpc::ConnectError::invalid_argument(e.to_string()))?;
                 }
             });
+            // A client stream: its first message is the request, and the raw-body field of
+            // every message a chunk of the handler's stream.
+            let chunks = method
+                .plan
+                .metadata
+                .client_streaming
+                .then_some(method.plan.raw_request_body.as_deref())
+                .flatten()
+                .map(crate::utils::field_ident);
+            let (request_param, read_request) = match &chunks {
+                Some(field) => (
+                    quote! { requests: ::connectrpc::InboundStream<#input> },
+                    quote! {
+                        let mut requests = requests;
+                        let Some(first) = ::futures::StreamExt::next(&mut requests).await else {
+                            return ::core::result::Result::Err(
+                                ::connectrpc::ConnectError::invalid_argument("the stream has no message"),
+                            );
+                        };
+                        let mut request = first?.to_owned_message();
+                        #validation
+                        let head = ::core::mem::take(&mut request.#field);
+                        let contents = ::futures::StreamExt::chain(
+                            ::futures::stream::iter(
+                                (!head.is_empty()).then(|| Ok(axum::body::Bytes::from(head))),
+                            ),
+                            ::futures::StreamExt::map(requests, |item| match item {
+                                Ok(item) => Ok(axum::body::Bytes::from(item.to_owned_message().#field)),
+                                Err(e) => Err(::std::io::Error::other(e)),
+                            }),
+                        );
+                    },
+                ),
+                None => (
+                    quote! { request: ::connectrpc::ServiceRequest<'_, #input> },
+                    quote! {
+                        let request = request.to_owned_message();
+                        #validation
+                    },
+                ),
+            };
+            let args = match &chunks {
+                Some(_) => quote! { request, Box::pin(contents), context },
+                None => quote! { request, context },
+            };
             let (output, call) = match method.output_type() {
                 // A server stream: the handler's stream, with its errors as Connect errors.
                 Some(output) if method.plan.metadata.server_streaming => (
@@ -92,7 +137,7 @@ pub(super) fn generate(service: &ServiceHandler<'_>, template: &str) -> Result<S
                     quote! {
                         let stream = self
                             .handler
-                            .#name(request, context)
+                            .#name(#args)
                             .await
                             .map_err(::core::convert::Into::<::connectrpc::ConnectError>::into)?;
                         let stream = ::futures::StreamExt::map(stream, |message| {
@@ -106,7 +151,7 @@ pub(super) fn generate(service: &ServiceHandler<'_>, template: &str) -> Result<S
                     quote! {
                         let answer = self
                             .handler
-                            .#name(request, context)
+                            .#name(#args)
                             .await
                             .map_err(::core::convert::Into::<::connectrpc::ConnectError>::into)?;
                         ::core::result::Result::Ok(::connectrpc::Response::new(answer))
@@ -116,7 +161,7 @@ pub(super) fn generate(service: &ServiceHandler<'_>, template: &str) -> Result<S
                     quote! { ::buffa_types::google::protobuf::Empty },
                     quote! {
                         self.handler
-                            .#name(request, context)
+                            .#name(#args)
                             .await
                             .map_err(::core::convert::Into::<::connectrpc::ConnectError>::into)?;
                         ::core::result::Result::Ok(::connectrpc::Response::new(
@@ -130,11 +175,10 @@ pub(super) fn generate(service: &ServiceHandler<'_>, template: &str) -> Result<S
                 async fn #name(
                     &self,
                     ctx: ::connectrpc::RequestContext,
-                    request: ::connectrpc::ServiceRequest<'_, #input>,
+                    #request_param,
                 ) -> ::connectrpc::ServiceResult<#output> {
                     let context = Cx::from_request_context(&ctx)?;
-                    let request = request.to_owned_message();
-                    #validation
+                    #read_request
                     #call
                 }
             }

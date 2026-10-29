@@ -57,6 +57,24 @@ impl CatalogClient {
         StreamCatalogEventsBuilder::new(self.client.clone(), &self.catalog_name)
     }
 
+    /// Read the export of a catalog: over REST the raw bytes of the answer, chunk by chunk, with
+    /// the status and the headers from the first chunk.
+    pub fn download_catalog_export(&self) -> DownloadCatalogExportBuilder {
+        DownloadCatalogExportBuilder::new(self.client.clone(), &self.catalog_name)
+    }
+
+    /// Write the import of a catalog: over REST the raw request body, chunk by chunk.
+    pub fn upload_catalog_import(
+        &self,
+        contents: Vec<u8>,
+    ) -> UploadCatalogImportBuilder {
+        UploadCatalogImportBuilder::new(
+            self.client.clone(),
+            &self.catalog_name,
+            contents,
+        )
+    }
+
     /// Access a `schema` within this resource.
     pub fn schema(
         &self,

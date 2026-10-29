@@ -168,10 +168,25 @@ fn generate_request_builder(
     let client_type_ident = service.low_level_client_type(protocol);
     let method_name = format_ident!("{}", method.plan.handler_function_name);
 
+    // The raw body of a client stream: a stream of bytes next to the request, not a field of it.
+    let stream_field = method
+        .plan
+        .metadata
+        .client_streaming
+        .then_some(method.plan.raw_request_body.as_deref())
+        .flatten()
+        .map(crate::utils::field_ident);
     // Constructor params: all required parameters (path + required body fields)
-    let required_params: Vec<&RequestParam> = method.required_parameters().collect();
+    let required_params: Vec<&RequestParam> = method
+        .required_parameters()
+        .filter(|p| stream_field.as_ref().is_none_or(|f| *f != p.name()))
+        .collect();
     // Optional body fields get with_* setter methods (handles oneof variant expansion)
     let (_, optional_body) = method.split_body_fields();
+    let optional_body: Vec<_> = optional_body
+        .into_iter()
+        .filter(|f| stream_field.as_ref().is_none_or(|s| *s != f.name))
+        .collect();
     // Optional query params also get simple with_* setter methods
     let optional_query: Vec<&RequestParam> = method
         .optional_parameters()
@@ -184,8 +199,9 @@ fn generate_request_builder(
     // needs filling. When the constructor already sets every field (a prost
     // request with only required params), the spread trips `clippy::needless_update`.
     let has_optional_fields = !optional_body.is_empty() || !optional_query.is_empty();
-    let needs_default_spread =
-        has_optional_fields || matches!(method.config.runtime, Runtime::Buffa);
+    let needs_default_spread = has_optional_fields
+        || stream_field.is_some()
+        || matches!(method.config.runtime, Runtime::Buffa);
 
     // Generate constructor
     let constructor = generate_constructor(
@@ -194,6 +210,7 @@ fn generate_request_builder(
         &client_type_ident,
         &required_params,
         needs_default_spread,
+        stream_field.as_ref(),
     );
 
     // Generate with_* methods: body fields first (handles oneof variants), then query params
@@ -230,13 +247,22 @@ fn generate_request_builder(
     };
 
     // Generate IntoFuture implementation
-    let into_future_impl = generate_into_future_impl(&builder_ident, &result_type, &method_name);
+    let into_future_impl = generate_into_future_impl(
+        &builder_ident,
+        &result_type,
+        &method_name,
+        stream_field.as_ref(),
+    );
+    let stream_member = stream_field.as_ref().map(|field| {
+        quote! { #field: super::super::ByteStream, }
+    });
 
     let tokens = quote! {
         #[doc = #builder_doc]
         pub struct #builder_ident {
             client: #client_type_ident,
             request: #request_type_ident,
+            #stream_member
         }
 
         impl #builder_ident {
@@ -260,11 +286,18 @@ fn generate_constructor(
     client_type_ident: &proc_macro2::Ident,
     required_params: &[&RequestParam],
     needs_default_spread: bool,
+    stream_field: Option<&proc_macro2::Ident>,
 ) -> TokenStream {
     let param_list = required_params.iter().map(|param| {
         let field_ident = param.field_ident();
         let param_type = method.field_type(param.field_type(), RenderContext::Constructor);
         quote! { #field_ident: #param_type }
+    });
+    // The stream of bytes of a client stream, after the request's fields.
+    let stream_param =
+        stream_field.map(|field| quote! { , #field: impl super::super::IntoByteStream });
+    let stream_init = stream_field.map(|field| {
+        quote! { , #field: super::super::IntoByteStream::into_byte_stream(#field) }
     });
 
     let field_assignments = required_params.iter().map(|param| {
@@ -292,12 +325,12 @@ fn generate_constructor(
     quote! {
         #[doc = " Create a new builder instance."]
         #[doc = #obtain_doc]
-        pub(crate) fn new(client: #client_type_ident, #(#param_list),*) -> Self {
+        pub(crate) fn new(client: #client_type_ident, #(#param_list),* #stream_param) -> Self {
             let request = #request_type_ident {
                 #(#field_assignments,)*
                 #default_spread
             };
-            Self { client, request }
+            Self { client, request #stream_init }
         }
     }
 }
@@ -471,7 +504,10 @@ fn generate_into_future_impl(
     builder_ident: &proc_macro2::Ident,
     result_type: &TokenStream,
     method_name: &proc_macro2::Ident,
+    stream_field: Option<&proc_macro2::Ident>,
 ) -> TokenStream {
+    let stream_take = stream_field.map(|field| quote! { let #field = self.#field; });
+    let stream_arg = stream_field.map(|field| quote! { , #field });
     quote! {
         impl IntoFuture for #builder_ident {
             type Output = Result<#result_type>;
@@ -480,7 +516,8 @@ fn generate_into_future_impl(
             fn into_future(self) -> Self::IntoFuture {
                 let client = self.client;
                 let request = self.request;
-                Box::pin(async move { client.#method_name(&request).await })
+                #stream_take
+                Box::pin(async move { client.#method_name(&request #stream_arg).await })
             }
         }
     }
@@ -598,6 +635,7 @@ mod tests {
                 request_header: None,
                 emit_unpopulated: false,
                 raw_body: false,
+                http_status: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: false,
@@ -616,6 +654,7 @@ mod tests {
                 request_header: None,
                 emit_unpopulated: false,
                 raw_body: false,
+                http_status: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: true,
@@ -634,6 +673,7 @@ mod tests {
                 request_header: None,
                 emit_unpopulated: false,
                 raw_body: false,
+                http_status: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::Map(
                         Box::new(UnifiedType {

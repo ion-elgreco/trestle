@@ -251,8 +251,8 @@ fn validation(method: &MethodHandler<'_>, extractors: &Extractors) -> TokenStrea
 /// an extractor per request message. Methods that share a request message share its extractor
 /// when they read the message the same way (the same path parameters, query, headers and
 /// body). Left out, for the app to write by hand: a method that sends or reads a raw body
-/// (`(olai.trestle.v1.raw_body)`), and a method whose request message another method of the
-/// service reads in another way.
+/// (`(olai.trestle.v1.raw_body)`) in one message rather than as a stream, and a method whose
+/// request message another method of the service reads in another way.
 pub(super) fn server_methods<'a>(service: &'a ServiceHandler<'a>) -> Vec<MethodHandler<'a>> {
     let extractors = Extractors::of(service.config);
     // The extractor of each request message, by message.
@@ -260,7 +260,9 @@ pub(super) fn server_methods<'a>(service: &'a ServiceHandler<'a>) -> Vec<MethodH
     service
         .rest_methods()
         .filter(|method| {
-            if method.plan.raw_request_body.is_some() || method.plan.raw_response_body.is_some() {
+            if (method.plan.raw_request_body.is_some() || method.plan.raw_response_body.is_some())
+                && !method.streams_raw_body()
+            {
                 return false;
             }
             let input = &method.plan.metadata.input_type;
@@ -284,9 +286,11 @@ pub(super) fn server_methods<'a>(service: &'a ServiceHandler<'a>) -> Vec<MethodH
 }
 
 /// Whether the request is read from the request parts alone (path and query, `FromRequestParts`)
-/// rather than with a body (`FromRequest`). A GET with a body reads the body.
+/// rather than with a body (`FromRequest`). A GET with a body reads the body. A client stream
+/// reads its message from the parts: the body is the stream of its chunks, which the route reads.
 fn extracts_from_parts(method: &MethodHandler<'_>) -> bool {
-    method.plan.needs_request_parts && method.plan.body_fields().next().is_none()
+    method.plan.metadata.client_streaming
+        || (method.plan.needs_request_parts && method.plan.body_fields().next().is_none())
 }
 
 /// Generate extractor implementation for a specific method.
@@ -319,6 +323,42 @@ fn axum_route_handler_impl(
     let status = response_status
         .map(|status| status_code(method, status))
         .transpose()?;
+    // The status field of the output (`(olai.trestle.v1.http_status)`): the answer's status
+    // when it is set, else the method's, else 200.
+    let fixed_status = status
+        .clone()
+        .unwrap_or_else(|| quote! { axum::http::StatusCode::OK });
+    let status_value = method.status_field().map(|field| {
+        let ident = crate::utils::field_ident(&field.name);
+        match field.unified_type.is_optional {
+            true => quote! { result.#ident },
+            false => quote! { Some(result.#ident) },
+        }
+    });
+    let status_from = |value: TokenStream| {
+        quote! {
+            let status = #value
+                .filter(|status| *status != 0)
+                .and_then(|status| u16::try_from(status).ok())
+                .and_then(|status| axum::http::StatusCode::from_u16(status).ok())
+                .unwrap_or(#fixed_status);
+        }
+    };
+    // A client stream: the request body, as the chunks of the handler's stream.
+    let (stream_param, stream_prelude, args) = if method.plan.metadata.client_streaming {
+        (
+            quote! { body: axum::body::Body, },
+            quote! {
+                let contents = ::futures::StreamExt::map(
+                    axum::body::Body::into_data_stream(body),
+                    |chunk| chunk.map_err(::std::io::Error::other),
+                );
+            },
+            quote! { request, Box::pin(contents), context },
+        )
+    } else {
+        (quote! {}, quote! {}, quote! { request, context })
+    };
 
     let (output, body) = if method.plan.has_response {
         if response_status == Some(204) {
@@ -334,9 +374,10 @@ fn axum_route_handler_impl(
             .map(|field| header_value(method, field))
             .collect::<crate::error::Result<Vec<_>>>()?;
         if method.plan.metadata.server_streaming {
-            // A server stream over REST: an NDJSON body, one line per message. The status, and
-            // the headers that come from the first message, go out before the body; an error
-            // before the first message is the answer, one after it ends the body.
+            // A server stream over REST: an NDJSON body, one line per message, or the raw body
+            // of each message as the bytes of the answer. The status, and the headers that come
+            // from the first message, go out before the body; an error before the first message
+            // is the answer, one after it ends the body.
             let header_sets = header_values.iter().map(|header| {
                 let (name, value) = (&header.name, header.option());
                 quote! {
@@ -345,27 +386,47 @@ fn axum_route_handler_impl(
                     }
                 }
             });
-            let status = status.map(|status| quote! { #status, });
+            let (status_let, status) = match status_value {
+                Some(value) => (
+                    status_from(quote! { first.as_ref().and_then(|result| #value) }),
+                    Some(quote! { status, }),
+                ),
+                None => (quote! {}, status.map(|status| quote! { #status, })),
+            };
+            let (content_type, chunk) = match &method.plan.raw_response_body {
+                Some(field) => {
+                    let field = crate::utils::field_ident(field);
+                    (
+                        quote! { "application/octet-stream" },
+                        quote! { Ok(message.#field.into()) },
+                    )
+                }
+                None => (
+                    quote! { "application/x-ndjson" },
+                    quote! {
+                        let mut line = serde_json::to_vec(&message)?;
+                        line.push(b'\n');
+                        Ok(line.into())
+                    },
+                ),
+            };
             (
                 quote! { axum::response::Response },
                 quote! {
-                    let mut stream = handler.#handler_method(request, context).await?;
+                    let mut stream = handler.#handler_method(#args).await?;
                     let first = ::futures::StreamExt::next(&mut stream).await.transpose()?;
                     let mut headers = axum::http::HeaderMap::new();
                     headers.insert(
                         axum::http::header::CONTENT_TYPE,
-                        axum::http::HeaderValue::from_static("application/x-ndjson"),
+                        axum::http::HeaderValue::from_static(#content_type),
                     );
                     #(#header_sets)*
-                    let lines = ::futures::StreamExt::map(
+                    #status_let
+                    let chunks = ::futures::StreamExt::map(
                         ::futures::StreamExt::chain(::futures::stream::iter(first.map(Ok)), stream),
                         |message| -> ::core::result::Result<axum::body::Bytes, axum::BoxError> {
                             match message {
-                                Ok(message) => {
-                                    let mut line = serde_json::to_vec(&message)?;
-                                    line.push(b'\n');
-                                    Ok(line.into())
-                                }
+                                Ok(message) => { #chunk }
                                 Err(_) => Err("the stream failed".into()),
                             }
                         },
@@ -373,19 +434,29 @@ fn axum_route_handler_impl(
                     Ok(axum::response::IntoResponse::into_response((
                         #status
                         headers,
-                        axum::body::Body::from_stream(lines),
+                        axum::body::Body::from_stream(chunks),
                     )))
                 },
             )
         } else {
-            // The answer: the status when it is not 200, the headers when there are some, and
-            // the JSON body.
+            // The answer: the status when it is not 200 or comes from the output, the headers
+            // when there are some, and the JSON body.
             let mut types = Vec::new();
             let mut values = Vec::new();
-            if let Some(status) = &status {
-                types.push(quote! { axum::http::StatusCode });
-                values.push(status.clone());
-            }
+            let status_let = match status_value {
+                Some(value) => {
+                    types.push(quote! { axum::http::StatusCode });
+                    values.push(quote! { status });
+                    status_from(value)
+                }
+                None => {
+                    if let Some(status) = &status {
+                        types.push(quote! { axum::http::StatusCode });
+                        values.push(status.clone());
+                    }
+                    quote! {}
+                }
+            };
             let headers = if header_values.is_empty() {
                 quote! {}
             } else {
@@ -414,7 +485,8 @@ fn axum_route_handler_impl(
             (
                 output,
                 quote! {
-                    let result = handler.#handler_method(request, context).await?;
+                    let result = handler.#handler_method(#args).await?;
+                    #status_let
                     #headers
                     Ok(#answer)
                 },
@@ -437,7 +509,7 @@ fn axum_route_handler_impl(
         (
             output,
             quote! {
-                handler.#handler_method(request, context).await?;
+                handler.#handler_method(#args).await?;
                 Ok(#answer)
             },
         )
@@ -447,11 +519,13 @@ fn axum_route_handler_impl(
             State(handler): State<T>,
             context: Cx,
             request: #input_type,
+            #stream_param
         ) -> Result<#output>
         where
             T: #handler_trait_ident<Cx> + Clone + Send + Sync + 'static,
             Cx: axum::extract::FromRequestParts<T> + Send,
         {
+            #stream_prelude
             #body
         }
     })
@@ -616,6 +690,16 @@ fn from_request_parts_impl(method: &MethodHandler<'_>, extractors: &Extractors) 
     } else {
         quote! { parts }
     };
+    // The body fields of a client stream are not read here: its raw body is the stream of
+    // chunks, which the route reads.
+    let stream_defaults = method
+        .plan
+        .body_fields()
+        .filter(|_| method.plan.metadata.client_streaming)
+        .map(|field| {
+            let ident = crate::utils::field_ident(&field.name);
+            quote! { let #ident = ::core::default::Default::default(); }
+        });
 
     quote! {
         impl<S: Send + Sync> axum::extract::FromRequestParts<S> for #input_type {
@@ -628,6 +712,7 @@ fn from_request_parts_impl(method: &MethodHandler<'_>, extractors: &Extractors) 
                 #path_extractions
                 #query_extractions
                 #header_extractions
+                #(#stream_defaults)*
 
                 let request = #input_type {
                     #field_assignments
@@ -933,6 +1018,7 @@ mod tests {
                 input_type: "ListThingsRequest".to_string(),
                 output_type: "ListThingsResponse".to_string(),
                 server_streaming: false,
+                client_streaming: false,
                 no_side_effects: false,
                 response_status: None,
                 operation: None,
@@ -963,6 +1049,7 @@ mod tests {
             raw_request_body: None,
             raw_response_body: None,
             request_headers: Vec::new(),
+            status_field: None,
         }
     }
 

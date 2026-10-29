@@ -377,6 +377,87 @@ impl ::core::convert::From<PyCatalogEvent> for super::catalog::v1::CatalogEvent 
     }
 }
 
+/// A chunk of the export of a catalog.
+#[::pyo3::pyclass(name = "CatalogExportChunk", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PyCatalogExportChunk(pub super::catalog::v1::CatalogExportChunk);
+#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
+#[::pyo3::pymethods]
+impl PyCatalogExportChunk {
+    #[new]
+    #[pyo3(signature = (contents = None, status = None, size = None))]
+    fn new(
+        contents: ::core::option::Option<::pyo3::pybacked::PyBackedBytes>,
+        status: ::core::option::Option<i32>,
+        size: ::core::option::Option<i64>,
+    ) -> Self {
+        let mut inner = <super::catalog::v1::CatalogExportChunk as ::core::default::Default>::default();
+        if let ::core::option::Option::Some(value) = contents {
+            inner.contents = value.to_vec();
+        }
+        {
+            let value = status;
+            inner.status = value;
+        }
+        {
+            let value = size;
+            inner.size = value;
+        }
+        Self(inner)
+    }
+
+    /// The bytes of the chunk.
+    #[getter]
+    fn contents(&self) -> ::std::borrow::Cow<'_, [u8]> {
+        ::std::borrow::Cow::Borrowed(&self.0.contents)
+    }
+
+    /// The status of the answer: 206 for a range.
+    #[getter]
+    fn status(&self) -> ::core::option::Option<i32> {
+        self.0.status
+    }
+
+    /// The size of the export, in the `Content-Length` header.
+    #[getter]
+    fn size(&self) -> ::core::option::Option<i64> {
+        self.0.size
+    }
+
+    #[setter(contents)]
+    fn set_contents(&mut self, value: ::pyo3::pybacked::PyBackedBytes) {
+        self.0.contents = value.to_vec();
+    }
+
+    #[setter(status)]
+    fn set_status(&mut self, value: ::core::option::Option<i32>) {
+        self.0.status = value;
+    }
+
+    #[setter(size)]
+    fn set_size(&mut self, value: ::core::option::Option<i64>) {
+        self.0.size = value;
+    }
+
+    fn __repr__(&self) -> ::std::string::String {
+        ::std::format!("{:?}", self.0)
+    }
+}
+
+impl ::core::convert::From<super::catalog::v1::CatalogExportChunk>
+for PyCatalogExportChunk {
+    fn from(value: super::catalog::v1::CatalogExportChunk) -> Self {
+        Self(value)
+    }
+}
+
+impl ::core::convert::From<PyCatalogExportChunk>
+for super::catalog::v1::CatalogExportChunk {
+    fn from(value: PyCatalogExportChunk) -> Self {
+        value.0
+    }
+}
+
 #[::pyo3::pyclass(name = "CatalogStatus", eq, from_py_object)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalogStatus(pub super::catalog::v1::CatalogStatus);
@@ -597,6 +678,71 @@ for PyDeleteCatalogResponse {
 impl ::core::convert::From<PyDeleteCatalogResponse>
 for super::catalog::v1::DeleteCatalogResponse {
     fn from(value: PyDeleteCatalogResponse) -> Self {
+        value.0
+    }
+}
+
+#[::pyo3::pyclass(name = "DownloadCatalogExportRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PyDownloadCatalogExportRequest(
+    pub super::catalog::v1::DownloadCatalogExportRequest,
+);
+#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
+#[::pyo3::pymethods]
+impl PyDownloadCatalogExportRequest {
+    #[new]
+    #[pyo3(signature = (name = None, range = None))]
+    fn new(
+        name: ::core::option::Option<::std::string::String>,
+        range: ::core::option::Option<::std::string::String>,
+    ) -> Self {
+        let mut inner = <super::catalog::v1::DownloadCatalogExportRequest as ::core::default::Default>::default();
+        if let ::core::option::Option::Some(value) = name {
+            inner.name = value;
+        }
+        {
+            let value = range;
+            inner.range = value;
+        }
+        Self(inner)
+    }
+
+    #[getter]
+    fn name(&self) -> ::std::string::String {
+        self.0.name.clone()
+    }
+
+    /// The bytes to read, in the `Range` header.
+    #[getter]
+    fn range(&self) -> ::core::option::Option<::std::string::String> {
+        self.0.range.clone()
+    }
+
+    #[setter(name)]
+    fn set_name(&mut self, value: ::std::string::String) {
+        self.0.name = value;
+    }
+
+    #[setter(range)]
+    fn set_range(&mut self, value: ::core::option::Option<::std::string::String>) {
+        self.0.range = value;
+    }
+
+    fn __repr__(&self) -> ::std::string::String {
+        ::std::format!("{:?}", self.0)
+    }
+}
+
+impl ::core::convert::From<super::catalog::v1::DownloadCatalogExportRequest>
+for PyDownloadCatalogExportRequest {
+    fn from(value: super::catalog::v1::DownloadCatalogExportRequest) -> Self {
+        Self(value)
+    }
+}
+
+impl ::core::convert::From<PyDownloadCatalogExportRequest>
+for super::catalog::v1::DownloadCatalogExportRequest {
+    fn from(value: PyDownloadCatalogExportRequest) -> Self {
         value.0
     }
 }
@@ -1297,6 +1443,70 @@ for PyUpdateCatalogRequest {
 impl ::core::convert::From<PyUpdateCatalogRequest>
 for super::catalog::v1::UpdateCatalogRequest {
     fn from(value: PyUpdateCatalogRequest) -> Self {
+        value.0
+    }
+}
+
+#[::pyo3::pyclass(name = "UploadCatalogImportRequest", eq, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PyUploadCatalogImportRequest(
+    pub super::catalog::v1::UploadCatalogImportRequest,
+);
+#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
+#[::pyo3::pymethods]
+impl PyUploadCatalogImportRequest {
+    #[new]
+    #[pyo3(signature = (name = None, contents = None))]
+    fn new(
+        name: ::core::option::Option<::std::string::String>,
+        contents: ::core::option::Option<::pyo3::pybacked::PyBackedBytes>,
+    ) -> Self {
+        let mut inner = <super::catalog::v1::UploadCatalogImportRequest as ::core::default::Default>::default();
+        if let ::core::option::Option::Some(value) = name {
+            inner.name = value;
+        }
+        if let ::core::option::Option::Some(value) = contents {
+            inner.contents = value.to_vec();
+        }
+        Self(inner)
+    }
+
+    #[getter]
+    fn name(&self) -> ::std::string::String {
+        self.0.name.clone()
+    }
+
+    /// The bytes of a chunk of the import.
+    #[getter]
+    fn contents(&self) -> ::std::borrow::Cow<'_, [u8]> {
+        ::std::borrow::Cow::Borrowed(&self.0.contents)
+    }
+
+    #[setter(name)]
+    fn set_name(&mut self, value: ::std::string::String) {
+        self.0.name = value;
+    }
+
+    #[setter(contents)]
+    fn set_contents(&mut self, value: ::pyo3::pybacked::PyBackedBytes) {
+        self.0.contents = value.to_vec();
+    }
+
+    fn __repr__(&self) -> ::std::string::String {
+        ::std::format!("{:?}", self.0)
+    }
+}
+
+impl ::core::convert::From<super::catalog::v1::UploadCatalogImportRequest>
+for PyUploadCatalogImportRequest {
+    fn from(value: super::catalog::v1::UploadCatalogImportRequest) -> Self {
+        Self(value)
+    }
+}
+
+impl ::core::convert::From<PyUploadCatalogImportRequest>
+for super::catalog::v1::UploadCatalogImportRequest {
+    fn from(value: PyUploadCatalogImportRequest) -> Self {
         value.0
     }
 }

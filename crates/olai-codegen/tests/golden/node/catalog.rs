@@ -48,6 +48,24 @@ impl NapiCatalogClient {
         let request = self.client.stream_catalog_events();
         request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
     }
+
+    #[napi(catch_unwind)]
+    pub async fn download_catalog_export(
+        &self,
+        range: Option<String>,
+    ) -> napi::Result<Buffer> {
+        let request = self.client.download_catalog_export().with_range(range);
+        request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
+    }
+
+    #[napi(catch_unwind)]
+    pub async fn upload_catalog_import(
+        &self,
+        contents: Vec<u8>,
+    ) -> napi::Result<Buffer> {
+        let request = self.client.upload_catalog_import(contents);
+        request.await.map(|item| Buffer::from(item.encode_to_vec())).default_error()
+    }
 }
 
 impl NapiCatalogClient {

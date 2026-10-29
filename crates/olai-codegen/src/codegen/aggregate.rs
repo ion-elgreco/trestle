@@ -349,6 +349,12 @@ fn builder_params(
         .iter()
         .map(|p| {
             let ident = p.field_ident();
+            // The raw body of a client stream is a stream of bytes, or bytes in hand.
+            if method.plan.metadata.client_streaming
+                && method.plan.raw_request_body.as_deref() == Some(p.name())
+            {
+                return quote! { #ident: impl super::IntoByteStream };
+            }
             // Match the builder's `::new` param types (RenderContext::Constructor) so the forward
             // call type-checks: `impl Into<String>` for required strings, concrete types otherwise.
             let ty = method.field_type(p.field_type(), RenderContext::Constructor);

@@ -26,6 +26,11 @@ extend google.protobuf.FieldOptions {
   // The HTTP request header that this field of a request message goes in, instead of the query
   // or the body, such as `Range`. On a `string` field.
   string request_header = 51004;
+
+  // The field that holds the HTTP status of the answer: an `int32` of a response message. A
+  // served route answers with it when it is not 0 (a stream, from its first message); the
+  // generated clients fill it from the response. It is not in the JSON body.
+  bool http_status = 51007;
 }
 
 extend google.protobuf.ServiceOptions {

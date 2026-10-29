@@ -147,3 +147,46 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for StreamCatalogEventsR
         Ok(request)
     }
 }
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S>
+for DownloadCatalogExportRequest {
+    type Rejection = axum::response::Response;
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Path(name) = parts
+            .extract::<axum::extract::Path<String>>()
+            .await
+            .map_err(axum::response::IntoResponse::into_response)?;
+        let range = parts
+            .headers
+            .get("Range")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let request = DownloadCatalogExportRequest {
+            name,
+            range,
+        };
+        Ok(request)
+    }
+}
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for UploadCatalogImportRequest {
+    type Rejection = axum::response::Response;
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::extract::Path(name) = parts
+            .extract::<axum::extract::Path<String>>()
+            .await
+            .map_err(axum::response::IntoResponse::into_response)?;
+        let contents = ::core::default::Default::default();
+        let request = UploadCatalogImportRequest {
+            name,
+            contents,
+        };
+        Ok(request)
+    }
+}

@@ -129,6 +129,8 @@ pub(crate) fn generate(
             Url(::url::ParseError),
             /// A body could not be written or read as JSON.
             Json(::serde_json::Error),
+            /// A stream of bytes given to the client, such as the contents of an upload, failed.
+            Io(::std::io::Error),
         }
 
         impl Error {
@@ -162,6 +164,7 @@ pub(crate) fn generate(
                     #transport_display
                     Error::Url(e) => write!(f, "invalid URL: {e}"),
                     Error::Json(e) => write!(f, "invalid JSON: {e}"),
+                    Error::Io(e) => write!(f, "the stream of bytes failed: {e}"),
                 }
             }
         }
@@ -174,6 +177,7 @@ pub(crate) fn generate(
                     #transport_source
                     Error::Url(e) => Some(e),
                     Error::Json(e) => Some(e),
+                    Error::Io(e) => Some(e),
                 }
             }
         }
@@ -201,6 +205,12 @@ pub(crate) fn generate(
         impl ::core::convert::From<::serde_json::Error> for Error {
             fn from(e: ::serde_json::Error) -> Self {
                 Error::Json(e)
+            }
+        }
+
+        impl ::core::convert::From<::std::io::Error> for Error {
+            fn from(e: ::std::io::Error) -> Self {
+                Error::Io(e)
             }
         }
 

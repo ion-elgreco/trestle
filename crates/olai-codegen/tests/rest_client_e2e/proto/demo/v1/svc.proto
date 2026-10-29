@@ -300,6 +300,42 @@ service ProbeService {
   rpc GetBlob(GetBlobRequest) returns (Blob) {
     option (google.api.http) = {get: "/api/v1/blobs/{path=**}"};
   }
+
+  // Read a blob chunk by chunk: the raw response body as a stream, with the status and the
+  // headers of the answer on every chunk.
+  rpc StreamBlob(GetBlobRequest) returns (stream BlobChunk) {
+    option (google.api.http) = {get: "/api/v1/blob-streams/{path=**}"};
+  }
+
+  // Store a blob chunk by chunk: the raw request body as a stream.
+  rpc UploadBlob(stream UploadBlobRequest) returns (Empty) {
+    option (google.api.http) = {
+      put: "/api/v1/blob-streams/{path=**}"
+      body: "data"
+    };
+  }
+}
+
+// A chunk of a blob.
+message BlobChunk {
+  // The bytes of the chunk.
+  bytes data = 1 [(olai.trestle.v1.raw_body) = true];
+  // The status of the answer: 206 for a range.
+  optional int32 status = 2 [(olai.trestle.v1.http_status) = true];
+  // The size, from the `Content-Length` header.
+  optional int64 size = 3 [(olai.trestle.v1.response_header) = "Content-Length"];
+}
+
+message UploadBlobRequest {
+  // The path of the blob, over several segments.
+  string path = 1 [(google.api.field_behavior) = REQUIRED];
+  // The bytes of a chunk of the blob.
+  bytes data = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (olai.trestle.v1.raw_body) = true
+  ];
+  // Whether to replace a blob that is there.
+  optional bool overwrite = 3;
 }
 
 // Exchange tokens.

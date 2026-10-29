@@ -255,6 +255,10 @@ pub struct MethodPlan {
     /// with their headers. They are query parameters to the builders and bindings, but not in
     /// the URL.
     pub request_headers: Vec<(String, String)>,
+    /// The response field that holds the HTTP status of the answer
+    /// (`(olai.trestle.v1.http_status)`): a served route answers with it when it is not 0, the
+    /// REST client fills it from the response.
+    pub status_field: Option<String>,
 }
 
 impl MethodPlan {

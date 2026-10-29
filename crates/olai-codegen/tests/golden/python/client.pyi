@@ -38,6 +38,24 @@ class CatalogEvent():
     def __init__(self, kind: Optional[str] = None, version: Optional[int] = None) -> None:
         ...
 
+class CatalogExportChunk():
+    """A chunk of the export of a catalog."""
+    contents: bytes
+    """The bytes of the chunk."""
+    size: Optional[int]
+    """The size of the export, in the `Content-Length` header."""
+    status: Optional[int]
+    """The status of the answer: 206 for a range."""
+
+    def __init__(
+
+            self,
+            contents: Optional[bytes] = None,
+            size: Optional[int] = None,
+            status: Optional[int] = None
+        ) -> None:
+        ...
+
 class CatalogStatus():
     etag: str
     """The entity tag, in the `ETag` header."""
@@ -51,6 +69,9 @@ class CatalogToken():
 
     def __init__(self, token: Optional[str] = None) -> None:
         ...
+
+class DeleteCatalogResponse():
+    ...
 
 class DeleteTagAssignmentResponse():
     ...

@@ -60,6 +60,20 @@ service CatalogService {
   rpc StreamCatalogEvents(StreamCatalogEventsRequest) returns (stream CatalogEvent) {
     option (google.api.http) = {get: "/catalogs/{name}/events"};
   }
+
+  // Read the export of a catalog: over REST the raw bytes of the answer, chunk by chunk, with
+  // the status and the headers from the first chunk.
+  rpc DownloadCatalogExport(DownloadCatalogExportRequest) returns (stream CatalogExportChunk) {
+    option (google.api.http) = {get: "/catalogs/{name}/export"};
+  }
+
+  // Write the import of a catalog: over REST the raw request body, chunk by chunk.
+  rpc UploadCatalogImport(stream UploadCatalogImportRequest) returns (DeleteCatalogResponse) {
+    option (google.api.http) = {
+      put: "/catalogs/{name}/import"
+      body: "contents"
+    };
+  }
 }
 
 message CreateCatalogRequest {
@@ -120,4 +134,26 @@ message CatalogEvent {
   string kind = 1;
   // The version of the catalog, in the `Catalog-Version` header of the answer.
   int64 version = 2 [(olai.trestle.v1.response_header) = "Catalog-Version"];
+}
+
+message DownloadCatalogExportRequest {
+  string name = 1;
+  // The bytes to read, in the `Range` header.
+  optional string range = 2 [(olai.trestle.v1.request_header) = "Range"];
+}
+
+// A chunk of the export of a catalog.
+message CatalogExportChunk {
+  // The bytes of the chunk.
+  bytes contents = 1 [(olai.trestle.v1.raw_body) = true];
+  // The status of the answer: 206 for a range.
+  optional int32 status = 2 [(olai.trestle.v1.http_status) = true];
+  // The size of the export, in the `Content-Length` header.
+  optional int64 size = 3 [(olai.trestle.v1.response_header) = "Content-Length"];
+}
+
+message UploadCatalogImportRequest {
+  string name = 1;
+  // The bytes of a chunk of the import.
+  bytes contents = 2 [(olai.trestle.v1.raw_body) = true];
 }

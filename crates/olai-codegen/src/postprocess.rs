@@ -73,7 +73,8 @@ pub struct PackageFields {
     pub json_names: BTreeMap<String, String>,
     /// The fields with `(olai.trestle.v1.emit_unpopulated)`.
     pub emit_unpopulated: BTreeSet<String>,
-    /// The fields with `(olai.trestle.v1.response_header)`.
+    /// The fields with `(olai.trestle.v1.response_header)` or `(olai.trestle.v1.http_status)`:
+    /// out of the JSON body.
     pub response_headers: BTreeSet<String>,
 }
 
@@ -107,7 +108,7 @@ pub fn field_options(
                     .emit_unpopulated
                     .insert(key.clone());
             }
-            if field.response_header.is_some() {
+            if field.response_header.is_some() || field.http_status {
                 packages
                     .entry(package.clone())
                     .or_default()

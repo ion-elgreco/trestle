@@ -2300,6 +2300,7 @@ mod tests {
             request_header: None,
             emit_unpopulated: false,
             raw_body: false,
+            http_status: false,
             unified_type: ty,
             documentation: None,
             oneof_variants: None,

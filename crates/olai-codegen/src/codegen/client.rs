@@ -152,15 +152,13 @@ pub(crate) fn connect_side(service: &ServiceHandler<'_>) -> Option<ConnectSide> 
     })
 }
 
-/// Whether the method is called over Connect when the client prefers it: a unary call with a
-/// JSON body or none, answered with one message or nothing. The others stay REST: raw bodies,
-/// request headers, streams, and the existence checks (`HEAD`).
+/// Whether the method is called over Connect when the client prefers it: a call with a message
+/// or a stream of them each way. The others stay REST: a raw body in one message, and the
+/// existence checks (`HEAD`).
 fn over_connect(method: &MethodHandler<'_>) -> bool {
+    let raw = method.plan.raw_request_body.is_some() || method.plan.raw_response_body.is_some();
     method.input_type().is_some()
-        && method.plan.raw_request_body.is_none()
-        && method.plan.raw_response_body.is_none()
-        && method.plan.request_headers.is_empty()
-        && !method.plan.metadata.server_streaming
+        && (!raw || method.streams_raw_body())
         && !method.is_existence_check()
 }
 
@@ -234,6 +232,18 @@ pub fn client_method(
     } else {
         format_ident!("_request")
     };
+    // The raw body of a client stream: a stream of bytes next to the request.
+    let chunks = method
+        .plan
+        .metadata
+        .client_streaming
+        .then_some(method.plan.raw_request_body.as_deref())
+        .flatten()
+        .map(crate::utils::field_ident);
+    let stream_param = chunks
+        .as_ref()
+        .map(|field| quote! { , #field: super::super::ByteStream });
+    let stream_arg = chunks.as_ref().map(|field| quote! { , #field });
     // Over Connect, when the client prefers it: the call of connect-rust's client, with the
     // request cloned (it takes it by value) and the answer taken as the owned message.
     let over_connect_name = format_ident!("{}_over_connect", method_name);
@@ -243,33 +253,118 @@ pub fn client_method(
             #cfg
             {
                 if self.protocol == super::super::Protocol::Connect {
-                    return self.#over_connect_name(request).await;
+                    return self.#over_connect_name(request #stream_arg).await;
                 }
             }
         }
     });
     let connect_fn = connect.map(|side| {
         let cfg = &side.cfg;
-        let call = match method.output_type() {
-            Some(_) => quote! {
+        let output_type = method.output_type();
+        let answer = match &output_type {
+            Some(_) => quote! { Ok(response.into_owned()) },
+            None => quote! { Ok(()) },
+        };
+        let call = match (&chunks, &output_type) {
+            // A client stream: every message carries the request's fields, and the chunks go in
+            // its raw body. A chunk that fails ends the stream, and its error is the call's.
+            (Some(field), _) => quote! {
+                let failed = ::std::sync::Arc::new(::std::sync::Mutex::new(None));
+                let head = ::futures::stream::iter([#input_type_ident {
+                    #field: ::core::default::Default::default(),
+                    ..request.clone()
+                }]);
+                let messages = ::futures::StreamExt::map(#field, {
+                    let request = request.clone();
+                    let failed = failed.clone();
+                    move |chunk| match chunk {
+                        Ok(chunk) => Some(#input_type_ident {
+                            #field: chunk.to_vec(),
+                            ..request.clone()
+                        }),
+                        Err(e) => {
+                            *failed.lock().expect("no panic holds the lock") = Some(e);
+                            None
+                        }
+                    }
+                });
+                let messages = ::futures::StreamExt::take_while(messages, |message| {
+                    ::std::future::ready(message.is_some())
+                });
+                let messages = ::futures::StreamExt::filter_map(messages, ::std::future::ready);
+                let response = self
+                    .connect()
+                    .#method_name(::futures::StreamExt::chain(head, messages))
+                    .await;
+                if let Some(e) = failed.lock().expect("no panic holds the lock").take() {
+                    return Err(e.into());
+                }
+                let response = response.map_err(#error_module::from_connect_error)?;
+                #answer
+            },
+            // A server stream of raw bytes: the messages as they come.
+            (None, Some(output))
+                if method.plan.metadata.server_streaming
+                    && method.plan.raw_response_body.is_some() =>
+            {
+                quote! {
+                    let stream = self
+                        .connect()
+                        .#method_name(request.clone())
+                        .await
+                        .map_err(#error_module::from_connect_error)?;
+                    Ok(Box::pin(::futures::stream::unfold(
+                        (stream, false),
+                        |(mut stream, failed)| async move {
+                            if failed {
+                                return None;
+                            }
+                            match stream.message::<#output>().await {
+                                Ok(Some(message)) => {
+                                    Some((Ok(message.to_owned_message()), (stream, false)))
+                                }
+                                Ok(None) => None,
+                                Err(e) => Some((
+                                    Err(#error_module::from_connect_error(e)),
+                                    (stream, true),
+                                )),
+                            }
+                        },
+                    )))
+                }
+            }
+            // A server stream of messages: all of them, as the NDJSON lines over REST.
+            (None, Some(output)) if method.plan.metadata.server_streaming => quote! {
+                let mut stream = self
+                    .connect()
+                    .#method_name(request.clone())
+                    .await
+                    .map_err(#error_module::from_connect_error)?;
+                let mut outputs = Vec::new();
+                while let Some(message) = stream
+                    .message::<#output>()
+                    .await
+                    .map_err(#error_module::from_connect_error)?
+                {
+                    outputs.push(message.to_owned_message());
+                }
+                Ok(outputs)
+            },
+            (None, _) => quote! {
                 let response = self
                     .connect()
                     .#method_name(request.clone())
                     .await
                     .map_err(#error_module::from_connect_error)?;
-                Ok(response.into_owned())
-            },
-            None => quote! {
-                self.connect()
-                    .#method_name(request.clone())
-                    .await
-                    .map_err(#error_module::from_connect_error)?;
-                Ok(())
+                #answer
             },
         };
         quote! {
             #cfg
-            async fn #over_connect_name(&self, request: &#input_type_ident) -> Result<#result_type> {
+            async fn #over_connect_name(
+                &self,
+                request: &#input_type_ident #stream_param
+            ) -> Result<#result_type> {
                 #call
             }
         }
@@ -307,7 +402,28 @@ pub fn client_method(
         };
         (copy, quote! { &body })
     };
+    // The stream of a client stream as the body: as it comes, or whole in the browser, whose
+    // requests take no stream.
+    let stream_body = chunks.as_ref().map(|field| {
+        quote! {
+            #[cfg(not(target_arch = "wasm32"))]
+            let body = reqwest::Body::wrap_stream(#field);
+            #[cfg(target_arch = "wasm32")]
+            let body = {
+                let mut whole = Vec::new();
+                let mut chunks = #field;
+                while let Some(chunk) = ::futures::StreamExt::next(&mut chunks).await {
+                    whole.extend_from_slice(&chunk?);
+                }
+                whole
+            };
+        }
+    });
     let body_handling = match (raw_body, method.plan.has_request_body, form_body) {
+        (Some(_), _, _) if chunks.is_some() => quote! {
+            .header("content-type", "application/octet-stream")
+            .body(body)
+        },
         (Some(field), _, _) => quote! {
             .header("content-type", "application/octet-stream")
             .body(request.#field.clone())
@@ -356,11 +472,15 @@ pub fn client_method(
 
     Ok(quote! {
         #doc_attrs
-        pub async fn #method_name(&self, #request_ident: &#input_type_ident) -> Result<#result_type> {
+        pub async fn #method_name(
+            &self,
+            #request_ident: &#input_type_ident #stream_param
+        ) -> Result<#result_type> {
             #connect_branch
             #url_formatting
             #query_handling
             #body_copy
+            #stream_body
             #send
             #not_found
             if !response.status().is_success() {
@@ -392,11 +512,44 @@ fn read_output(
     };
 
     let header_fields = method.response_header_fields();
-    let assignments = header_fields
+    let mut assignments = header_fields
         .iter()
         .map(|field| header_assignment(method, field))
         .collect::<Result<Vec<_>>>()?;
+    // The status field takes the HTTP status of the answer.
+    let status = method.status_field().map(|field| {
+        let ident = crate::utils::field_ident(&field.name);
+        match field.unified_type.is_optional {
+            true => quote! { output.#ident = Some(status); },
+            false => quote! { output.#ident = status; },
+        }
+    });
+    let read_status = status
+        .is_some()
+        .then(|| quote! { let status = i32::from(response.status().as_u16()); });
+    assignments.extend(status);
     if method.plan.metadata.server_streaming {
+        if let Some(field) = &method.plan.raw_response_body {
+            // The chunks of the body as the messages, each with the fields that come from the
+            // headers and the status of the answer.
+            let field_ident = crate::utils::field_ident(field);
+            return Ok(quote! {
+                let headers = response.headers().clone();
+                #read_status
+                let chunks = ::futures::StreamExt::map(
+                    response.bytes_stream(),
+                    move |chunk| -> Result<#output_type> {
+                        let mut output = #output_type {
+                            #field_ident: chunk?.to_vec(),
+                            ..::core::default::Default::default()
+                        };
+                        #(#assignments)*
+                        Ok(output)
+                    },
+                );
+                Ok(Box::pin(chunks))
+            });
+        }
         // The lines of the NDJSON body; the output fields in response headers are set on every
         // message, as the headers are those of the whole answer.
         let parse_line = from_slice(quote! { line });
@@ -413,6 +566,7 @@ fn read_output(
         }
         return Ok(quote! {
             let headers = response.headers().clone();
+            #read_status
             let result = response.bytes().await?;
             #options
             let mut outputs = result
@@ -439,6 +593,7 @@ fn read_output(
         }
         return Ok(quote! {
             let headers = response.headers().clone();
+            #read_status
             let mut output = #output_type {
                 #field_ident: response.bytes().await?.into(),
                 ..::core::default::Default::default()
@@ -449,7 +604,7 @@ fn read_output(
     }
 
     let parse = from_slice(quote! { &result });
-    if header_fields.is_empty() {
+    if assignments.is_empty() {
         return Ok(quote! {
             let result = response.bytes().await?;
             #options
@@ -458,6 +613,7 @@ fn read_output(
     }
     Ok(quote! {
         let headers = response.headers().clone();
+        #read_status
         let result = response.bytes().await?;
         #options
         let mut output: #output_type = if result.trim_ascii().is_empty() {

@@ -6,6 +6,53 @@ pub mod tag_assignments;
 pub use catalog::CatalogClient;
 pub use schema::SchemaClient;
 
+/// The messages of a call that streams them, such as the chunks of a file.
+#[cfg(not(target_arch = "wasm32"))]
+pub type Streamed<T> = ::futures::stream::BoxStream<'static, error::Result<T>>;
+/// The messages of a call that streams them, such as the chunks of a file.
+#[cfg(target_arch = "wasm32")]
+pub type Streamed<T> = ::futures::stream::LocalBoxStream<'static, error::Result<T>>;
+/// The bytes that a call streams, such as the contents of a file to upload.
+#[cfg(not(target_arch = "wasm32"))]
+pub type ByteStream = ::futures::stream::BoxStream<
+    'static,
+    ::std::io::Result<::bytes::Bytes>,
+>;
+/// The bytes that a call streams, such as the contents of a file to upload.
+#[cfg(target_arch = "wasm32")]
+pub type ByteStream = ::futures::stream::LocalBoxStream<
+    'static,
+    ::std::io::Result<::bytes::Bytes>,
+>;
+/// What a call takes as its stream of bytes: a stream, or bytes in hand.
+pub trait IntoByteStream {
+    fn into_byte_stream(self) -> ByteStream;
+}
+
+impl IntoByteStream for ByteStream {
+    fn into_byte_stream(self) -> ByteStream {
+        self
+    }
+}
+
+impl IntoByteStream for ::bytes::Bytes {
+    fn into_byte_stream(self) -> ByteStream {
+        Box::pin(::futures::stream::once(::std::future::ready(Ok(self))))
+    }
+}
+
+impl IntoByteStream for Vec<u8> {
+    fn into_byte_stream(self) -> ByteStream {
+        ::bytes::Bytes::from(self).into_byte_stream()
+    }
+}
+
+impl IntoByteStream for &[u8] {
+    fn into_byte_stream(self) -> ByteStream {
+        ::bytes::Bytes::copy_from_slice(self).into_byte_stream()
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::doc_lazy_continuation)]
 pub mod client;
 #[allow(unused_imports)]

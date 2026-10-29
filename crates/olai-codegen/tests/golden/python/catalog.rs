@@ -82,6 +82,49 @@ impl PyCatalogClient {
             >(result.into_iter().map(PyCatalogEvent::from).collect::<Vec<_>>())
         })
     }
+
+    #[pyo3(signature = (range = None))]
+    pub fn download_catalog_export(
+        &self,
+        py: Python,
+        range: Option<String>,
+    ) -> PyExampleResult<PyCatalogExportChunk> {
+        let request = self.client.download_catalog_export().with_range(range);
+        let runtime = get_runtime(py)?;
+        py.detach(|| {
+            #[allow(clippy::let_unit_value)]
+            let result = runtime
+                .block_on(async move {
+                    let mut chunks = request.into_future().await?;
+                    let mut whole = None;
+                    while let Some(chunk) = ::futures::StreamExt::next(&mut chunks).await
+                    {
+                        let chunk = chunk?;
+                        match &mut whole {
+                            None => whole = Some(chunk),
+                            Some(whole) => whole.contents.extend(chunk.contents),
+                        }
+                    }
+                    Ok(whole.unwrap_or_default())
+                })?;
+            Ok::<_, PyExampleError>(PyCatalogExportChunk::from(result))
+        })
+    }
+
+    #[pyo3(signature = (contents))]
+    pub fn upload_catalog_import(
+        &self,
+        py: Python,
+        contents: ::pyo3::pybacked::PyBackedBytes,
+    ) -> PyExampleResult<PyDeleteCatalogResponse> {
+        let request = self.client.upload_catalog_import(contents.to_vec());
+        let runtime = get_runtime(py)?;
+        py.detach(|| {
+            #[allow(clippy::let_unit_value)]
+            let result = runtime.block_on(request.into_future())?;
+            Ok::<_, PyExampleError>(PyDeleteCatalogResponse::from(result))
+        })
+    }
 }
 
 impl PyCatalogClient {

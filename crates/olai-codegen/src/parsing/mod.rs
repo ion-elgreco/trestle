@@ -59,6 +59,7 @@ const TRESTLE_RESPONSE_HEADER_EXTENSION: u32 = 51001;
 const TRESTLE_EMIT_UNPOPULATED_EXTENSION: u32 = 51002;
 const TRESTLE_RAW_BODY_EXTENSION: u32 = 51003;
 const TRESTLE_REQUEST_HEADER_EXTENSION: u32 = 51004;
+const TRESTLE_HTTP_STATUS_EXTENSION: u32 = 51007;
 /// `olai.trestle.v1.connect`, on a service.
 const TRESTLE_CONNECT_EXTENSION: u32 = 51005;
 /// `olai.trestle.v1.response_status`, on a method.

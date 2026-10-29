@@ -296,3 +296,75 @@ impl IntoFuture for StreamCatalogEventsBuilder {
         Box::pin(async move { client.stream_catalog_events(&request).await })
     }
 }
+
+/// Builder for catalog export
+pub struct DownloadCatalogExportBuilder {
+    client: CatalogServiceClient,
+    request: DownloadCatalogExportRequest,
+}
+
+impl DownloadCatalogExportBuilder {
+    /// Create a new builder instance.
+    /// Obtain via the corresponding method on `CatalogServiceClient`.
+    pub(crate) fn new(client: CatalogServiceClient, name: impl Into<String>) -> Self {
+        let request = DownloadCatalogExportRequest {
+            name: name.into(),
+            ..Default::default()
+        };
+        Self { client, request }
+    }
+
+    /// The bytes to read, in the `Range` header.
+    pub fn with_range(mut self, range: impl Into<Option<String>>) -> Self {
+        self.request.range = range.into();
+        self
+    }
+}
+
+impl IntoFuture for DownloadCatalogExportBuilder {
+    type Output = Result<super::super::Streamed<CatalogExportChunk>>;
+    type IntoFuture = BoxFut<'static, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        let client = self.client;
+        let request = self.request;
+        Box::pin(async move { client.download_catalog_export(&request).await })
+    }
+}
+
+/// Builder for catalog import
+pub struct UploadCatalogImportBuilder {
+    client: CatalogServiceClient,
+    request: UploadCatalogImportRequest,
+    contents: super::super::ByteStream,
+}
+
+impl UploadCatalogImportBuilder {
+    /// Create a new builder instance.
+    /// Obtain via the corresponding method on `CatalogServiceClient`.
+    pub(crate) fn new(
+        client: CatalogServiceClient,
+        name: impl Into<String>,
+        contents: impl super::super::IntoByteStream,
+    ) -> Self {
+        let request = UploadCatalogImportRequest {
+            name: name.into(),
+            ..Default::default()
+        };
+        Self {
+            client,
+            request,
+            contents: super::super::IntoByteStream::into_byte_stream(contents),
+        }
+    }
+}
+
+impl IntoFuture for UploadCatalogImportBuilder {
+    type Output = Result<DeleteCatalogResponse>;
+    type IntoFuture = BoxFut<'static, Self::Output>;
+    fn into_future(self) -> Self::IntoFuture {
+        let client = self.client;
+        let request = self.request;
+        let contents = self.contents;
+        Box::pin(async move { client.upload_catalog_import(&request, contents).await })
+    }
+}

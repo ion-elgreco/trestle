@@ -42,13 +42,14 @@ fn qualified_wrapper_ident(ty: &UnifiedType) -> Ident {
 /// expression converting the bare client result `result` into it.
 ///
 /// Returns `(return_type, convert_expr)`, or `None` for an `Empty`-returning method
-/// ([`MethodHandler::output_type`] is `None`). A server-streaming method returns a list.
+/// ([`MethodHandler::output_type`] is `None`). A server-streaming method returns a list, but
+/// one that streams raw bytes returns one message with all of them ([`PyBackend::single`]).
 fn wrap_single_output(method: &MethodHandler<'_>) -> Option<(TokenStream, TokenStream)> {
     if method.is_existence_check() {
         return Some((quote! { bool }, quote! { result }));
     }
     let w = wrapper_ident(&method.output_type()?);
-    if method.plan.metadata.server_streaming {
+    if method.plan.metadata.server_streaming && method.plan.raw_response_body.is_none() {
         Some((
             quote! { Vec<#w> },
             quote! { result.into_iter().map(#w::from).collect::<Vec<_>>() },
@@ -648,17 +649,40 @@ struct MethodOutput {
 }
 
 impl PyBackend<'_> {
-    /// A method that gives back one model, or nothing.
+    /// A method that gives back one model, or nothing. A stream of raw bytes is read whole:
+    /// one message, with the bytes of every chunk and the other fields of the first.
     fn single(
         &self,
         parts: &ShapeParts<'_>,
         method_name: Ident,
         value: Option<(TokenStream, TokenStream)>,
     ) -> TokenStream {
-        let output = MethodOutput {
-            future: quote! { request.into_future() },
-            value,
+        let method = parts.method;
+        let raw_stream = method
+            .plan
+            .metadata
+            .server_streaming
+            .then_some(method.plan.raw_response_body.as_deref())
+            .flatten()
+            .map(crate::utils::field_ident);
+        let future = match raw_stream {
+            Some(field) => quote! {
+                async move {
+                    let mut chunks = request.into_future().await?;
+                    let mut whole = None;
+                    while let Some(chunk) = ::futures::StreamExt::next(&mut chunks).await {
+                        let chunk = chunk?;
+                        match &mut whole {
+                            None => whole = Some(chunk),
+                            Some(whole) => whole.#field.extend(chunk.#field),
+                        }
+                    }
+                    Ok(whole.unwrap_or_default())
+                }
+            },
+            None => quote! { request.into_future() },
         };
+        let output = MethodOutput { future, value };
         self.methods(parts, method_name, false, output)
     }
 

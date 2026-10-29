@@ -295,11 +295,13 @@ pub fn register(
     module.add_class::<PyAzureConfig>()?;
     module.add_class::<PyCatalog>()?;
     module.add_class::<PyCatalogEvent>()?;
+    module.add_class::<PyCatalogExportChunk>()?;
     module.add_class::<PyCatalogStatus>()?;
     module.add_class::<PyCatalogToken>()?;
     module.add_class::<PyCreateCatalogRequest>()?;
     module.add_class::<PyDeleteCatalogRequest>()?;
     module.add_class::<PyDeleteCatalogResponse>()?;
+    module.add_class::<PyDownloadCatalogExportRequest>()?;
     module.add_class::<PyGenerateCatalogTokenRequest>()?;
     module.add_class::<PyGetCatalogRequest>()?;
     module.add_class::<PyGetCatalogStatusRequest>()?;
@@ -312,6 +314,7 @@ pub fn register(
     module.add_class::<PyStorageConfig>()?;
     module.add_class::<PyStreamCatalogEventsRequest>()?;
     module.add_class::<PyUpdateCatalogRequest>()?;
+    module.add_class::<PyUploadCatalogImportRequest>()?;
     module.add_class::<PyCatalogClient>()?;
     module.add_class::<PyGetSchemaRequestView>()?;
     module.add_class::<PySchemaType>()?;
