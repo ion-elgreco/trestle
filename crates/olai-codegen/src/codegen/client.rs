@@ -261,9 +261,13 @@ pub fn client_method(
     let connect_fn = connect.map(|side| {
         let cfg = &side.cfg;
         let output_type = method.output_type();
-        let answer = match &output_type {
-            Some(_) => quote! { Ok(response.into_owned()) },
-            None => quote! { Ok(()) },
+        // The answer of a unary call: the owned message, or nothing.
+        let (bind, answer) = match &output_type {
+            Some(_) => (
+                quote! { let response = },
+                quote! { Ok(response.into_owned()) },
+            ),
+            None => (quote! {}, quote! { Ok(()) }),
         };
         let call = match (&chunks, &output_type) {
             // A client stream: every message carries the request's fields, and the chunks go in
@@ -299,7 +303,7 @@ pub fn client_method(
                 if let Some(e) = failed.lock().expect("no panic holds the lock").take() {
                     return Err(e.into());
                 }
-                let response = response.map_err(#error_module::from_connect_error)?;
+                #bind response.map_err(#error_module::from_connect_error)?;
                 #answer
             },
             // A server stream of raw bytes: the messages as they come.
@@ -351,7 +355,7 @@ pub fn client_method(
                 Ok(outputs)
             },
             (None, _) => quote! {
-                let response = self
+                #bind self
                     .connect()
                     .#method_name(request.clone())
                     .await
