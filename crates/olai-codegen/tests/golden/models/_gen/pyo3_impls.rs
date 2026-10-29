@@ -294,8 +294,8 @@ impl ::pyo3_stub_gen::PyStubType for PySchemaType {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "AzureConfig", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "AzureConfig", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyAzureConfig(pub super::catalog::v1::AzureConfig);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -319,11 +319,7 @@ impl PyAzureConfig {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["container"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("container", false)])
     }
 }
 
@@ -340,8 +336,8 @@ impl ::core::convert::From<PyAzureConfig> for super::catalog::v1::AzureConfig {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "Catalog", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "Catalog", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalog(pub super::catalog::v1::Catalog);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -441,18 +437,14 @@ impl PyCatalog {
         __python_repr(
             slf.as_any(),
             &[
-                "name",
-                "comment",
-                "catalog_type",
-                "properties",
-                "storage_config",
-                "created_at",
+                ("name", false),
+                ("comment", false),
+                ("catalog_type", false),
+                ("properties", false),
+                ("storage_config", false),
+                ("created_at", false),
             ],
         )
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -469,8 +461,8 @@ impl ::core::convert::From<PyCatalog> for super::catalog::v1::Catalog {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CatalogStatus", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CatalogStatus", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalogStatus(pub super::catalog::v1::CatalogStatus);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -484,11 +476,7 @@ impl PyCatalogStatus {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["state"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("state", false)])
     }
 }
 
@@ -505,8 +493,8 @@ impl ::core::convert::From<PyCatalogStatus> for super::catalog::v1::CatalogStatu
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CatalogToken", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CatalogToken", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalogToken(pub super::catalog::v1::CatalogToken);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -520,11 +508,7 @@ impl PyCatalogToken {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["token"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("token", false)])
     }
 }
 
@@ -541,8 +525,8 @@ impl ::core::convert::From<PyCatalogToken> for super::catalog::v1::CatalogToken 
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CreateCatalogRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CreateCatalogRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCreateCatalogRequest(pub super::catalog::v1::CreateCatalogRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -556,11 +540,7 @@ impl PyCreateCatalogRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["catalog"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("catalog", false)])
     }
 }
 
@@ -579,8 +559,8 @@ for super::catalog::v1::CreateCatalogRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteCatalogRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteCatalogRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteCatalogRequest(pub super::catalog::v1::DeleteCatalogRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -594,11 +574,7 @@ impl PyDeleteCatalogRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["name"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("name", false)])
     }
 }
 
@@ -617,8 +593,8 @@ for super::catalog::v1::DeleteCatalogRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteCatalogResponse", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteCatalogResponse", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteCatalogResponse(pub super::catalog::v1::DeleteCatalogResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -628,10 +604,6 @@ impl PyDeleteCatalogResponse {
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
         __python_repr(slf.as_any(), &[])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -650,8 +622,8 @@ for super::catalog::v1::DeleteCatalogResponse {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GenerateCatalogTokenRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GenerateCatalogTokenRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGenerateCatalogTokenRequest(
     pub super::catalog::v1::GenerateCatalogTokenRequest,
 );
@@ -667,11 +639,7 @@ impl PyGenerateCatalogTokenRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["catalog_id"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("catalog_id", false)])
     }
 }
 
@@ -690,8 +658,8 @@ for super::catalog::v1::GenerateCatalogTokenRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GetCatalogRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GetCatalogRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGetCatalogRequest(pub super::catalog::v1::GetCatalogRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -705,11 +673,7 @@ impl PyGetCatalogRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["name"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("name", false)])
     }
 }
 
@@ -728,8 +692,8 @@ for super::catalog::v1::GetCatalogRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GetCatalogStatusRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GetCatalogStatusRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGetCatalogStatusRequest(pub super::catalog::v1::GetCatalogStatusRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -743,11 +707,7 @@ impl PyGetCatalogStatusRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["name"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("name", false)])
     }
 }
 
@@ -766,8 +726,8 @@ for super::catalog::v1::GetCatalogStatusRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListByCatalogTypeRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListByCatalogTypeRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListByCatalogTypeRequest(pub super::catalog::v1::ListByCatalogTypeRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -787,11 +747,7 @@ impl PyListByCatalogTypeRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["catalog_type"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("catalog_type", false)])
     }
 }
 
@@ -810,8 +766,8 @@ for super::catalog::v1::ListByCatalogTypeRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListByTagsRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListByTagsRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListByTagsRequest(pub super::catalog::v1::ListByTagsRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -831,11 +787,7 @@ impl PyListByTagsRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["tags", "max_results"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("tags", false), ("max_results", false)])
     }
 }
 
@@ -854,8 +806,8 @@ for super::catalog::v1::ListByTagsRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListByTagsResponse", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListByTagsResponse", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListByTagsResponse(pub super::catalog::v1::ListByTagsResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -869,11 +821,7 @@ impl PyListByTagsResponse {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["results"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("results", false)])
     }
 }
 
@@ -892,8 +840,8 @@ for super::catalog::v1::ListByTagsResponse {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListCatalogsRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListCatalogsRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListCatalogsRequest(pub super::catalog::v1::ListCatalogsRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -912,11 +860,7 @@ impl PyListCatalogsRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["max_results", "page_token"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("max_results", false), ("page_token", false)])
     }
 }
 
@@ -935,8 +879,8 @@ for super::catalog::v1::ListCatalogsRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListCatalogsResponse", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListCatalogsResponse", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListCatalogsResponse(pub super::catalog::v1::ListCatalogsResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -955,11 +899,7 @@ impl PyListCatalogsResponse {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["catalogs", "next_page_token"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("catalogs", false), ("next_page_token", false)])
     }
 }
 
@@ -978,8 +918,8 @@ for super::catalog::v1::ListCatalogsResponse {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "S3Config", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "S3Config", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyS3Config(pub super::catalog::v1::S3Config);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1003,11 +943,7 @@ impl PyS3Config {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["bucket"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("bucket", false)])
     }
 }
 
@@ -1024,8 +960,8 @@ impl ::core::convert::From<PyS3Config> for super::catalog::v1::S3Config {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "StorageConfig", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "StorageConfig", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyStorageConfig(pub super::catalog::v1::StorageConfig);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1074,11 +1010,7 @@ impl PyStorageConfig {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["s3", "azure"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("s3", false), ("azure", false)])
     }
 }
 
@@ -1095,8 +1027,8 @@ impl ::core::convert::From<PyStorageConfig> for super::catalog::v1::StorageConfi
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "UpdateCatalogRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "UpdateCatalogRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyUpdateCatalogRequest(pub super::catalog::v1::UpdateCatalogRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1115,11 +1047,7 @@ impl PyUpdateCatalogRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["name", "catalog"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("name", false), ("catalog", false)])
     }
 }
 
@@ -1138,8 +1066,8 @@ for super::catalog::v1::UpdateCatalogRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CreateSchemaRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CreateSchemaRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCreateSchemaRequest(pub super::schemas::v1::CreateSchemaRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1172,11 +1100,10 @@ impl PyCreateSchemaRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["name", "catalog_name", "schema_type"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(
+            slf.as_any(),
+            &[("name", false), ("catalog_name", false), ("schema_type", false)],
+        )
     }
 }
 
@@ -1195,8 +1122,8 @@ for super::schemas::v1::CreateSchemaRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteSchemaRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteSchemaRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteSchemaRequest(pub super::schemas::v1::DeleteSchemaRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1210,11 +1137,7 @@ impl PyDeleteSchemaRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["full_name"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("full_name", false)])
     }
 }
 
@@ -1233,8 +1156,8 @@ for super::schemas::v1::DeleteSchemaRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteSchemaResponse", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteSchemaResponse", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteSchemaResponse(pub super::schemas::v1::DeleteSchemaResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1244,10 +1167,6 @@ impl PyDeleteSchemaResponse {
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
         __python_repr(slf.as_any(), &[])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -1266,8 +1185,8 @@ for super::schemas::v1::DeleteSchemaResponse {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GetSchemaRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GetSchemaRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGetSchemaRequest(pub super::schemas::v1::GetSchemaRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1291,11 +1210,7 @@ impl PyGetSchemaRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["full_name", "view"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("full_name", false), ("view", false)])
     }
 }
 
@@ -1312,8 +1227,8 @@ impl ::core::convert::From<PyGetSchemaRequest> for super::schemas::v1::GetSchema
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListSchemasRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListSchemasRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListSchemasRequest(pub super::schemas::v1::ListSchemasRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1338,11 +1253,10 @@ impl PyListSchemasRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["catalog_name", "max_results", "page_token"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(
+            slf.as_any(),
+            &[("catalog_name", false), ("max_results", false), ("page_token", false)],
+        )
     }
 }
 
@@ -1361,8 +1275,8 @@ for super::schemas::v1::ListSchemasRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListSchemasResponse", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListSchemasResponse", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListSchemasResponse(pub super::schemas::v1::ListSchemasResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1381,11 +1295,7 @@ impl PyListSchemasResponse {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["schemas", "next_page_token"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("schemas", false), ("next_page_token", false)])
     }
 }
 
@@ -1407,8 +1317,8 @@ for super::schemas::v1::ListSchemasResponse {
 /// resource-scoped client: `catalog.schema(name)` navigation, `catalog.create_schema(...)`, and the
 /// cross-module model import for the create method's enum parameter (`SchemaType`).
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "Schema", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "Schema", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PySchema(pub super::schemas::v1::Schema);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1518,19 +1428,15 @@ impl PySchema {
         __python_repr(
             slf.as_any(),
             &[
-                "full_name",
-                "comment",
-                "schema_type",
-                "created_at",
-                "schema_id",
-                "catalog_name",
-                "name",
+                ("full_name", false),
+                ("comment", false),
+                ("schema_type", false),
+                ("created_at", false),
+                ("schema_id", false),
+                ("catalog_name", false),
+                ("name", false),
             ],
         )
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -1547,8 +1453,8 @@ impl ::core::convert::From<PySchema> for super::schemas::v1::Schema {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "UpdateSchemaRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "UpdateSchemaRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyUpdateSchemaRequest(pub super::schemas::v1::UpdateSchemaRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1567,11 +1473,7 @@ impl PyUpdateSchemaRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["full_name", "schema"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(slf.as_any(), &[("full_name", false), ("schema", false)])
     }
 }
 
@@ -1590,8 +1492,8 @@ for super::schemas::v1::UpdateSchemaRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CreateTagAssignmentRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "CreateTagAssignmentRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyCreateTagAssignmentRequest(pub super::tags::v1::CreateTagAssignmentRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1615,11 +1517,10 @@ impl PyCreateTagAssignmentRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["entity_type", "entity_name", "tag"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(
+            slf.as_any(),
+            &[("entity_type", false), ("entity_name", false), ("tag", false)],
+        )
     }
 }
 
@@ -1638,8 +1539,8 @@ for super::tags::v1::CreateTagAssignmentRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteTagAssignmentRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteTagAssignmentRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteTagAssignmentRequest(pub super::tags::v1::DeleteTagAssignmentRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1663,11 +1564,10 @@ impl PyDeleteTagAssignmentRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["entity_type", "entity_name", "tag_key"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(
+            slf.as_any(),
+            &[("entity_type", false), ("entity_name", false), ("tag_key", false)],
+        )
     }
 }
 
@@ -1686,8 +1586,8 @@ for super::tags::v1::DeleteTagAssignmentRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteTagAssignmentResponse", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "DeleteTagAssignmentResponse", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteTagAssignmentResponse(
     pub super::tags::v1::DeleteTagAssignmentResponse,
 );
@@ -1699,10 +1599,6 @@ impl PyDeleteTagAssignmentResponse {
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
         __python_repr(slf.as_any(), &[])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -1721,8 +1617,8 @@ for super::tags::v1::DeleteTagAssignmentResponse {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GetTagAssignmentRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "GetTagAssignmentRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyGetTagAssignmentRequest(pub super::tags::v1::GetTagAssignmentRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1746,11 +1642,10 @@ impl PyGetTagAssignmentRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["entity_type", "entity_name", "tag_key"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(
+            slf.as_any(),
+            &[("entity_type", false), ("entity_name", false), ("tag_key", false)],
+        )
     }
 }
 
@@ -1769,8 +1664,8 @@ for super::tags::v1::GetTagAssignmentRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListTagAssignmentsRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListTagAssignmentsRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListTagAssignmentsRequest(pub super::tags::v1::ListTagAssignmentsRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1801,12 +1696,13 @@ impl PyListTagAssignmentsRequest {
     ) -> ::pyo3::PyResult<::std::string::String> {
         __python_repr(
             slf.as_any(),
-            &["entity_type", "entity_name", "max_results", "page_token"],
+            &[
+                ("entity_type", false),
+                ("entity_name", false),
+                ("max_results", false),
+                ("page_token", false),
+            ],
         )
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -1825,8 +1721,8 @@ for super::tags::v1::ListTagAssignmentsRequest {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListTagAssignmentsResponse", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "ListTagAssignmentsResponse", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyListTagAssignmentsResponse(pub super::tags::v1::ListTagAssignmentsResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1845,11 +1741,10 @@ impl PyListTagAssignmentsResponse {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["tag_assignments", "next_page_token"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(
+            slf.as_any(),
+            &[("tag_assignments", false), ("next_page_token", false)],
+        )
     }
 }
 
@@ -1868,8 +1763,8 @@ for super::tags::v1::ListTagAssignmentsResponse {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "TagAssignment", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "TagAssignment", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyTagAssignment(pub super::tags::v1::TagAssignment);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1931,12 +1826,13 @@ impl PyTagAssignment {
     ) -> ::pyo3::PyResult<::std::string::String> {
         __python_repr(
             slf.as_any(),
-            &["entity_type", "entity_name", "tag_key", "tag_value"],
+            &[
+                ("entity_type", false),
+                ("entity_name", false),
+                ("tag_key", false),
+                ("tag_value", false),
+            ],
         )
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -1953,8 +1849,8 @@ impl ::core::convert::From<PyTagAssignment> for super::tags::v1::TagAssignment {
 }
 
 #[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "TouchTagAssignmentRequest", frozen, from_py_object)]
-#[derive(Clone, Debug)]
+#[::pyo3::pyclass(name = "TouchTagAssignmentRequest", eq, frozen, from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PyTouchTagAssignmentRequest(pub super::tags::v1::TouchTagAssignmentRequest);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
 #[::pyo3_stub_gen::derive::gen_stub_pymethods]
@@ -1978,11 +1874,10 @@ impl PyTouchTagAssignmentRequest {
     fn __repr__(
         slf: &::pyo3::Bound<'_, Self>,
     ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &["entity_type", "entity_name", "tag_key"])
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self.0 == other.0
+        __python_repr(
+            slf.as_any(),
+            &[("entity_type", false), ("entity_name", false), ("tag_key", false)],
+        )
     }
 }
 
@@ -2001,16 +1896,21 @@ for super::tags::v1::TouchTagAssignmentRequest {
 }
 
 /// `Name(field=value, …)` with the `repr` of each attribute in `fields`, without the
-/// ones that are `None`.
+/// ones that are `None`. A field marked `true` (`debug_redact` in the proto) shows `'***'`.
 fn __python_repr(
     obj: &::pyo3::Bound<'_, ::pyo3::PyAny>,
-    fields: &[&str],
+    fields: &[(&str, bool)],
 ) -> ::pyo3::PyResult<::std::string::String> {
     use ::pyo3::types::{PyAnyMethods, PyTypeMethods};
     let mut shown = ::std::vec::Vec::with_capacity(fields.len());
-    for field in fields {
+    for (field, redact) in fields {
         let value = obj.getattr(*field)?;
-        if !value.is_none() {
+        if value.is_none() {
+            continue;
+        }
+        if *redact {
+            shown.push(::std::format!("{field}='***'"));
+        } else {
             shown.push(::std::format!("{field}={}", value.repr() ?));
         }
     }

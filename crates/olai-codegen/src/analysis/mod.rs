@@ -470,6 +470,8 @@ pub(crate) fn analyze_method(
         types::request_has_body(&request_type) || !method.http_rule.body.is_empty();
     let needs_request_parts = types::request_needs_request_parts(&request_type);
     let scoped_verb = types::scoped_verb(&request_type);
+    let (raw_request_body, raw_response_body) = raw_bodies(metadata, method, &input_fields)?;
+    let request_headers = request_headers(method, &input_fields)?;
 
     Ok(MethodPlan {
         metadata: method.clone(),
@@ -487,7 +489,89 @@ pub(crate) fn analyze_method(
         // known here. `analyze_service` overwrites this once `extract_managed_resources` has run.
         shape: types::MethodShape::Unbound,
         has_http_route: true,
+        raw_request_body,
+        raw_response_body,
+        request_headers,
     })
+}
+
+/// The request fields that go in HTTP request headers (`(olai.trestle.v1.request_header)`), with
+/// their headers: `string` fields out of the body.
+fn request_headers(
+    method: &MethodMetadata,
+    input_fields: &[MessageField],
+) -> Result<Vec<(String, String)>> {
+    input_fields
+        .iter()
+        .filter_map(|f| Some((f, f.request_header.clone()?)))
+        .map(|(f, header)| {
+            let fail = |message: &str| {
+                Err(crate::Error::Build(format!(
+                    "method `{}`: the request header field `{}` {message}",
+                    method.method_name, f.name
+                )))
+            };
+            if !matches!(f.unified_type.base_type, BaseType::String) || f.unified_type.is_repeated {
+                return fail("must be a `string`");
+            }
+            if matches!(method.http_rule.body.as_str(), "*") || method.http_rule.body == f.name {
+                return fail("cannot be in the body");
+            }
+            Ok((f.name.clone(), header))
+        })
+        .collect()
+}
+
+/// The fields that are the raw request and response bodies of a method
+/// (`(olai.trestle.v1.raw_body)`): singular `bytes` fields. In the request, the field that the
+/// rule's `body` names. In the response of a method that does not stream, beside fields that come
+/// from response headers only.
+fn raw_bodies(
+    metadata: &CodeGenMetadata,
+    method: &MethodMetadata,
+    input_fields: &[MessageField],
+) -> Result<(Option<String>, Option<String>)> {
+    let fail = |message: String| {
+        Err(crate::Error::Build(format!(
+            "method `{}`: {message}",
+            method.method_name
+        )))
+    };
+    let request = match input_fields.iter().find(|f| f.raw_body) {
+        None => None,
+        Some(f) if !f.unified_type.is_singular_bytes() => {
+            return fail(format!("the raw body `{}` must be `bytes`", f.name));
+        }
+        Some(f) if method.http_rule.body != f.name => {
+            return fail(format!(
+                "the rule's `body` must name the raw body `{}`",
+                f.name
+            ));
+        }
+        Some(f) => Some(f.name.clone()),
+    };
+    let output_fields = metadata.get_message_fields(&method.output_type);
+    let response = match output_fields.iter().find(|f| f.raw_body) {
+        None => None,
+        Some(f) if !f.unified_type.is_singular_bytes() => {
+            return fail(format!("the raw body `{}` must be `bytes`", f.name));
+        }
+        Some(_) if method.server_streaming => {
+            return fail("a streamed output has no raw body".to_string());
+        }
+        Some(f)
+            if output_fields
+                .iter()
+                .any(|o| o.name != f.name && o.response_header.is_none()) =>
+        {
+            return fail(format!(
+                "the other fields of an output with the raw body `{}` must come from response headers",
+                f.name
+            ));
+        }
+        Some(f) => Some(f.name.clone()),
+    };
+    Ok((request, response))
 }
 
 /// Analyze a method that has no `google.api.http` annotation (the ConnectRPC-degenerate shape).
@@ -531,6 +615,9 @@ fn analyze_routeless_method(
         scoped_verb: None,
         shape: types::MethodShape::Unbound,
         has_http_route: false,
+        raw_request_body: None,
+        raw_response_body: None,
+        request_headers: Vec::new(),
     })
 }
 
@@ -958,7 +1045,9 @@ mod tests {
             name: name.to_string(),
             json_name: None,
             response_header: None,
+            request_header: None,
             emit_unpopulated: false,
+            raw_body: false,
             unified_type: UnifiedType {
                 base_type: BaseType::String,
                 is_optional: optional,
@@ -978,7 +1067,9 @@ mod tests {
             name: name.to_string(),
             json_name: None,
             response_header: None,
+            request_header: None,
             emit_unpopulated: false,
+            raw_body: false,
             unified_type: UnifiedType {
                 base_type: BaseType::String,
                 is_optional: false,
@@ -1173,7 +1264,9 @@ mod tests {
                     name: "catalog_name".to_string(),
                     json_name: None,
                     response_header: None,
+                    request_header: None,
                     emit_unpopulated: false,
+                    raw_body: false,
                     unified_type: UnifiedType {
                         base_type: BaseType::String,
                         is_optional: false,
@@ -1203,7 +1296,9 @@ mod tests {
                         name: "catalog_name".to_string(),
                         json_name: None,
                         response_header: None,
+                        request_header: None,
                         emit_unpopulated: false,
+                        raw_body: false,
                         unified_type: UnifiedType {
                             base_type: BaseType::String,
                             is_optional: false,
@@ -1222,7 +1317,9 @@ mod tests {
                         name: "schema_name".to_string(),
                         json_name: None,
                         response_header: None,
+                        request_header: None,
                         emit_unpopulated: false,
+                        raw_body: false,
                         unified_type: UnifiedType {
                             base_type: BaseType::String,
                             is_optional: false,

@@ -67,7 +67,7 @@ fn rust_config(tmp: &Path) -> CodeGenConfig {
         connect_client_path: None,
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: Some(models),
             models_subdir: "_gen".into(),
             server: Some(server),
@@ -186,7 +186,7 @@ fn wasm_bindings_and_dts_are_emitted() {
         connect_client_path: None,
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: None,
             models_subdir: "_gen".into(),
             server: None,
@@ -622,7 +622,7 @@ fn node_ts_bindings_generated() {
         connect_client_path: None,
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: None,
             models_subdir: "_gen".into(),
             server: None,
@@ -679,7 +679,9 @@ fn rest_client_and_python_options_generate_valid_code() {
         ignore_unknown_enum_values: true,
         error_module: Some(Default::default()),
         form_encoded_methods: vec![],
+        path_fields_in_body_methods: vec![],
         json_query_packages: vec![],
+        user_agent: Some("example-client".into()),
     };
     config.bindings = Some(BindingsConfig {
         aggregate_client_name: "ExampleClient".into(),
@@ -698,6 +700,8 @@ fn rest_client_and_python_options_generate_valid_code() {
             module: Some("example._core".into()),
             async_methods: true,
             keyword_only: true,
+            public_modules: true,
+            user_agent: Some("example-python".into()),
         }),
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
@@ -723,6 +727,12 @@ fn rest_client_and_python_options_generate_valid_code() {
         "error module missing"
     );
     assert!(client.contains("ignore_unknown_enum_values(true)"));
+    // The default `User-Agent`, outside the browser; the aggregate client can set another.
+    assert!(
+        client.contains("\"example-client/\"") && client.contains("not(target_arch = \"wasm32\")"),
+        "default User-Agent missing"
+    );
+    assert!(client.contains("pub fn with_user_agent("));
 
     let models = read_all(&tmp.path().join("models"));
     assert!(
@@ -740,6 +750,10 @@ fn rest_client_and_python_options_generate_valid_code() {
     assert!(bindings.contains("_async"), "async twins missing");
     assert!(bindings.contains("pub fn register("), "register missing");
     assert!(bindings.contains("PyFuture"), "PyFuture helper missing");
+    assert!(
+        bindings.contains("\"example-python/\""),
+        "Python User-Agent missing"
+    );
     assert!(bindings.contains("pub fn rt()"), "runtime missing");
 
     let enums = std::fs::read_to_string(package.join("_enums.py")).unwrap();
@@ -748,8 +762,52 @@ fn rest_client_and_python_options_generate_valid_code() {
         !enums.contains("_UNSPECIFIED ="),
         "hidden zero values: {enums}"
     );
+    // A public module per submodule: its classes and scoped client, and its enums.
+    let schemas = std::fs::read_to_string(package.join("schemas.py")).unwrap();
+    assert!(
+        schemas.contains("from example._core.schemas import (\n    DeleteSchemaResponse,")
+            && schemas.contains("    SchemaClient,\n)")
+            && schemas.contains("from example._enums import (\n    GetSchemaRequestView,")
+            && schemas.contains("    \"SchemaType\",\n]"),
+        "{schemas}"
+    );
     assert!(
         bindings.contains("extends = ExampleError") && bindings.contains("add_exceptions(module)"),
         "PyO3 exception classes missing"
     );
+}
+
+// ── Without the common (extractor) output ────────────────────────────────────
+
+/// A client-only config without `common`: no extractors are written, and the models `mod.rs`
+/// does not declare them.
+#[test]
+fn no_common_output_leaves_out_the_extractors() {
+    let tmp = TempDir::new().unwrap();
+    let mut config = rust_config(tmp.path());
+    config.output.common = None;
+    config.output.server = None;
+    generate_code(&metadata(), &config).expect("generation succeeds");
+
+    let models = tmp.path().join("models/_gen");
+    assert!(
+        !models.join("extractors").exists(),
+        "no extractors without `common`"
+    );
+    let models_mod = std::fs::read_to_string(models.join("mod.rs")).expect("models mod.rs");
+    assert!(
+        !models_mod.contains("extractors"),
+        "the models mod.rs must not declare the extractors"
+    );
+    syn::parse_file(&models_mod).expect("the models mod.rs is valid Rust");
+}
+
+/// The server routes need the extractors of the common output.
+#[test]
+fn server_output_needs_the_common_output() {
+    let tmp = TempDir::new().unwrap();
+    let mut config = rust_config(tmp.path());
+    config.output.common = None;
+    let err = generate_code(&metadata(), &config).expect_err("a server needs `common`");
+    assert!(err.to_string().contains("CodeGenOutput::common"), "{err}");
 }

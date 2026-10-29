@@ -295,7 +295,18 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
         fn client_exception(py: Python<'_>, e: ClientError) -> PyResult<PyErr> {
             let (message, code, status, details) = match e {
                 ClientError::Api(api) => (api.message, api.code, Some(api.status), api.details),
-                other => (other.to_string(), None, None, ::std::vec::Vec::new()),
+                other => {
+                    // A Python exception has no chain of causes, so the message lists them.
+                    // The first source is the error that `other` wraps and shows already.
+                    let mut message = other.to_string();
+                    let mut cause = ::std::error::Error::source(&other).and_then(::std::error::Error::source);
+                    while let Some(error) = cause {
+                        message.push_str(": ");
+                        message.push_str(&error.to_string());
+                        cause = error.source();
+                    }
+                    (message, None, None, ::std::vec::Vec::new())
+                }
             };
             let details = details
                 .iter()

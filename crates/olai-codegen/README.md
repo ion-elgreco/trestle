@@ -121,13 +121,15 @@ let metadata = parse_file_descriptor_set(&fds)?;
 let config = CodeGenConfig {
     context_type_path: "crate::RequestContext".into(),
     result_type_path: "crate::Result".into(),
-    output: CodeGenOutput { common: "src/gen/common".into(), ..Default::default() },
+    output: CodeGenOutput { common: Some("src/gen/common".into()), ..Default::default() },
     ..Default::default()
 };
 generate_code(&metadata, &config)?;
 ```
 
-See the rustdoc for the full `CodeGenConfig` / `CodeGenOutput` field reference.
+See the rustdoc for the full `CodeGenConfig` / `CodeGenOutput` field reference. A client-only
+crate sets `common` to `None`: no Axum extractors are written, and the models `mod.rs` does not
+declare them. The `server` output needs them.
 
 ## WASM / browser clients
 
@@ -150,10 +152,12 @@ option is off by default.
 | `json_int64_as_number` | `json_int64: number` (under `generate`) | 64-bit integers are JSON numbers, not proto3-JSON strings, and the whole numbers of `google.protobuf.Value`/`Struct`/`ListValue` fields are integers (`1`, not `1.0`). Reading accepts both. |
 | `ignore_unknown_enum_values` | `ignore_unknown_enum_values: true` | An unknown enum name in a response becomes the zero value instead of failing the response. |
 | `form_encoded_methods` | `form_encoded_methods: [pkg.Service.Method]` | Send the request body of these RPCs form-encoded. |
+| `path_fields_in_body_methods` | `path_fields_in_body_methods: [pkg.Service.Method]` | Keep the path values in the request body of these RPCs too, for APIs that check that both match. |
 | `json_query_packages` | `json_field_names_by_package: {pkg: json}` | Send the query parameters of these packages by their JSON name (`startIndex`), as their bodies. Elsewhere a query key is the proto name, or a `json_name` that differs from the default. |
 
 Path values are always percent-encoded (`/` too, except for multi-segment patterns such as
-`{name=catalogs/*}`). With `json_field_names: proto`, a field with an explicit `json_name`
+`{name=catalogs/*}`). As `google.api.http` maps them, they are not in the request body, also
+with `body: "*"`: a strict server rejects fields that it does not know. With `json_field_names: proto`, a field with an explicit `json_name`
 keeps it, and `json_field_names_by_package` overrides the style per proto package.
 
 ## Python API
@@ -180,10 +184,11 @@ The generated API:
 
 | Option | Effect |
 |---|---|
-| `package` | Where `_enums.py` goes: `{ dir, name }`. Required. |
+| `package` | Where `_enums.py` and the public modules go: `{ dir, name }`. Required. |
 | `module` | Classes go in `<module>.<service>`; the root client in `<module>`. The generated `register(module)` adds them and the submodules. With a module, request messages get no class. |
 | `async_methods` | Each method gets a `<name>_async` twin that returns an `asyncio.Future` (needs `pyo3-async-runtimes`). |
 | `keyword_only` | Optional parameters are keyword-only. |
+| `public_modules` | A module `<package>/<service>.py` per submodule of `module`: it re-exports the classes of the submodule and the enums of its proto package, so users import `<package>.<service>`. Needs `module`. |
 
 In `trestle.yaml`, `package` sits under `clients.python` and the rest under
 `clients.python.options`. `tests/rest_client_e2e` runs a client and Python bindings with all of

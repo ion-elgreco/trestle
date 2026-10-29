@@ -50,8 +50,10 @@ impl PyExampleClient {
         py: Python,
         catalog: ::core::option::Option<PyCatalog>,
     ) -> PyExampleResult<PyCatalog> {
-        let mut request = self.client.create_catalog();
-        request = request.with_catalog(catalog.map(::core::convert::Into::into));
+        let request = self
+            .client
+            .create_catalog()
+            .with_catalog(catalog.map(::core::convert::Into::into));
         let runtime = crate::codegen::runtime::rt();
         py.detach(|| {
             #[allow(clippy::let_unit_value)]
@@ -116,7 +118,7 @@ impl PyExampleClient {
     pub fn list_by_tags(
         &self,
         py: Python,
-        tags: Option<Vec<String>>,
+        tags: Vec<String>,
         max_results: i32,
     ) -> PyExampleResult<PyListByTagsResponse> {
         let request = self.client.list_by_tags(tags, max_results);
@@ -245,8 +247,10 @@ impl PyExampleClient {
         entity_name: String,
         tag: ::core::option::Option<PyTagAssignment>,
     ) -> PyExampleResult<PyTagAssignment> {
-        let mut request = self.client.create_tag_assignment(entity_type, entity_name);
-        request = request.with_tag(tag.map(::core::convert::Into::into));
+        let request = self
+            .client
+            .create_tag_assignment(entity_type, entity_name)
+            .with_tag(tag.map(::core::convert::Into::into));
         let runtime = crate::codegen::runtime::rt();
         py.detach(|| {
             #[allow(clippy::let_unit_value)]

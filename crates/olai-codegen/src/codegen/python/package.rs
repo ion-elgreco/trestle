@@ -1,10 +1,13 @@
-//! The pure-Python file of the generated package: `_enums.py`.
+//! The pure-Python files of the generated package: `_enums.py`, and the public modules that
+//! re-export the submodules of the extension module.
 //!
 //! Enums are better as Python source than as PyO3 classes. An `enum.StrEnum` (Python 3.11+)
 //! member is a real `str`: it equals its name, works as a dict key for that name, and goes into
 //! JSON as is. PyO3 enum classes cannot subclass `str`, and `pyo3-stub-gen` can only describe an
 //! `enum.Enum` base. The model wrappers convert through these classes (see `model_conversions`).
 //! Type checkers read the classes from the file directly, so it needs no stubs.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::parsing::{CodeGenMetadata, EnumInfo};
 
@@ -47,6 +50,66 @@ fn enum_class(fq_name: &str, info: &EnumInfo) -> String {
     out
 }
 
+/// The public modules, `<segment>.py` by file name: one per submodule `<module>.<segment>`,
+/// which re-exports its classes (the `names` that are not enums, and `clients`) and the enums
+/// of its proto package from `<package>._enums`.
+pub(crate) fn public_modules<'a>(
+    module: &str,
+    package: &str,
+    names: impl Iterator<Item = (&'a str, String, bool)>,
+    clients: impl Iterator<Item = (&'a str, String)>,
+) -> Vec<(String, String)> {
+    let mut segments: BTreeMap<&str, (BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
+    for (segment, name, is_enum) in names {
+        let (classes, enums) = segments.entry(segment).or_default();
+        if is_enum {
+            enums.insert(name);
+        } else {
+            classes.insert(name);
+        }
+    }
+    for (segment, name) in clients {
+        segments.entry(segment).or_default().0.insert(name);
+    }
+    segments
+        .into_iter()
+        .map(|(segment, (classes, enums))| {
+            let mut imports = vec![
+                (format!("{module}.{segment}"), &classes),
+                (format!("{package}._enums"), &enums),
+            ];
+            imports.retain(|(_, names)| !names.is_empty());
+            imports.sort();
+            let mut out = format!("\"\"\"The classes of the `{segment}` API.\"\"\"\n\n");
+            for (from, names) in &imports {
+                out.push_str(&format!("from {from} import (\n"));
+                for name in isort_order(names) {
+                    out.push_str(&format!("    {name},\n"));
+                }
+                out.push_str(")\n");
+            }
+            let all: BTreeSet<&String> = classes.iter().chain(&enums).collect();
+            out.push_str("\n__all__ = [\n");
+            for name in all {
+                out.push_str(&format!("    \"{name}\",\n"));
+            }
+            out.push_str("]\n");
+            (format!("{segment}.py"), out)
+        })
+        .collect()
+}
+
+/// `names` in the order of isort (and ruff) within a `from` import: the constants (`ALL_CAPS`)
+/// first, then the others, each without case (`SharedDataObject` before `ShareInfo`).
+fn isort_order(names: &BTreeSet<String>) -> Vec<&String> {
+    let mut names: Vec<&String> = names.iter().collect();
+    names.sort_by_key(|name| {
+        let constant = name.len() > 1 && !name.chars().any(|c| c.is_lowercase());
+        (!constant, name.to_lowercase())
+    });
+    names
+}
+
 /// A Python docstring at `indent`, or `None` when `doc` is empty.
 fn docstring(doc: Option<&str>, indent: &str) -> Option<String> {
     let doc = doc?.trim();
@@ -82,5 +145,16 @@ mod tests {
             Some("  \"\"\"First.\n  Second \\\"\\\"\\\" here.\n  \"\"\"\n")
         );
         assert_eq!(docstring(Some("  \n "), "    "), None);
+    }
+
+    #[test]
+    fn isort_order_puts_constants_first_and_ignores_case() {
+        let names: BTreeSet<String> = ["ShareInfo", "SharedDataObject", "ACL", "Share"]
+            .map(String::from)
+            .into();
+        assert_eq!(
+            isort_order(&names),
+            ["ACL", "Share", "SharedDataObject", "ShareInfo"]
+        );
     }
 }

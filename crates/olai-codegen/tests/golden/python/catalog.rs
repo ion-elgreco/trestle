@@ -36,8 +36,10 @@ impl PyCatalogClient {
         py: Python,
         catalog: ::core::option::Option<PyCatalog>,
     ) -> PyExampleResult<PyCatalog> {
-        let mut request = self.client.update();
-        request = request.with_catalog(catalog.map(::core::convert::Into::into));
+        let request = self
+            .client
+            .update()
+            .with_catalog(catalog.map(::core::convert::Into::into));
         let runtime = crate::codegen::runtime::rt();
         py.detach(|| {
             #[allow(clippy::let_unit_value)]

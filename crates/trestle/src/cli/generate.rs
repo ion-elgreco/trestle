@@ -303,10 +303,15 @@ fn print_summary(config: &CodeGenConfig) {
     if let Some(m) = &out.models {
         push(&m.join(&out.models_subdir));
     }
-    push(&out.common);
-    for p in [&out.server, &out.client, &out.python, &out.node]
-        .into_iter()
-        .flatten()
+    for p in [
+        &out.common,
+        &out.server,
+        &out.client,
+        &out.python,
+        &out.node,
+    ]
+    .into_iter()
+    .flatten()
     {
         push(p);
     }

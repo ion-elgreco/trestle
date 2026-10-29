@@ -1137,7 +1137,7 @@ mod tests {
             connect_client_path: None,
             rest_client: Default::default(),
             output: crate::codegen::CodeGenOutput {
-                common: "/tmp/common".into(),
+                common: Some("/tmp/common".into()),
                 models: Some("/tmp/models".into()),
                 models_subdir: "_gen".into(),
                 server: None,

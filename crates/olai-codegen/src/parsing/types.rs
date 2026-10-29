@@ -188,7 +188,10 @@ pub fn field_assignment(
         return flexible_optional_field_assignment(unified_type, field_ident, runtime);
     }
     match &unified_type.base_type {
-        BaseType::String if !unified_type.is_optional => quote! { #field_ident.into() },
+        // A single string is an `impl Into<String>`; a repeated one is already a `Vec<String>`.
+        BaseType::String if !unified_type.is_optional && !unified_type.is_repeated => {
+            quote! { #field_ident.into() }
+        }
         BaseType::Enum(_) => match runtime {
             Runtime::Prost if unified_type.is_repeated => {
                 quote! { #field_ident.into_iter().map(|v| v as i32).collect() }
@@ -199,6 +202,14 @@ pub fn field_assignment(
             }
             Runtime::Buffa => quote! { buffa::EnumValue::Known(#field_ident) },
         },
+        // A constructor takes the keys as `impl Into<String>`, and string values too; other
+        // values have the field's type already.
+        BaseType::Map(_, value)
+            if matches!(ctx, RenderContext::Constructor)
+                && !matches!(value.base_type, BaseType::String) =>
+        {
+            quote! { #field_ident.into_iter().map(|(k, v)| (k.into(), v)).collect() }
+        }
         BaseType::Map(_, _) => quote! {
             #field_ident.into_iter().map(|(k, v)| (k.into(), v.into())).collect()
         },
@@ -537,6 +548,11 @@ impl UnifiedType {
             BaseType::Map(_, _) => "HashMap",
         };
         quote::format_ident!("{}", name)
+    }
+
+    /// A singular `bytes` value: not repeated.
+    pub fn is_singular_bytes(&self) -> bool {
+        matches!(self.base_type, BaseType::Bytes) && !self.is_repeated
     }
 
     /// Create a simple string type

@@ -238,7 +238,8 @@ pub struct BindingsConfig {
 /// which needs [`RestClientOptions::error_module`].
 #[derive(Debug, Clone)]
 pub struct PythonOptions {
-    /// The pure-Python package that gets `_enums.py`. See [`PyPackageConfig`].
+    /// The pure-Python package that gets `_enums.py` and the public modules. See
+    /// [`PyPackageConfig`].
     pub package: PyPackageConfig,
     /// Name of the base exception class (e.g. `MyServiceError`): the class with `message`,
     /// `code`, `status` and `details` that the subclasses per kind of HTTP error status
@@ -252,11 +253,22 @@ pub struct PythonOptions {
     /// Every client method also gets a `<name>_async` twin that returns an `asyncio.Future`.
     /// The binding crate depends on `pyo3-async-runtimes` (with `tokio-runtime`).
     pub async_methods: bool,
-    /// Optional parameters of client methods are keyword-only (`*` in the signature).
+    /// Optional parameters of client methods and model constructors are keyword-only (`*` in
+    /// the signature). A constructor then takes the `REQUIRED` fields as required arguments.
     pub keyword_only: bool,
+    /// Write a public module `<package>/<service>.py` per submodule of
+    /// [`module`](Self::module): it re-exports the classes of the submodule and the enums of
+    /// its proto package, so that users import `my_pkg.<service>`, not the extension module.
+    /// Needs [`module`](Self::module).
+    pub public_modules: bool,
+    /// The product of the `User-Agent` of the Python client:
+    /// `<product>/<version of the binding crate>`, instead of the Rust client's. Needs the
+    /// `reqwest` transport.
+    pub user_agent: Option<String>,
 }
 
-/// Where the generated pure-Python file `_enums.py` goes.
+/// Where the generated pure-Python files go: `_enums.py` and the
+/// [`public_modules`](PythonOptions::public_modules).
 #[derive(Debug, Clone)]
 pub struct PyPackageConfig {
     /// Directory of the Python package (e.g. `python/my_pkg`).
@@ -410,11 +422,21 @@ pub struct RestClientOptions {
     /// (`application/x-www-form-urlencoded`) instead of as JSON. The response is still JSON.
     pub form_encoded_methods: Vec<String>,
 
+    /// RPCs, as `package.Service.Method`, whose request body keeps the fields that go in the URL
+    /// path. By `google.api.http` the body leaves them out; some APIs want them in both places
+    /// and check that the values match.
+    pub path_fields_in_body_methods: Vec<String>,
+
     /// Proto packages whose query parameters are sent by their JSON (lowerCamelCase) name, as
     /// their bodies are (`startIndex`, not `start_index`). Elsewhere a query parameter is sent
     /// by its proto name, or by its `json_name` when the proto sets one that differs from the
     /// default. The generated server extractors read the same keys.
     pub json_query_packages: Vec<String>,
+
+    /// The product of the `User-Agent` that the generated `reqwest` transport sends by default:
+    /// `<product>/<version of the client crate>`. The browser (`wasm32`) sends its own. Every
+    /// transport can set another one with `with_user_agent`. Needs the `reqwest` transport.
+    pub user_agent: Option<String>,
 }
 
 /// Shape of the JSON error body that the generated error module reads.
@@ -564,15 +586,38 @@ impl CodeGenConfig {
 
     /// Check the options that need other options.
     pub(crate) fn validate_options(&self) -> Result<()> {
+        if self.output.server.is_some() && self.output.common.is_none() {
+            return Err(Error::Build(
+                "the server routes take the requests as Axum extractors: the server output \
+                 needs `CodeGenOutput::common`"
+                    .into(),
+            ));
+        }
+        if self.rest_client.user_agent.is_some() && !self.uses_reqwest_transport() {
+            return Err(Error::Build(
+                "the default `User-Agent` is sent by the generated `reqwest` transport: \
+                 `RestClientOptions::user_agent` needs it"
+                    .into(),
+            ));
+        }
         if self.output.python.is_some() {
-            if self
-                .bindings
-                .as_ref()
-                .and_then(|b| b.python.as_ref())
-                .is_none()
-            {
+            let Some(python) = self.bindings.as_ref().and_then(|b| b.python.as_ref()) else {
                 return Err(Error::Build(
                     "the Python output needs `BindingsConfig::python`".into(),
+                ));
+            };
+            if python.user_agent.is_some() && !self.uses_reqwest_transport() {
+                return Err(Error::Build(
+                    "the Python `User-Agent` is set on the generated `reqwest` transport: \
+                     `PythonOptions::user_agent` needs it"
+                        .into(),
+                ));
+            }
+            if python.public_modules && python.module.is_none() {
+                return Err(Error::Build(
+                    "the Python `public_modules` re-export the submodules of \
+                     `PythonOptions::module`: they need it"
+                        .into(),
                 ));
             }
             if self.rest_client.error_module.is_none() {
@@ -636,13 +681,14 @@ impl CodeGenConfig {
 
 /// Output directory configuration for code generation.
 ///
-/// Only `common` is required. All other outputs are optional — set to `None` to skip that
-/// output entirely. For example, a server-only crate can omit `client`, and a client-only
-/// crate can omit `server`.
+/// All outputs are optional — set to `None` to skip that output entirely. For example, a
+/// server-only crate can omit `client`, and a client-only crate can omit `server` and
+/// `common`.
 #[derive(Debug, Clone)]
 pub struct CodeGenOutput {
-    /// Output directory for common (shared extractor) code.
-    pub common: PathBuf,
+    /// Output directory for common (shared extractor) code: the Axum request extractors of
+    /// the server. Generation is skipped when `None`; the `server` output needs it.
+    pub common: Option<PathBuf>,
     /// Parent models directory (e.g. `crates/common/src/models`).
     ///
     /// When `Some`, the generator writes `labels.rs`, `pyo3_impls.rs`, and `mod.rs`

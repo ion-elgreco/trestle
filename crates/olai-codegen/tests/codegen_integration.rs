@@ -37,7 +37,7 @@ fn make_test_config(
             ..Default::default()
         },
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: None,
             models_subdir: "_gen".to_string(),
             server: None,
@@ -69,6 +69,8 @@ fn make_test_config(
                 module: None,
                 async_methods: false,
                 keyword_only: false,
+                public_modules: false,
+                user_agent: None,
             }),
         }),
     }

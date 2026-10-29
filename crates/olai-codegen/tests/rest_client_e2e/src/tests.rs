@@ -5,7 +5,7 @@ use axum::body::Bytes;
 use axum::extract::{OriginalUri, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use futures::TryStreamExt;
 use serde_json::{Value, json};
 
@@ -13,7 +13,8 @@ use crate::codegen::DemoClient;
 use crate::codegen::error::Error;
 use crate::models::demo::v1::{Color, CreateWidgetRequest, ErrorCode, Widget};
 
-/// What the server saw: the raw request paths, bodies, content types and authorization headers.
+/// What the server saw: the raw request paths, bodies, content types, authorization headers and
+/// user agents.
 #[derive(Clone, Default)]
 struct Seen(Arc<Mutex<Vec<String>>>);
 
@@ -34,6 +35,9 @@ fn record(seen: &Seen, uri: &OriginalUri, headers: &HeaderMap) {
     }
     if let Some(ct) = headers.get(header::CONTENT_TYPE) {
         seen.push(format!("content-type {}", ct.to_str().unwrap()));
+    }
+    if let Some(agent) = headers.get(header::USER_AGENT) {
+        seen.push(format!("user-agent {}", agent.to_str().unwrap()));
     }
 }
 
@@ -145,10 +149,10 @@ async fn exchange_token(
 
 async fn widget_exists(State(seen): State<Seen>, Path(name): Path<String>) -> StatusCode {
     seen.push(format!("HEAD {name}"));
-    if name == "missing" {
-        StatusCode::NOT_FOUND
-    } else {
-        StatusCode::OK
+    match name.as_str() {
+        "missing" => StatusCode::NOT_FOUND,
+        "denied" => StatusCode::FORBIDDEN,
+        _ => StatusCode::OK,
     }
 }
 
@@ -165,6 +169,22 @@ async fn search_widgets(State(seen): State<Seen>, body: Bytes) -> Response {
         .map(|name| json!({"name": name}))
         .collect();
     axum::Json(json!({"widgets": widgets})).into_response()
+}
+
+async fn tag_widget(State(seen): State<Seen>, Path(name): Path<String>, body: Bytes) -> Response {
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    seen.push(format!("tag {name} body {body}"));
+    StatusCode::OK.into_response()
+}
+
+async fn rename_widget(
+    State(seen): State<Seen>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Response {
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    seen.push(format!("rename {name} body {body}"));
+    StatusCode::OK.into_response()
 }
 
 async fn stream_widgets(uri: OriginalUri) -> Response {
@@ -189,6 +209,33 @@ async fn widget_version(Path(name): Path<String>) -> Response {
     ([("Widget-Version", "7"), ("ETag", "abc")], body).into_response()
 }
 
+/// Store a blob: the server notes its path, content type and bytes.
+async fn put_blob(
+    State(seen): State<Seen>,
+    uri: OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    seen.push(format!(
+        "PUT {} {content_type} {:?}",
+        uri.path(),
+        body.as_ref()
+    ));
+    StatusCode::NO_CONTENT
+}
+
+/// A blob whose bytes are `blob:` and its path, or `range:` and the `Range` header.
+async fn get_blob(Path(path): Path<String>, headers: HeaderMap) -> Vec<u8> {
+    match headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
+        Some(range) => format!("range:{range}").into_bytes(),
+        None => format!("blob:{path}").into_bytes(),
+    }
+}
+
 /// Start the demo server on a free port; returns its base URL and what it saw.
 async fn serve() -> (url::Url, Seen) {
     let seen = Seen::default();
@@ -199,8 +246,11 @@ async fn serve() -> (url::Url, Seen) {
             get(get_widget).delete(delete_widget).head(widget_exists),
         )
         .route("/api/v1/search", get(search_widgets))
+        .route("/api/v1/widgets/{name}/tags", post(tag_widget))
+        .route("/api/v1/widgets/{name}/rename", post(rename_widget))
         .route("/api/v1/widget-lines", get(stream_widgets))
         .route("/api/v1/widgets/{name}/version", get(widget_version))
+        .route("/api/v1/blobs/{*path}", put(put_blob).get(get_blob))
         .route("/auth/tokens", post(exchange_token))
         .with_state(seen.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -300,6 +350,12 @@ async fn error_answers_keep_status_code_message_and_details() {
     assert_eq!(e.message, "no widget named missing");
     assert_eq!(e.details, vec![json!({"reason": "gone"})]);
     assert_eq!(e.to_string(), "WIDGET_NOT_FOUND: no widget named missing");
+    // The body as sent stays readable.
+    assert!(
+        e.body.starts_with('{') && e.body.contains("\"reason\":\"gone\""),
+        "{}",
+        e.body
+    );
 
     // A code that the client does not know is kept, from the camelCase key too.
     let err = client.widget("odd").get().await.unwrap_err();
@@ -313,6 +369,8 @@ async fn error_answers_keep_status_code_message_and_details() {
     assert_eq!(err.status(), Some(502));
     assert_eq!(err.code(), None);
     assert_eq!(err.to_string(), "HTTP 502: bad gateway");
+    let Error::Api(e) = err else { unreachable!() };
+    assert_eq!(e.body, "bad gateway\n");
 
     // An error object under `error`, and OAuth's error keys.
     let err = client.widget("nested").get().await.unwrap_err();
@@ -337,6 +395,43 @@ async fn list_stream_reads_all_pages() {
         .unwrap();
     let names: Vec<_> = all.iter().map(|w| w.name.as_str()).collect();
     assert_eq!(names, ["w1", "w2", "w3"]);
+}
+
+#[tokio::test]
+async fn list_stream_holds_its_cap_when_pages_are_larger() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    // The server sends 2 widgets on its first page whatever the request asks for.
+    let one: Vec<Widget> = client
+        .list_widgets()
+        .with_max_results(1)
+        .into_stream()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(one.len(), 1);
+    // Each page asks for the widgets still wanted.
+    let three: Vec<Widget> = client
+        .list_widgets()
+        .with_max_results(3)
+        .into_stream()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(three.len(), 3);
+    let queries: Vec<_> = seen
+        .all()
+        .into_iter()
+        .filter(|e| e.starts_with("query "))
+        .collect();
+    assert_eq!(
+        queries,
+        [
+            "query max_results=1",
+            "query max_results=3",
+            "query max_results=1&page_token=p2"
+        ]
+    );
 }
 
 #[tokio::test]
@@ -395,16 +490,50 @@ async fn free_form_json_keeps_whole_numbers() {
 async fn head_requests_and_get_bodies() {
     let (base, seen) = serve().await;
     let client = DemoClient::new_unauthenticated(base);
-    client.widget_exists("w").await.unwrap();
-    let err = client.widget_exists("missing").await.unwrap_err();
-    assert_eq!(err.status(), Some(404));
-    let found = client.search_widgets("w").await.unwrap();
+    // A HEAD request without an answer tells whether the widget exists; other errors fail.
+    assert!(client.widget_exists("w").await.unwrap());
+    assert!(!client.widget_exists("missing").await.unwrap());
+    let err = client.widget_exists("denied").await.unwrap_err();
+    assert_eq!(err.status(), Some(403));
+    let found = client
+        .search_widgets(
+            "w",
+            vec!["a".to_string()],
+            [(
+                "t".to_string(),
+                buffa_types::google::protobuf::ListValue {
+                    values: vec![1_i64.into(), 2_i64.into()],
+                    ..Default::default()
+                },
+            )],
+        )
+        .await
+        .unwrap();
     let names: Vec<_> = found.widgets.iter().map(|w| w.name.as_str()).collect();
     assert_eq!(names, ["w1", "w2"]);
     let seen = seen.all();
     assert!(seen.contains(&"HEAD w".to_string()), "{seen:?}");
     assert!(
-        seen.contains(&r#"GET body {"prefix":"w"}"#.to_string()),
+        seen.contains(&r#"GET body {"prefix":"w","tags":["a"],"filters":{"t":[1,2]}}"#.to_string()),
+        "{seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn path_values_stay_out_of_the_body() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    client.tag_widget("w", "blue").await.unwrap();
+    // A method of `path_fields_in_body_methods` keeps them.
+    client.rename_widget("w", "v").await.unwrap();
+    // The name is in the path only: a strict server rejects fields that it does not know.
+    let seen = seen.all();
+    assert!(
+        seen.contains(&r#"tag w body {"tag":"blue"}"#.to_string()),
+        "{seen:?}"
+    );
+    assert!(
+        seen.contains(&r#"rename w body {"name":"w","new_name":"v"}"#.to_string()),
         "{seen:?}"
     );
 }
@@ -428,6 +557,31 @@ async fn ndjson_answers_and_header_fields() {
     assert_eq!(version.etag.as_deref(), Some("abc"));
     let bare = client.widget_version("bare").await.unwrap();
     assert_eq!((bare.name.as_str(), bare.version), ("", 7));
+}
+
+#[tokio::test]
+async fn raw_bodies_and_paths_of_several_segments() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    // A path value keeps its `/` and drops its leading one.
+    client
+        .put_blob("/a/b c.bin", vec![0, 1, 255])
+        .await
+        .unwrap();
+    assert_eq!(
+        seen.all(),
+        ["PUT /api/v1/blobs/a/b%20c.bin application/octet-stream [0, 1, 255]"]
+    );
+    let blob = client.get_blob("x/y").await.unwrap();
+    assert_eq!(blob.data, b"blob:x/y");
+    assert_eq!(blob.size, Some(8));
+    // A request header field goes in its header, not in the query.
+    let part = client
+        .get_blob("x/y")
+        .with_range("bytes=0-1".to_string())
+        .await
+        .unwrap();
+    assert_eq!(part.data, b"range:bytes=0-1");
 }
 
 #[tokio::test]
@@ -474,4 +628,35 @@ async fn bearer_token_goes_in_every_request_and_form_bodies_are_encoded() {
     // The token never shows in `Debug`.
     let transport = crate::codegen::transport::HttpClient::default().with_token("secret");
     assert!(!format!("{transport:?}").contains("secret"));
+}
+
+#[tokio::test]
+async fn user_agent_goes_in_every_request() {
+    let (base, seen) = serve().await;
+    let default = format!("user-agent demo-client/{}", env!("CARGO_PKG_VERSION"));
+    DemoClient::new_unauthenticated(base.clone())
+        .widget("w")
+        .delete()
+        .await
+        .unwrap();
+    DemoClient::new_with_token(base.clone(), "secret")
+        .widget("w")
+        .delete()
+        .await
+        .unwrap();
+    DemoClient::new_unauthenticated(base)
+        .with_user_agent("demo-cli/1.0")
+        .widget("w")
+        .delete()
+        .await
+        .unwrap();
+    let agents: Vec<String> = seen
+        .all()
+        .into_iter()
+        .filter(|e| e.starts_with("user-agent "))
+        .collect();
+    assert_eq!(
+        agents,
+        [default.clone(), default, "user-agent demo-cli/1.0".into()]
+    );
 }

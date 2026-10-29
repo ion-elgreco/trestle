@@ -33,7 +33,10 @@ fn compile_descriptors(out: &Path) -> PathBuf {
         .expect("protoc on PATH");
     assert!(status.success(), "protoc failed");
     println!("cargo:rerun-if-changed={}", fixture.join("proto").display());
-    println!("cargo:rerun-if-changed={}", fixture.join("../../src").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        fixture.join("../../src").display()
+    );
     descriptors
 }
 
@@ -43,7 +46,12 @@ fn demo_config(out: &Path) -> CodeGenConfig {
     let models_dir = out.join("models");
     let gen_dir = models_dir.join("_gen");
     let package_dir = out.join("pkg").join("demo");
-    for dir in [&gen_dir, &out.join("client"), &out.join("python"), &package_dir] {
+    for dir in [
+        &gen_dir,
+        &out.join("client"),
+        &out.join("python"),
+        &package_dir,
+    ] {
         std::fs::create_dir_all(dir).unwrap();
     }
     CodeGenConfig {
@@ -70,10 +78,12 @@ fn demo_config(out: &Path) -> CodeGenConfig {
                 ..Default::default()
             }),
             form_encoded_methods: vec!["demo.v1.TokenService.ExchangeToken".into()],
+            path_fields_in_body_methods: vec!["demo.v1.ProbeService.RenameWidget".into()],
             json_query_packages: vec![],
+            user_agent: Some("demo-client".into()),
         },
         output: CodeGenOutput {
-            common: gen_dir.clone(),
+            common: Some(gen_dir.clone()),
             models: Some(models_dir),
             models_subdir: "_gen".into(),
             server: None,
@@ -105,6 +115,8 @@ fn demo_config(out: &Path) -> CodeGenConfig {
                 module: Some("demo._core".into()),
                 async_methods: true,
                 keyword_only: true,
+                public_modules: false,
+                user_agent: Some("demo-python".into()),
             }),
         }),
     }

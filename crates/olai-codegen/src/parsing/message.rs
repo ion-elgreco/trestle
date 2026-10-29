@@ -114,8 +114,10 @@ pub(super) fn process_message(
         let field_info = MessageField {
             name: field.name().to_string(),
             json_name,
-            response_header: extract_response_header(field),
-            emit_unpopulated: extract_emit_unpopulated(field),
+            response_header: string_option(field, super::TRESTLE_RESPONSE_HEADER_EXTENSION),
+            request_header: string_option(field, super::TRESTLE_REQUEST_HEADER_EXTENSION),
+            emit_unpopulated: bool_option(field, super::TRESTLE_EMIT_UNPOPULATED_EXTENSION),
+            raw_body: bool_option(field, super::TRESTLE_RAW_BODY_EXTENSION),
             unified_type,
             documentation,
             field_behavior,
@@ -141,7 +143,9 @@ pub(super) fn process_message(
             name: oneof_field_name.clone(),
             json_name: None,
             response_header: None,
+            request_header: None,
             emit_unpopulated: false,
+            raw_body: false,
             unified_type: UnifiedType {
                 base_type: BaseType::OneOf(enum_type_name.clone()),
                 is_optional: true, // oneof fields are always Option<enum>
@@ -215,27 +219,25 @@ pub(super) fn process_message(
     Ok(())
 }
 
-/// The `(olai.trestle.v1.emit_unpopulated)` option of a field.
-fn extract_emit_unpopulated(field: &FieldDescriptorProto) -> bool {
+/// A `bool` option of trestle on a field, such as `(olai.trestle.v1.emit_unpopulated)`, by its
+/// extension number: whether it is set to `true`.
+fn bool_option(field: &FieldDescriptorProto, number: u32) -> bool {
     field.options.as_ref().is_some_and(|options| {
-        options.unknown_fields().iter().any(|(number, value)| {
-            number == super::TRESTLE_EMIT_UNPOPULATED_EXTENSION
-                && matches!(value, protobuf::UnknownValueRef::Varint(v) if v != 0)
+        options.unknown_fields().iter().any(|(n, value)| {
+            n == number && matches!(value, protobuf::UnknownValueRef::Varint(v) if v != 0)
         })
     })
 }
 
-/// The `(olai.trestle.v1.response_header)` option of a field: the HTTP response header that the
-/// field comes from.
-fn extract_response_header(field: &FieldDescriptorProto) -> Option<String> {
+/// A `string` option of trestle on a field, such as `(olai.trestle.v1.response_header)`, by its
+/// extension number.
+fn string_option(field: &FieldDescriptorProto, number: u32) -> Option<String> {
     let options = field.options.as_ref()?;
     options
         .unknown_fields()
         .iter()
-        .find_map(|(number, value)| match value {
-            protobuf::UnknownValueRef::LengthDelimited(bytes)
-                if number == super::TRESTLE_RESPONSE_HEADER_EXTENSION =>
-            {
+        .find_map(|(n, value)| match value {
+            protobuf::UnknownValueRef::LengthDelimited(bytes) if n == number => {
                 String::from_utf8(bytes.to_vec()).ok()
             }
             _ => None,

@@ -324,7 +324,17 @@ pub fn add_exceptions(module: &Bound<'_, ::pyo3::types::PyModule>) -> PyResult<(
 fn client_exception(py: Python<'_>, e: ClientError) -> PyResult<PyErr> {
     let (message, code, status, details) = match e {
         ClientError::Api(api) => (api.message, api.code, Some(api.status), api.details),
-        other => (other.to_string(), None, None, ::std::vec::Vec::new()),
+        other => {
+            let mut message = other.to_string();
+            let mut cause = ::std::error::Error::source(&other)
+                .and_then(::std::error::Error::source);
+            while let Some(error) = cause {
+                message.push_str(": ");
+                message.push_str(&error.to_string());
+                cause = error.source();
+            }
+            (message, None, None, ::std::vec::Vec::new())
+        }
     };
     let details = details
         .iter()

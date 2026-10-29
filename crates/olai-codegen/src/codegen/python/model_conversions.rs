@@ -122,23 +122,40 @@ pub(crate) fn generate_pyo3_impls(
 
 /// The expression that converts the Python object `value` (a `Bound<PyAny>`) into the Rust
 /// value of a free-form JSON field of type `ty`: a single value, a `Vec` from a list, or a map
-/// from a dict.
-pub(crate) fn json_from_py(json: JsonType, ty: &UnifiedType, value: TokenStream) -> TokenStream {
+/// from a dict. For a method argument (`arg`), a list or map is collected into a `Vec` (of
+/// pairs, for a map): the client methods and builders take an `impl IntoIterator`, which leaves
+/// nothing to infer the collection from.
+pub(crate) fn json_from_py(
+    json: JsonType,
+    ty: &UnifiedType,
+    value: TokenStream,
+    arg: bool,
+) -> TokenStream {
     let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
     if ty.is_repeated {
+        let collection = if arg {
+            quote! { ::std::vec::Vec<_> }
+        } else {
+            quote! { _ }
+        };
         quote! {{
             let items: ::std::vec::Vec<::pyo3::Bound<'_, ::pyo3::PyAny>> =
                 ::pyo3::types::PyAnyMethods::extract(&#value)?;
-            items.iter().map(#from_py).collect::<::pyo3::PyResult<_>>()?
+            items.iter().map(#from_py).collect::<::pyo3::PyResult<#collection>>()?
         }}
     } else if matches!(ty.base_type, BaseType::Map(..)) {
+        let collection = if arg {
+            quote! { ::std::vec::Vec<_> }
+        } else {
+            quote! { _ }
+        };
         quote! {{
             let items: ::std::collections::HashMap<::std::string::String, ::pyo3::Bound<'_, ::pyo3::PyAny>> =
                 ::pyo3::types::PyAnyMethods::extract(&#value)?;
             items
                 .iter()
                 .map(|(key, item)| ::core::result::Result::Ok((key.clone(), #from_py(item)?)))
-                .collect::<::pyo3::PyResult<_>>()?
+                .collect::<::pyo3::PyResult<#collection>>()?
         }}
     } else {
         quote! { ::buffa::MessageField::some(#from_py(&#value)?) }
@@ -217,7 +234,13 @@ fn json_conversions() -> TokenStream {
             if obj.is_instance_of::<::pyo3::types::PyInt>()
                 || obj.is_instance_of::<::pyo3::types::PyFloat>()
             {
-                return ::core::result::Result::Ok(Value::from(obj.extract::<f64>()?));
+                let number = obj.extract::<f64>()?;
+                if !number.is_finite() {
+                    return ::core::result::Result::Err(::pyo3::exceptions::PyValueError::new_err(
+                        ::std::format!("not a JSON number: {number}"),
+                    ));
+                }
+                return ::core::result::Result::Ok(Value::from(number));
             }
             if obj.is_instance_of::<::pyo3::types::PyString>() {
                 return ::core::result::Result::Ok(Value::from(obj.extract::<::std::string::String>()?));
@@ -337,6 +360,21 @@ impl<'a> ModelClasses<'a> {
         self.messages.iter().filter_map(|name| {
             let package = package_of(name, &self.packages)?;
             Some((super::package_segment(package), wrapper_ident(name)))
+        })
+    }
+
+    /// The Python names of the enums and the messages, with the Python submodule segment of
+    /// their package and whether they are enums.
+    pub(crate) fn public_names(&self) -> impl Iterator<Item = (&'a str, String, bool)> {
+        let enums = self.enums.iter().map(|name| (*name, true));
+        let messages = self.messages.iter().map(|name| (*name, false));
+        enums.chain(messages).filter_map(|(name, is_enum)| {
+            let package = package_of(name, &self.packages)?;
+            Some((
+                super::package_segment(package),
+                python_class_name(name),
+                is_enum,
+            ))
         })
     }
 }
@@ -459,16 +497,21 @@ impl Ctx<'_> {
 fn python_repr_fn() -> TokenStream {
     quote! {
         /// `Name(field=value, …)` with the `repr` of each attribute in `fields`, without the
-        /// ones that are `None`.
+        /// ones that are `None`. A field marked `true` (`debug_redact` in the proto) shows `'***'`.
         fn __python_repr(
             obj: &::pyo3::Bound<'_, ::pyo3::PyAny>,
-            fields: &[&str],
+            fields: &[(&str, bool)],
         ) -> ::pyo3::PyResult<::std::string::String> {
             use ::pyo3::types::{PyAnyMethods, PyTypeMethods};
             let mut shown = ::std::vec::Vec::with_capacity(fields.len());
-            for field in fields {
+            for (field, redact) in fields {
                 let value = obj.getattr(*field)?;
-                if !value.is_none() {
+                if value.is_none() {
+                    continue;
+                }
+                if *redact {
+                    shown.push(::std::format!("{field}='***'"));
+                } else {
                     shown.push(::std::format!("{field}={}", value.repr()?));
                 }
             }
@@ -682,14 +725,22 @@ fn message_wrapper(
     let oneof_getters = oneofs.iter().flat_map(OneofAccessor::variant_getters);
     let ctor = ctx
         .has_constructor(fq_name)
-        .then(|| constructor(&accessors, &oneofs, &inner));
+        .then(|| constructor(&accessors, &oneofs, &inner, ctx.options.keyword_only));
 
     // The Python names: a raw identifier (`r#type`) is `type` in Python.
     let fields = accessors
         .iter()
-        .map(|a| a.ident.clone())
-        .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents))
-        .map(|ident| syn::ext::IdentExt::unraw(&ident).to_string());
+        .map(|a| (a.ident.clone(), a.sensitive))
+        .chain(
+            oneofs
+                .iter()
+                .flat_map(OneofAccessor::variant_param_idents)
+                .map(|ident| (ident, false)),
+        )
+        .map(|(ident, redact)| {
+            let name = syn::ext::IdentExt::unraw(&ident).to_string();
+            quote! { (#name, #redact) }
+        });
 
     let module_arg = ctx.module_arg(fq_name);
     let stub_class = super::stub_class_attr();
@@ -703,8 +754,8 @@ fn message_wrapper(
         // `FromPyObject` derive for `Clone` `#[pyclass]` types opt-in. Keep the pre-0.28
         // behavior (derive it) explicitly so Python callers can still pass a wrapper into
         // Rust-side functions and to silence the deprecation under `-D warnings`.
-        #[::pyo3::pyclass(name = #class_name, frozen, #module_arg from_py_object)]
-        #[derive(Clone, Debug)]
+        #[::pyo3::pyclass(name = #class_name, eq, frozen, #module_arg from_py_object)]
+        #[derive(Clone, Debug, PartialEq)]
         pub struct #wrapper(pub #inner);
 
         #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
@@ -718,10 +769,6 @@ fn message_wrapper(
 
             fn __repr__(slf: &::pyo3::Bound<'_, Self>) -> ::pyo3::PyResult<::std::string::String> {
                 __python_repr(slf.as_any(), &[#(#fields),*])
-            }
-
-            fn __eq__(&self, other: &Self) -> bool {
-                self.0 == other.0
             }
         }
 
@@ -841,6 +888,11 @@ struct FieldAccessor {
     documentation: Option<String>,
     /// The free-form JSON type of the field (buffa only): Python sees plain JSON objects.
     json: Option<JsonType>,
+    /// Whether the proto marks the field `REQUIRED`: a required argument of the constructor
+    /// with [`PythonOptions::keyword_only`](crate::PythonOptions::keyword_only).
+    required: bool,
+    /// Whether the proto marks the field `debug_redact`: the Python repr hides its value.
+    sensitive: bool,
 }
 
 impl FieldAccessor {
@@ -864,7 +916,12 @@ impl FieldAccessor {
         hidden_zero: bool,
     ) -> Self {
         let ident = crate::utils::field_ident(&super::sanitize_python_field_name(&field.name));
-        let in_project = match &field.unified_type.base_type {
+        // A map is in the project when its values are.
+        let element = match &field.unified_type.base_type {
+            BaseType::Map(_, value) => &value.base_type,
+            base => base,
+        };
+        let in_project = match element {
             BaseType::Message(n) | BaseType::Enum(n) => is_in_project(n, packages),
             _ => false,
         };
@@ -886,6 +943,10 @@ impl FieldAccessor {
             hidden_zero,
             documentation: field.documentation.clone(),
             json: JsonType::of_field(&field.unified_type).filter(|_| runtime == Runtime::Buffa),
+            required: field
+                .field_behavior
+                .contains(&crate::google::api::FieldBehavior::Required),
+            sensitive: field.is_sensitive,
         }
     }
 
@@ -962,7 +1023,7 @@ impl FieldAccessor {
     /// The expression that converts the Python object `value` (a `Bound<PyAny>`) into the
     /// Rust value of a free-form JSON field.
     fn json_store(&self, json: JsonType) -> TokenStream {
-        json_from_py(json, &self.ty, quote! { value })
+        json_from_py(json, &self.ty, quote! { value }, false)
     }
 
     /// The Python-visible Rust type for this field (the getter return / constructor
@@ -1045,8 +1106,10 @@ impl FieldAccessor {
             return self.json_getter(json);
         }
         let getter = self.getter_ident();
-        let ret = self.py_type();
-        let body = self.read_expr();
+        let (ret, body) = match self.ty.is_singular_bytes() {
+            true => self.bytes_getter(),
+            false => (self.py_type(), self.read_expr()),
+        };
         let doc = doc_tokens(self.documentation.as_deref());
         quote! {
             #doc
@@ -1054,6 +1117,39 @@ impl FieldAccessor {
             fn #getter(&self) -> #ret {
                 #body
             }
+        }
+    }
+
+    /// The return type and body of the getter of a singular `bytes` field: a `Cow` that lends the
+    /// bytes, which PyO3 copies into `bytes` once, and the stubs show as `bytes`.
+    fn bytes_getter(&self) -> (TokenStream, TokenStream) {
+        let ident = &self.ident;
+        match self.is_optional_scalar() {
+            true => (
+                quote! { ::core::option::Option<::std::borrow::Cow<'_, [u8]>> },
+                quote! { self.0.#ident.as_deref().map(::std::borrow::Cow::Borrowed) },
+            ),
+            false => (
+                quote! { ::std::borrow::Cow<'_, [u8]> },
+                quote! { ::std::borrow::Cow::Borrowed(&self.0.#ident) },
+            ),
+        }
+    }
+
+    /// The type that a constructor argument takes: the Python-visible type, but `bytes` for a
+    /// singular `bytes` field.
+    fn input_type(&self) -> TokenStream {
+        match self.ty.is_singular_bytes() {
+            true => super::bindings::py_bytes_input(self.is_optional_scalar()),
+            false => self.py_type(),
+        }
+    }
+
+    /// [`Self::input_type`] without its `Option`, for a required constructor argument.
+    fn input_base_type(&self) -> TokenStream {
+        match self.ty.is_singular_bytes() {
+            true => super::bindings::py_bytes_input(false),
+            false => self.base_py_type(),
         }
     }
 
@@ -1199,8 +1295,16 @@ impl FieldAccessor {
         if self.ty.is_repeated {
             return self.write_repeated();
         }
-        if let BaseType::Map(_, _) = &self.ty.base_type {
-            return quote! { value };
+        if self.ty.is_singular_bytes() {
+            return super::bindings::bytes_to_vec(quote! { value }, self.is_optional_scalar());
+        }
+        if let BaseType::Map(_, value) = &self.ty.base_type {
+            // Message values arrive as their wrappers.
+            return if self.in_project && matches!(value.base_type, BaseType::Message(_)) {
+                quote! { value.into_iter().map(|(k, v)| (k, ::core::convert::Into::into(v))).collect() }
+            } else {
+                quote! { value }
+            };
         }
         if self.is_optional_scalar() {
             return self.write_optional_scalar();
@@ -1597,10 +1701,20 @@ fn read_map(access: &TokenStream, value: &UnifiedType, in_project: bool) -> Toke
 /// adopters used, see issue #99). Provided values are stored; omitted ones fall
 /// back to the inner type's `Default`. If more than one variant of the same oneof
 /// is supplied, the last one in proto declaration order wins.
+/// `let value = <argument>;`, which the store expressions read; nothing for an argument that is
+/// itself named `value`.
+fn bind_value(ident: &proc_macro2::Ident) -> Option<TokenStream> {
+    (ident != "value").then(|| quote! { let value = #ident; })
+}
+
+/// The `#[new]` constructor of an input model. Every argument is optional (`None`), except, with
+/// `keyword_only`, the `REQUIRED` fields: they come first, as required arguments, and the others
+/// are keyword-only.
 fn constructor(
     accessors: &[FieldAccessor],
     oneofs: &[OneofAccessor],
     inner: &syn::Path,
+    keyword_only: bool,
 ) -> TokenStream {
     if accessors.is_empty() && oneofs.is_empty() {
         return quote! {
@@ -1611,16 +1725,34 @@ fn constructor(
         };
     }
 
-    // Plain-field params: fields whose Python type is *already* `Option<..>`
+    let is_required = |a: &&FieldAccessor| keyword_only && a.required;
+    let (required, optional): (Vec<&FieldAccessor>, Vec<&FieldAccessor>) =
+        accessors.iter().partition(is_required);
+
+    // A required argument is the bare Python type: a field whose Python type is an `Option`
+    // (a singular message, an explicit-presence scalar) takes its inner type.
+    let required_params = required.iter().map(|a| {
+        let ident = &a.ident;
+        if a.json.is_some() {
+            return quote! { #ident: ::pyo3::Bound<'_, ::pyo3::PyAny> };
+        }
+        let ty = if a.py_type_is_optional() {
+            a.input_base_type()
+        } else {
+            a.input_type()
+        };
+        quote! { #ident: #ty }
+    });
+    // Optional plain fields: fields whose Python type is *already* `Option<..>`
     // (singular messages, explicit-presence scalars) must not be double-wrapped —
     // `Option<Option<T>>` makes pyo3's `#[new]` arg-coercion ambiguous. For those
     // the single `Option` already encodes the "omitted/None" keyword default.
-    let field_params = accessors.iter().map(|a| {
+    let optional_params = optional.iter().map(|a| {
         let ident = &a.ident;
         if a.json.is_some() {
             return quote! { #ident: ::core::option::Option<::pyo3::Bound<'_, ::pyo3::PyAny>> };
         }
-        let ty = a.py_type();
+        let ty = a.input_type();
         if a.py_type_is_optional() {
             quote! { #ident: #ty }
         } else {
@@ -1629,17 +1761,54 @@ fn constructor(
     });
     // One `Option<PyPayload>` param per oneof variant, flattened across all oneofs.
     let oneof_params = oneofs.iter().flat_map(OneofAccessor::ctor_params);
-    let params = field_params.chain(oneof_params);
+    let params = required_params.chain(optional_params).chain(oneof_params);
 
-    // `<name> = None` for every plain field then every oneof variant, in order.
-    let sig_parts = accessors
+    // The required arguments, then `*` with `keyword_only`, then `<name> = None` for every
+    // other plain field and every oneof variant, in order.
+    let optional_idents: Vec<proc_macro2::Ident> = optional
         .iter()
         .map(|a| a.ident.clone())
         .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents))
-        .map(|ident| quote! { #ident = None });
+        .collect();
+    let mut sig_parts: Vec<TokenStream> = required
+        .iter()
+        .map(|a| {
+            let ident = &a.ident;
+            quote! { #ident }
+        })
+        .collect();
+    if keyword_only && !optional_idents.is_empty() {
+        sig_parts.push(quote! { * });
+    }
+    sig_parts.extend(optional_idents.iter().map(|ident| quote! { #ident = None }));
     let sig = quote! { #(#sig_parts),* };
 
-    let assigns = accessors.iter().map(|a| {
+    let required_assigns = required.iter().map(|a| {
+        let ident = &a.ident;
+        let store = match a.json {
+            Some(json) => a.json_store(json),
+            None => a.write_expr(),
+        };
+        // The store expressions read `value`: the `Option` that an optional argument would be,
+        // for a field whose Python type is an `Option`.
+        if a.json.is_none() && a.py_type_is_optional() {
+            quote! {
+                {
+                    let value = ::core::option::Option::Some(#ident);
+                    inner.#ident = #store;
+                }
+            }
+        } else {
+            let bind = bind_value(ident);
+            quote! {
+                {
+                    #bind
+                    inner.#ident = #store;
+                }
+            }
+        }
+    });
+    let optional_assigns = optional.iter().map(|a| {
         let ident = &a.ident;
         if let Some(json) = a.json {
             let store = a.json_store(json);
@@ -1654,9 +1823,10 @@ fn constructor(
         if a.py_type_is_optional() {
             // `value` is the whole (already-`Option`) argument; store unconditionally
             // (an omitted kwarg arrives as `None`, the field's natural absent value).
+            let bind = bind_value(ident);
             quote! {
                 {
-                    let value = #ident;
+                    #bind
                     inner.#ident = #store;
                 }
             }
@@ -1684,7 +1854,8 @@ fn constructor(
         #[pyo3(signature = (#sig))]
         fn new(#(#params,)*) -> #ret {
             let mut inner = <#inner as ::core::default::Default>::default();
-            #(#assigns)*
+            #(#required_assigns)*
+            #(#optional_assigns)*
             #(#oneof_assigns)*
             #result
         }
@@ -1856,7 +2027,9 @@ mod tests {
             name: name.to_string(),
             json_name: None,
             response_header: None,
+            request_header: None,
             emit_unpopulated: false,
+            raw_body: false,
             unified_type: ty,
             documentation: None,
             oneof_variants: None,

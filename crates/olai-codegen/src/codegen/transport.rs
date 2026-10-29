@@ -1,10 +1,10 @@
 //! The plain `reqwest` transport for generated REST clients.
 //!
 //! Selected with `transport_type_path =` [`REQWEST_TRANSPORT_TYPE_PATH`]. The generator then emits
-//! `transport.rs` into the client output: an `HttpClient` that wraps a `reqwest::Client` and an
-//! optional bearer token, with the per-verb builder methods the client bodies call. It has no
-//! cloud credential providers and no retries, and it builds for native targets and `wasm32` alike
-//! (reqwest uses the browser `fetch` there).
+//! `transport.rs` into the client output: an `HttpClient` that wraps a `reqwest::Client`, an
+//! optional bearer token and an optional `User-Agent`, with the per-verb builder methods the
+//! client bodies call. It has no cloud credential providers and no retries, and it builds for
+//! native targets and `wasm32` alike (reqwest uses the browser `fetch` there).
 
 use quote::quote;
 
@@ -13,38 +13,72 @@ use super::format_tokens_static;
 /// Transport type path that selects the generated `reqwest` transport.
 pub const REQWEST_TRANSPORT_TYPE_PATH: &str = "crate::codegen::transport::HttpClient";
 
-/// The `transport.rs` file of the client output.
-pub(crate) fn generate() -> String {
+/// The `transport.rs` file of the client output. With `user_agent`, the default transport sends
+/// `<user_agent>/<version of the client crate>` as its `User-Agent`, except in the browser.
+pub(crate) fn generate(user_agent: Option<&str>) -> String {
+    let (derive, default) = match user_agent {
+        None => (quote! { #[derive(Clone, Default)] }, quote! {}),
+        Some(product) => {
+            let prefix = format!("{product}/");
+            let doc =
+                format!(" own, its `User-Agent` is `{product}/` and the version of this crate.");
+            let default = quote! {
+                impl Default for HttpClient {
+                    /// A transport with a default `reqwest::Client`. Outside the browser, which sends its
+                    #[doc = #doc]
+                    fn default() -> Self {
+                        let client = Self::new(reqwest::Client::default());
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let client =
+                            client.with_user_agent(concat!(#prefix, env!("CARGO_PKG_VERSION")));
+                        client
+                    }
+                }
+            };
+            (quote! { #[derive(Clone)] }, default)
+        }
+    };
     let tokens = quote! {
         use reqwest::{Method, RequestBuilder};
         use url::Url;
 
         /// The HTTP transport of the generated clients: a `reqwest::Client`, plus a bearer token
-        /// that goes in every request when set.
-        #[derive(Clone, Default)]
+        /// and a `User-Agent` that go in every request when set.
+        #derive
         pub struct HttpClient {
             client: reqwest::Client,
             token: Option<String>,
+            user_agent: Option<String>,
         }
+
+        #default
 
         // Hand-written so that the token never shows up in logs or panic messages.
         impl ::std::fmt::Debug for HttpClient {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 f.debug_struct("HttpClient")
                     .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+                    .field("user_agent", &self.user_agent)
                     .finish_non_exhaustive()
             }
         }
 
         impl HttpClient {
-            /// A transport that sends its requests with `client`, without a token.
+            /// A transport that sends its requests with `client`, without a token or a
+            /// `User-Agent` of its own.
             pub fn new(client: reqwest::Client) -> Self {
-                Self { client, token: None }
+                Self { client, token: None, user_agent: None }
             }
 
             /// The same transport, sending `token` as the bearer token of every request.
             pub fn with_token(mut self, token: impl Into<String>) -> Self {
                 self.token = Some(token.into());
+                self
+            }
+
+            /// The same transport, sending `user_agent` as the `User-Agent` of every request.
+            pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
+                self.user_agent = Some(user_agent.into());
                 self
             }
 
@@ -80,7 +114,10 @@ pub(crate) fn generate() -> String {
 
             /// Start a request with any method.
             pub fn request(&self, method: Method, url: Url) -> RequestBuilder {
-                let builder = self.client.request(method, url);
+                let mut builder = self.client.request(method, url);
+                if let Some(user_agent) = &self.user_agent {
+                    builder = builder.header(reqwest::header::USER_AGENT, user_agent);
+                }
                 match &self.token {
                     Some(token) => builder.bearer_auth(token),
                     None => builder,

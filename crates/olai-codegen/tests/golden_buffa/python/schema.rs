@@ -49,8 +49,10 @@ impl PySchemaClient {
         py: Python,
         schema: ::core::option::Option<PySchema>,
     ) -> PyExampleResult<PySchema> {
-        let mut request = self.client.update();
-        request = request.with_schema(schema.map(::core::convert::Into::into));
+        let request = self
+            .client
+            .update()
+            .with_schema(schema.map(::core::convert::Into::into));
         let runtime = crate::codegen::runtime::rt();
         py.detach(|| {
             #[allow(clippy::let_unit_value)]

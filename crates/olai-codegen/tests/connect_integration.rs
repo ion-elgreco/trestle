@@ -23,7 +23,9 @@ fn string_field(name: &str, required: bool) -> MessageField {
         name: name.to_string(),
         json_name: None,
         response_header: None,
+        request_header: None,
         emit_unpopulated: false,
+        raw_body: false,
         unified_type: UnifiedType {
             base_type: BaseType::String,
             is_optional: !required,
@@ -106,7 +108,7 @@ fn connect_config(client_dir: &Path) -> CodeGenConfig {
         connect_client_path: Some("myproto::connect_gen::example::read::v1".into()),
         rest_client: Default::default(),
         output: CodeGenOutput {
-            common: client_dir.join("common"),
+            common: Some(client_dir.join("common")),
             models: None,
             models_subdir: "_gen".into(),
             server: None,

@@ -40,7 +40,7 @@ impl GenerateConfig {
         // the same directory, so `mod.rs` includes the buf-written model files as
         // plain siblings (`./<pkg>.rs`).
         let models_root = resolve_dir(&self.models.dir)?;
-        let common = resolve_dir_joined(&self.models.dir, MODELS_GEN_SUBDIR)?;
+        let common = Some(resolve_dir_joined(&self.models.dir, MODELS_GEN_SUBDIR)?);
         let models = Some(models_root);
 
         let server = self
@@ -152,6 +152,9 @@ impl GenerateConfig {
             form_encoded_methods: rust
                 .map(|r| r.form_encoded_methods.clone())
                 .unwrap_or_default(),
+            path_fields_in_body_methods: rust
+                .map(|r| r.path_fields_in_body_methods.clone())
+                .unwrap_or_default(),
             // A package whose JSON names are lowerCamelCase sends its query keys so too.
             json_query_packages: self
                 .json_field_names_by_package
@@ -159,6 +162,7 @@ impl GenerateConfig {
                 .filter(|(_, names)| **names == super::JsonFieldNames::Json)
                 .map(|(package, _)| package.clone())
                 .collect(),
+            user_agent: rust.and_then(|r| r.user_agent.clone()),
         }
     }
 
@@ -307,6 +311,8 @@ fn lower_python(
         module: options.module.clone(),
         async_methods: options.async_methods,
         keyword_only: options.keyword_only,
+        public_modules: options.public_modules,
+        user_agent: options.user_agent.clone(),
     })
 }
 

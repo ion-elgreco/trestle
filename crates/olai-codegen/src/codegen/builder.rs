@@ -554,8 +554,14 @@ fn generate_into_stream_impl(
             let remaining = self.request.max_results;
             let stream = stream_paginated((self, remaining), move |(mut builder, mut remaining), page_token| async move {
                 builder.request.page_token = page_token;
-                let res = builder.client.#client_method_name(&builder.request).await?;
+                // Ask each page for the items still wanted, and keep no more: a server can cap
+                // its pages below `max_results`, and the cap holds over all pages.
+                if remaining.is_some() {
+                    builder.request.max_results = remaining;
+                }
+                let mut res = builder.client.#client_method_name(&builder.request).await?;
                 if let Some(ref mut rem) = remaining {
+                    res.#item_field_ident.truncate((*rem).max(0) as usize);
                     *rem -= res.#item_field_ident.len() as i32;
                 }
                 let next_page_token = if remaining.is_some_and(|r| r <= 0) {
@@ -589,7 +595,9 @@ mod tests {
                 name: "name".to_string(),
                 json_name: None,
                 response_header: None,
+                request_header: None,
                 emit_unpopulated: false,
+                raw_body: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: false,
@@ -605,7 +613,9 @@ mod tests {
                 name: "comment".to_string(),
                 json_name: None,
                 response_header: None,
+                request_header: None,
                 emit_unpopulated: false,
+                raw_body: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: true,
@@ -621,7 +631,9 @@ mod tests {
                 name: "properties".to_string(),
                 json_name: None,
                 response_header: None,
+                request_header: None,
                 emit_unpopulated: false,
+                raw_body: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::Map(
                         Box::new(UnifiedType {

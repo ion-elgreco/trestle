@@ -107,6 +107,8 @@ pub struct ApiError {
     pub message: String,
     /// The details of the body.
     pub details: ::std::vec::Vec<::serde_json::Value>,
+    /// The body as sent, as text.
+    pub body: String,
 }
 
 impl ApiError {
@@ -132,6 +134,7 @@ impl ApiError {
             code,
             message,
             details,
+            body: String::from_utf8_lossy(body).into_owned(),
         }
     }
 }

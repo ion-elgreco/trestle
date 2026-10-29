@@ -60,15 +60,17 @@ async fn create_widget(body: String) -> Response {
         "attributes": request["attributes"],
         "display_name": body,
         "type": request["type"],
+        "labels_by_key": request["labels_by_key"],
+        "notes": request["notes"],
     }))
     .into_response()
 }
 
 async fn widget_exists(Path(name): Path<String>) -> StatusCode {
-    if name == "missing" {
-        StatusCode::NOT_FOUND
-    } else {
-        StatusCode::OK
+    match name.as_str() {
+        "missing" => StatusCode::NOT_FOUND,
+        "denied" => StatusCode::FORBIDDEN,
+        _ => StatusCode::OK,
     }
 }
 
@@ -117,7 +119,22 @@ fn serve() -> (String, tokio::runtime::Runtime) {
             )
             .route("/api/v1/search", get(search_widgets))
             .route("/api/v1/widget-lines", get(stream_widgets))
-            .route("/api/v1/widgets/{name}/version", get(widget_version));
+            .route("/api/v1/widgets/{name}/version", get(widget_version))
+            .route(
+                "/api/v1/blobs/{*path}",
+                axum::routing::put(|body: axum::body::Bytes| async move {
+                    assert_eq!(body.as_ref(), b"\x00\x01\xff");
+                    StatusCode::NO_CONTENT
+                })
+                .get(
+                    |Path(path): Path<String>, headers: axum::http::HeaderMap| async move {
+                        match headers.get("Range").and_then(|v| v.to_str().ok()) {
+                            Some(range) => format!("range:{range}"),
+                            None => format!("blob:{path}"),
+                        }
+                    },
+                ),
+            );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -160,7 +177,7 @@ fn python_api() {
 import asyncio
 import pickle
 
-from demo._core import DemoClient, DemoError, NotFoundError, ServerError
+from demo._core import DemoClient, DemoError, NotFoundError, PermissionDeniedError, ServerError
 from demo._core.demo import Label, Widget, WidgetClient
 from demo._enums import Color
 
@@ -180,7 +197,7 @@ assert w.properties == {"a": "1"}
 assert repr(w) == (
     "Widget(name='a/b c', created_at=1700000000000, size_bytes=0, "
     "properties={'a': '1'}, display_name='', metadata_location='', notes=[], rows={}, "
-    "sizes=[], counts={})"
+    "sizes=[], counts={}, labels_by_key={})"
 ), repr(w)
 try:
     w.name = "x"
@@ -207,6 +224,17 @@ assert [x.name for x in client.list_widgets()] == ["w1", "w2", "w3"]
 
 # Only models that a request takes have a constructor; optional arguments are keyword-only.
 label = Label(key="k", value="v")
+assert Label("k").key == "k"
+# Models compare by value; a `debug_redact` field is hidden in the repr, not in the attribute.
+assert Label("k") == Label("k") and Label("k") != Label("j")
+hidden = Label("k", secret="s3cret")
+assert hidden.secret == "s3cret" and "s3cret" not in repr(hidden), repr(hidden)
+assert repr(hidden) == "Label(key='k', value='', secret='***')", repr(hidden)
+try:
+    Label(value="v")
+    raise AssertionError("expected a TypeError for the missing key")
+except TypeError:
+    pass
 assert label.key == "k"
 try:
     Widget(name="x")
@@ -247,6 +275,8 @@ try:
     raise AssertionError("expected an error")
 except DemoError as e:
     assert type(e) is DemoError and e.status is None and e.code is None
+    # The message names the cause, as a Python exception has no chain of Rust causes.
+    assert "onnect" in str(e).split("error sending request", 1)[1], str(e)
 
 # Free-form JSON fields are plain Python objects; whole numbers are ints both ways.
 w = client.widget("json").get()
@@ -260,25 +290,44 @@ assert created.attributes == {"count": 3, "flag": True, "list": [1, 2.5]}, creat
 assert '"count":3' in created.display_name, created.display_name
 # A field named after a Rust keyword keeps its name in Python.
 assert client.create_widget("w4", type="gear").type == "gear"
+# A map of messages, both ways.
+by_key = client.create_widget("w5", labels_by_key={"k": label}).labels_by_key
+assert list(by_key) == ["k"] and by_key["k"].value == "v", by_key
+# A list of free-form JSON as an argument.
+assert client.create_widget("w6", notes=[1, "two"]).notes == [1, "two"]
 try:
     client.create_widget("w3", attributes={"bad": object()})
     raise AssertionError("expected a TypeError")
 except TypeError:
     pass
+# JSON has no NaN or infinity: refused before the request.
+for bad in (float("nan"), float("inf")):
+    try:
+        client.create_widget("w3", attributes={"bad": bad})
+        raise AssertionError("expected a ValueError")
+    except ValueError:
+        pass
 
-# A HEAD request gives None, or raises for a missing widget; a GET can carry a JSON body.
-assert client.widget_exists("w") is None
+# A HEAD request tells whether the widget exists; other errors raise. A GET can carry a JSON body.
+assert client.widget_exists("w") is True
+assert client.widget_exists("missing") is False
 try:
-    client.widget_exists("missing")
+    client.widget_exists("denied")
     raise AssertionError("expected an error")
-except NotFoundError:
+except PermissionDeniedError:
     pass
-assert [w.name for w in client.search_widgets("w").widgets] == ["w1", "w2"]
+assert [w.name for w in client.search_widgets("w", ["a"], {"t": [1, 2]}).widgets] == ["w1", "w2"]
 
 # A streaming method gives a list, one item per NDJSON line; fields can come from headers.
 assert [w.name for w in client.stream_widgets()] == ["w1", "w2"]
 version = client.widget_version("w")
 assert (version.name, version.version, version.etag) == ("w", 7, "abc"), version
+
+# A raw body: `bytes` in and out.
+assert client.put_blob("x/y", b"\x00\x01\xff") is None
+blob = client.get_blob("x/y")
+assert (blob.data, blob.size) == (b"blob:x/y", 8), blob
+assert client.get_blob("x/y", range="bytes=0-1").data == b"range:bytes=0-1"
 
 # Each method has an `_async` twin.
 async def main():
@@ -326,6 +375,7 @@ fn stubs() {
         "class DemoError(builtins.Exception):",
         "class NotFoundError(DemoError):",
         "def details(self) -> list[typing.Any]:",
+        "def put_blob(self, path: builtins.str, data: bytes) -> None:",
     ] {
         assert!(root.contains(expected), "missing `{expected}` in:\n{root}");
     }
@@ -334,14 +384,17 @@ fn stubs() {
         "def color(self) -> typing.Optional[_enums.Color]:",
         // A field named after a Rust keyword keeps its Python name.
         "def type(self) -> typing.Optional[builtins.str]:",
+        // `#[pyclass(eq)]`: comparable with any object, positional-only.
+        "def __eq__(self, other: builtins.object, /) -> builtins.bool:",
         "The color of the widget.",
-        "def __new__(cls, key: typing.Optional[builtins.str] = None",
+        "def __new__(cls, key: builtins.str, *, value: typing.Optional[builtins.str] = None",
         "def get_async(self) -> asyncio.Future[Widget]:",
         "def delete_async(self) -> asyncio.Future[None]:",
         "def attributes(self) -> typing.Optional[dict[str, typing.Any]]:",
         "def extra(self) -> typing.Any:",
         "def notes(self) -> list[typing.Any]:",
         "def rows(self) -> dict[str, list[typing.Any]]:",
+        "def data(self) -> builtins.bytes:",
     ] {
         assert!(
             models.contains(expected),

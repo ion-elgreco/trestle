@@ -287,6 +287,14 @@ pub struct RustClient {
     /// RPCs (`package.Service.Method`) whose request body is sent form-encoded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub form_encoded_methods: Vec<String>,
+    /// RPCs (`package.Service.Method`) whose request body keeps the fields that go in the URL
+    /// path, for APIs that want them in both places.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_fields_in_body_methods: Vec<String>,
+    /// The product of the `User-Agent` that the `reqwest` transport sends by default:
+    /// `<product>/<version of the client crate>`. Not sent in the browser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
 }
 
 /// The JSON error body that the generated error module reads.
@@ -363,7 +371,7 @@ pub struct PythonClient {
     pub error_type: String,
     /// Fully-qualified Python result type. Required.
     pub result_type: String,
-    /// The pure-Python package that gets `_enums.py`. Required.
+    /// The pure-Python package that gets `_enums.py` and the `public_modules`. Required.
     pub package: PythonPackage,
     /// Shape of the generated Python API. Every option is off by default.
     #[serde(default)]
@@ -383,6 +391,14 @@ pub struct PythonOptions {
     /// Optional parameters are keyword-only.
     #[serde(default)]
     pub keyword_only: bool,
+    /// A public module `<package>/<service>.py` per submodule of `module`, which re-exports
+    /// its classes and enums. Needs `module`.
+    #[serde(default)]
+    pub public_modules: bool,
+    /// The product of the Python client's `User-Agent`: `<product>/<version of the binding
+    /// crate>`. Needs the `reqwest` transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
 }
 
 /// The pure-Python package of the generated files.
@@ -623,6 +639,7 @@ mod tests {
              \x20     error_module:\n\
              \x20       code_enum: demo.v1.ErrorCode\n\
              \x20     form_encoded_methods: [demo.v1.TokenService.ExchangeToken]\n\
+             \x20     path_fields_in_body_methods: [demo.v1.UserService.ReplaceUser]\n\
              \x20   python:\n\
              \x20     output: python/client/src\n\
              \x20     error_type: PyDemoError\n\
@@ -631,7 +648,8 @@ mod tests {
              \x20       dir: python/client/demo\n\
              \x20       name: demo\n\
              \x20     options:\n\
-             \x20       module: demo._core\n";
+             \x20       module: demo._core\n\
+             \x20       public_modules: true\n";
         let mut cfg: TrestleConfig = serde_yaml::from_str(yaml).unwrap();
         let g = &cfg.generate;
         assert_eq!(g.json_int64, JsonInt64::Number);
@@ -646,13 +664,25 @@ mod tests {
         assert_eq!(errors.code_field, "error_code");
         assert_eq!(errors.details_field.as_deref(), Some("details"));
         assert_eq!(errors.code_enum.as_deref(), Some("demo.v1.ErrorCode"));
+        assert_eq!(
+            rust.path_fields_in_body_methods,
+            ["demo.v1.UserService.ReplaceUser"]
+        );
         let python = g.clients.python.as_ref().unwrap();
         assert_eq!(python.package.name, "demo");
         let py = &python.options;
+        assert!(py.public_modules);
         assert_eq!(py.module.as_deref(), Some("demo._core"));
         assert!(cfg.validate(false).is_ok());
 
-        // The Python error module raises the errors of the client error module.
+        // `public_modules` builds on `module`.
+        let options = &mut cfg.generate.clients.python.as_mut().unwrap().options;
+        options.module = None;
+        assert!(cfg.validate(false).is_err());
+        cfg.generate.clients.python.as_mut().unwrap().options.module = Some("demo._core".into());
+        assert!(cfg.validate(false).is_ok());
+
+        // The Python exception classes raise the errors of the client error module.
         cfg.generate.clients.rust.as_mut().unwrap().error_module = None;
         assert!(cfg.validate(false).is_err());
     }

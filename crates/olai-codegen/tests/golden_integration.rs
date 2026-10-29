@@ -101,7 +101,7 @@ fn full_config(tmp: &Path, runtime: Runtime) -> CodeGenConfig {
             ..Default::default()
         },
         output: CodeGenOutput {
-            common,
+            common: Some(common),
             models: Some(models),
             models_subdir: "_gen".into(),
             server: Some(server),
@@ -133,6 +133,8 @@ fn full_config(tmp: &Path, runtime: Runtime) -> CodeGenConfig {
                 module: None,
                 async_methods: false,
                 keyword_only: false,
+                public_modules: false,
+                user_agent: None,
             }),
         }),
     }

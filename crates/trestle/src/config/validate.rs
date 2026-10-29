@@ -86,7 +86,7 @@ impl TrestleConfig {
 
         // The Python bindings need the client error module: the Python exception classes raise
         // its errors.
-        if self.generate.clients.python.is_some() {
+        if let Some(python) = &self.generate.clients.python {
             let has_error_module = self
                 .generate
                 .clients
@@ -97,6 +97,12 @@ impl TrestleConfig {
                 return Err(Error::other(
                     "`clients.python` needs `clients.rust.error_module`: the Python exception \
                      classes raise the errors of the client error module",
+                ));
+            }
+            if python.options.public_modules && python.options.module.is_none() {
+                return Err(Error::other(
+                    "`clients.python.options.public_modules` re-export the submodules of \
+                     `module`: set it",
                 ));
             }
         }

@@ -69,7 +69,7 @@ fn main() {
             ..Default::default()
         },
         output: CodeGenOutput {
-            common: common_dir,
+            common: Some(common_dir),
             models: Some(models_dir),
             models_subdir: "_gen".into(),
             server: None,
@@ -108,6 +108,8 @@ fn main() {
                 module: None,
                 async_methods: false,
                 keyword_only: false,
+                public_modules: false,
+                user_agent: None,
             }),
         }),
     };

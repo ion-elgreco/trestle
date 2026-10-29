@@ -44,6 +44,9 @@ fn qualified_wrapper_ident(ty: &UnifiedType) -> Ident {
 /// Returns `(return_type, convert_expr)`, or `None` for an `Empty`-returning method
 /// ([`MethodHandler::output_type`] is `None`). A server-streaming method returns a list.
 fn wrap_single_output(method: &MethodHandler<'_>) -> Option<(TokenStream, TokenStream)> {
+    if method.is_existence_check() {
+        return Some((quote! { bool }, quote! { result }));
+    }
     let w = wrapper_ident(&method.output_type()?);
     if method.plan.metadata.server_streaming {
         Some((
@@ -52,17 +55,6 @@ fn wrap_single_output(method: &MethodHandler<'_>) -> Option<(TokenStream, TokenS
         ))
     } else {
         Some((quote! { #w }, quote! { #w::from(result) }))
-    }
-}
-
-/// `mut` keyword for the `let request = ...` binding, but only when there are
-/// optional-field setter calls that actually mutate it. Without setters the
-/// binding is never reassigned, so `let mut` would trip `unused_mut`.
-fn mut_if_setters(builder_calls: &[TokenStream]) -> TokenStream {
-    if builder_calls.is_empty() {
-        quote! {}
-    } else {
-        quote! { mut }
     }
 }
 
@@ -96,7 +88,8 @@ impl<'a> PyBackend<'a> {
     ///
     /// With [`PythonOptions::module`], the root client goes in the module itself and the
     /// classes of each proto package in a submodule named after its service segment, which is
-    /// also put in `sys.modules` so that `import <module>.<service>` finds it. Without it, every
+    /// also put in `sys.modules` so that `import <module>.<service>` finds it: the generated
+    /// `register_submodule!` macro does both, once per submodule. Without it, every
     /// class goes in the module. With `_async` methods, it first installs the generated runtime
     /// in `pyo3-async-runtimes`.
     fn register_fn(&self, services: &[&ServiceHandler<'_>], aggregate: &Ident) -> TokenStream {
@@ -118,30 +111,36 @@ impl<'a> PyBackend<'a> {
                 .push(format_ident!("Py{}", service.client_type().to_string()));
         }
 
-        let body = match &self.python.module {
+        // With a module path, each submodule is registered by `register_submodule!`, which goes
+        // before `register`, as a macro is defined before its use.
+        let (helpers, body) = match &self.python.module {
             Some(root) => {
                 let children = groups.iter().map(|(segment, classes)| {
-                    let full = format!("{root}.{segment}");
                     quote! {
-                        let child = ::pyo3::types::PyModule::new(py, #segment)?;
-                        #(child.add_class::<#classes>()?;)*
-                        module.add_submodule(&child)?;
-                        modules.set_item(#full, &child)?;
+                        register_submodule!(module, #segment, [#(#classes),*])?;
                     }
                 });
-                quote! {
-                    let py = module.py();
-                    let modules = py.import("sys")?.getattr("modules")?;
+                // The macro body goes in as text after formatting (`REGISTER_SUBMODULE_MACRO`):
+                // this placeholder marks its place.
+                let helpers = quote! {
+                    /// The extension module, as Python imports it.
+                    pub const CORE_MODULE: &str = #root;
+
+                    macro_rules! register_submodule { () => {}; }
+                };
+                let body = quote! {
                     module.add_class::<#aggregate>()?;
                     #(#children)*
-                }
+                };
+                (helpers, body)
             }
             None => {
                 let classes = groups.values().flatten();
-                quote! {
+                let body = quote! {
                     module.add_class::<#aggregate>()?;
                     #(module.add_class::<#classes>()?;)*
-                }
+                };
+                (quote! {}, body)
             }
         };
         let init_async = self
@@ -149,6 +148,8 @@ impl<'a> PyBackend<'a> {
             .async_methods
             .then(|| quote! { crate::codegen::runtime::init_async_runtime(); });
         quote! {
+            #helpers
+
             /// Add the generated classes to the extension module `module`.
             pub fn register(module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>) -> ::pyo3::PyResult<()> {
                 #init_async
@@ -159,6 +160,34 @@ impl<'a> PyBackend<'a> {
         }
     }
 }
+
+/// The `register_submodule!` macro of the bindings' `mod.rs`, as text: prettyplease prints a
+/// macro body as a token stream on few lines, and rustfmt leaves a body with repetitions as it
+/// is. It replaces [`REGISTER_SUBMODULE_PLACEHOLDER`], after a blank line.
+const REGISTER_SUBMODULE_MACRO: &str = r#"
+/// Register the submodule `<CORE_MODULE>.<name>` with its classes. It also goes in
+/// `sys.modules`, so `import <CORE_MODULE>.<name>` finds it.
+///
+/// Usage:
+/// ```ignore
+/// register_submodule!(module, "tables", [PyColumnInfo, PyTableInfo])?;
+/// ```
+macro_rules! register_submodule {
+    ($parent:expr, $mod_name:expr, [$($type:ty),* $(,)?]) => {{
+        let py = $parent.py();
+        let child = ::pyo3::types::PyModule::new(py, $mod_name)?;
+        $(
+            child.add_class::<$type>()?;
+        )*
+        $parent.add_submodule(&child)?;
+        py.import("sys")?
+            .getattr("modules")?
+            .set_item(format!("{}.{}", CORE_MODULE, $mod_name), child)
+    }};
+}"#;
+
+/// How prettyplease prints the placeholder of [`REGISTER_SUBMODULE_MACRO`].
+const REGISTER_SUBMODULE_PLACEHOLDER: &str = "macro_rules! register_submodule {\n    () => {};\n}";
 
 pub fn main_module(services: &[ServiceHandler<'_>]) -> crate::error::Result<String> {
     PyBackend::from_services(services).main_module(services)
@@ -302,6 +331,12 @@ impl BindingBackend for PyBackend<'_> {
                 .then(|| quote! { pub mod py_future; });
             quote! { pub mod error; #future pub mod runtime; }
         };
+        let user_agent = self.python.user_agent.as_ref().map(|product| {
+            let prefix = format!("{product}/");
+            quote! {
+                let client = client.with_user_agent(concat!(#prefix, env!("CARGO_PKG_VERSION")));
+            }
+        });
         let register = self.register_fn(&sorted_services, &py_aggregate_client_ident);
 
         let tokens = quote! {
@@ -343,6 +378,7 @@ impl BindingBackend for PyBackend<'_> {
                         Some(token) => #aggregate_client_ident::new_with_token(base_url, token),
                         None => #aggregate_client_ident::new_unauthenticated(base_url),
                     };
+                    #user_agent
                     Ok(Self { client })
                 }
 
@@ -354,7 +390,16 @@ impl BindingBackend for PyBackend<'_> {
             #register
         };
 
-        format_tokens(tokens)
+        let code = format_tokens(tokens)?;
+        if self.python.module.is_none() {
+            return Ok(code);
+        }
+        if !code.contains(REGISTER_SUBMODULE_PLACEHOLDER) {
+            return Err(crate::Error::Build(
+                "the placeholder of register_submodule! is not in the formatted bindings".into(),
+            ));
+        }
+        Ok(code.replacen(REGISTER_SUBMODULE_PLACEHOLDER, REGISTER_SUBMODULE_MACRO, 1))
     }
 
     fn param_defs(&self, method: &MethodHandler<'_>, mode: BindingMode) -> Vec<TokenStream> {
@@ -540,7 +585,6 @@ impl PyBackend<'_> {
         let signature = pyo3_signature(method, parts.mode, python.keyword_only);
         let client_call = &parts.client_call;
         let builder_calls = generate_builder_pattern(method, is_list, self);
-        let mut_kw = mut_if_setters(&builder_calls);
         let MethodOutput { future, value } = output;
         let (py_type, convert) = match &value {
             Some((py_type, convert)) => (py_type.clone(), convert.clone()),
@@ -556,8 +600,7 @@ impl PyBackend<'_> {
                 py: Python,
                 #(#param_defs,)*
             ) -> #py_result_type<#py_type> {
-                let #mut_kw request = #client_call;
-                #(#builder_calls)*
+                let request = #client_call #(#builder_calls)*;
                 let runtime = crate::codegen::runtime::rt();
                 py.detach(|| {
                     // `result` is the bare client value; `#convert` lifts it into the `Py`
@@ -593,8 +636,7 @@ impl PyBackend<'_> {
                 py: Python<'py>,
                 #(#param_defs,)*
             ) -> ::pyo3::PyResult<crate::codegen::py_future::PyFuture<'py, #async_type>> {
-                let #mut_kw request = #client_call;
-                #(#builder_calls)*
+                let request = #client_call #(#builder_calls)*;
                 crate::codegen::py_future::PyFuture::new(py, async move {
                     #[allow(clippy::let_unit_value, unused_variables)]
                     let result = #future
@@ -630,55 +672,54 @@ impl SetterRender for PyBackend<'_> {
         param_ident: &Ident,
         with_method: &Ident,
     ) -> TokenStream {
+        let ty = setter.field_type;
+        let collection = ty.is_repeated || matches!(ty.base_type, BaseType::Map(..));
         // A free-form JSON argument is any Python object: convert it to the field's value.
-        if let Some(json) = json_param(setter.field_type) {
-            let value = super::model_conversions::json_from_py(
-                json,
-                setter.field_type,
-                quote! { #param_ident },
-            );
-            let value = if setter.field_type.is_repeated
-                || matches!(setter.field_type.base_type, BaseType::Map(..))
-            {
-                value
+        if let Some(json) = json_param(ty) {
+            let value = if collection {
+                let items =
+                    super::model_conversions::json_from_py(json, ty, quote! { #param_ident }, true);
+                quote! {
+                    match #param_ident {
+                        ::core::option::Option::Some(#param_ident) => #items,
+                        ::core::option::Option::None => ::std::vec::Vec::new(),
+                    }
+                }
             } else {
-                // The builder takes the bare value, not the `MessageField`.
                 let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
-                quote! { #from_py(&#param_ident)? }
+                quote! { #param_ident.as_ref().map(#from_py).transpose()? }
             };
-            return quote! {
-                if let Some(#param_ident) = #param_ident {
-                    request = request.#with_method(#value);
-                }
-            };
+            return quote! { .#with_method(#value) };
         }
-        // Maps and repeated fields are `Option`-wrapped at the binding boundary; guard before
-        // forwarding. Repeated message/enum elements are also converted from their `Py`
-        // wrapper to the bare model.
-        if matches!(setter.field_type.base_type, BaseType::Map(_, _))
-            || setter.field_type.is_repeated
-        {
-            let inner = if param_needs_conversion(setter.field_type) {
-                quote! { #param_ident.into_iter().map(::core::convert::Into::into).collect::<::std::vec::Vec<_>>() }
-            } else {
-                quote! { #param_ident }
-            };
-            quote! {
-                if let Some(#param_ident) = #param_ident {
-                    request = request.#with_method(#inner);
+        // Maps and repeated fields are `Option`s at the binding boundary: one left out is the
+        // empty collection, which the request holds anyway. Message and enum elements are
+        // converted from their `Py` wrappers to the bare models.
+        if collection {
+            let value = quote! { #param_ident.unwrap_or_default() };
+            let value = if message_map_value(ty).is_some() {
+                convert_map_values(value)
+            } else if param_needs_conversion(ty) {
+                quote! {
+                    #value
+                        .into_iter()
+                        .map(::core::convert::Into::into)
+                        .collect::<::std::vec::Vec<_>>()
                 }
-            }
-        } else if param_needs_conversion(setter.field_type) {
+            } else {
+                value
+            };
+            return quote! { .#with_method(#value) };
+        }
+        if ty.is_singular_bytes() {
+            let value = bytes_to_vec(quote! { #param_ident }, true);
+            return quote! { .#with_method(#value) };
+        }
+        if param_needs_conversion(ty) {
             // Optional singular message/enum: `Option<PyWrapper>` → `Option<Inner>` for
             // the builder, which accepts `impl Into<Option<Inner>>`.
-            quote! {
-                request = request.#with_method(#param_ident.map(::core::convert::Into::into));
-            }
-        } else {
-            quote! {
-                request = request.#with_method(#param_ident);
-            }
+            return quote! { .#with_method(#param_ident.map(::core::convert::Into::into)) };
         }
+        quote! { .#with_method(#param_ident) }
     }
 }
 
@@ -705,6 +746,12 @@ fn python_param_defs(method: &MethodHandler<'_>, mode: BindingMode) -> Vec<Token
             }
             let rust_type = method.field_type(p.field_type(), RenderContext::PythonParameter);
             let py_type = wrap_param_type(p.field_type(), &rust_type);
+            // Every list and map is an `Option` at the boundary; a required one is not.
+            let py_type = if p.is_optional() || !is_collection(p.field_type()) {
+                py_type
+            } else {
+                strip_option(py_type)
+            };
             quote! { #param_name: #py_type }
         })
         .collect()
@@ -718,6 +765,25 @@ fn json_param(ty: &UnifiedType) -> Option<JsonType> {
 
 /// Whether a param's base type is a model (message/enum) that has a `Py` wrapper,
 /// so its value must be converted (`.into()`) when forwarded to the Rust client.
+/// The value type of a `map<K, Message>` param, whose values cross the boundary as wrappers.
+fn message_map_value(ty: &UnifiedType) -> Option<&UnifiedType> {
+    match &ty.base_type {
+        BaseType::Map(_, value) if matches!(value.base_type, BaseType::Message(_)) => Some(value),
+        _ => None,
+    }
+}
+
+/// The expression that converts the wrapper values of a map param `expr` to the models: each
+/// wrapper holds its model in `.0`.
+fn convert_map_values(expr: TokenStream) -> TokenStream {
+    quote! {
+        #expr
+            .into_iter()
+            .map(|(k, v)| (k, v.0))
+            .collect::<::std::collections::HashMap<_, _>>()
+    }
+}
+
 fn param_needs_conversion(ty: &UnifiedType) -> bool {
     matches!(
         ty.base_type,
@@ -725,10 +791,37 @@ fn param_needs_conversion(ty: &UnifiedType) -> bool {
     )
 }
 
+/// The type that takes a singular `bytes` value from Python, `Option`al or not: `PyBackedBytes`,
+/// which takes `bytes` without copying it byte by byte, as a `Vec<u8>` would.
+pub(super) fn py_bytes_input(optional: bool) -> TokenStream {
+    match optional {
+        true => quote! { ::core::option::Option<::pyo3::pybacked::PyBackedBytes> },
+        false => quote! { ::pyo3::pybacked::PyBackedBytes },
+    }
+}
+
+/// The bytes of the [`py_bytes_input`] value `expr`, for the model.
+pub(super) fn bytes_to_vec(expr: TokenStream, optional: bool) -> TokenStream {
+    match optional {
+        true => quote! { #expr.map(|v| v.to_vec()) },
+        false => quote! { #expr.to_vec() },
+    }
+}
+
 /// Rewrite a rendered param `syn::Type` so a message/enum base type becomes its
-/// `Py` wrapper, preserving the `Option`/`Vec` cardinality wrapping. Scalars,
+/// `Py` wrapper, preserving the `Option`/`Vec` cardinality wrapping. A `bytes` param is
+/// `PyBackedBytes`, which takes `bytes` without copying it byte by byte. Other scalars,
 /// maps, and `()` are returned unchanged.
 fn wrap_param_type(ty: &UnifiedType, rendered: &syn::Type) -> TokenStream {
+    if ty.is_singular_bytes() {
+        return py_bytes_input(ty.is_optional);
+    }
+    if let Some(value) = message_map_value(ty) {
+        let wrapper = qualified_wrapper_ident(value);
+        return quote! {
+            ::core::option::Option<::std::collections::HashMap<::std::string::String, #wrapper>>
+        };
+    }
     if !param_needs_conversion(ty) {
         return quote! { #rendered };
     }
@@ -746,23 +839,53 @@ fn wrap_param_type(ty: &UnifiedType, rendered: &syn::Type) -> TokenStream {
     inner
 }
 
-/// The expression that converts a Python-wrapper param value `expr` (of the type
-/// produced by [`wrap_param_type`]) back into the bare model the Rust client
-/// expects. Handles the `Option`/`Vec` cardinality wrapping. Scalars pass through.
+/// Whether a param is a list or a map.
+fn is_collection(ty: &UnifiedType) -> bool {
+    ty.is_repeated || matches!(ty.base_type, BaseType::Map(..))
+}
+
+/// `T` for a rendered `Option<T>`; any other type unchanged.
+fn strip_option(ty: TokenStream) -> TokenStream {
+    let Ok(syn::Type::Path(path)) = syn::parse2::<syn::Type>(ty.clone()) else {
+        return ty;
+    };
+    let Some(last) = path.path.segments.last() else {
+        return ty;
+    };
+    match &last.arguments {
+        syn::PathArguments::AngleBracketed(args) if last.ident == "Option" => {
+            match args.args.first() {
+                Some(syn::GenericArgument::Type(inner)) => quote! { #inner },
+                _ => ty,
+            }
+        }
+        _ => ty,
+    }
+}
+
+/// The expression that converts the Python-wrapper value `expr` of a required param back into
+/// the bare model the Rust client expects. A required list is a plain `Vec` (see
+/// [`python_param_defs`]). Scalars pass through.
 fn convert_param_value(ty: &UnifiedType, expr: TokenStream) -> TokenStream {
     if let Some(json) = json_param(ty) {
         if ty.is_repeated || matches!(ty.base_type, BaseType::Map(..)) {
-            return super::model_conversions::json_from_py(json, ty, expr);
+            return super::model_conversions::json_from_py(json, ty, expr, true);
         }
         let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
         return quote! { #from_py(&#expr)? };
+    }
+    if message_map_value(ty).is_some() {
+        return convert_map_values(expr);
+    }
+    if ty.is_singular_bytes() {
+        return bytes_to_vec(expr, ty.is_optional);
     }
     if !param_needs_conversion(ty) {
         return expr;
     }
     match (ty.is_repeated, ty.is_optional) {
         (true, _) => quote! {
-            #expr.map(|v| v.into_iter().map(::core::convert::Into::into).collect())
+            #expr.into_iter().map(::core::convert::Into::into).collect()
         },
         (false, true) => quote! { #expr.map(::core::convert::Into::into) },
         (false, false) => quote! { #expr.into() },
