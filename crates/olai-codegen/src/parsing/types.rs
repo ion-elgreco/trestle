@@ -8,7 +8,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::codegen::Runtime;
-use crate::utils::{extract_qualified_type_name, extract_simple_type_name};
+use crate::utils::extract_simple_type_name;
 
 /// Context for rendering types in different situations
 #[derive(Debug, Clone, Copy)]
@@ -37,9 +37,8 @@ pub enum RenderContext {
 
 /// Trait for rendering a [`UnifiedType`] into a language-specific string.
 ///
-/// Each language backend provides a concrete impl. The four existing free functions
-/// (`unified_to_rust`, `unified_to_python_type`, `unified_to_napi`, `unified_to_typescript`)
-/// are kept as thin wrappers so call-sites don't change.
+/// Each language backend provides a concrete impl over its free function (`unified_to_rust`,
+/// `unified_to_napi`, `unified_to_typescript`).
 pub trait TypeRenderer {
     fn render(&self, ty: &UnifiedType) -> String;
 }
@@ -50,15 +49,6 @@ pub struct RustRenderer(pub RenderContext);
 impl TypeRenderer for RustRenderer {
     fn render(&self, ty: &UnifiedType) -> String {
         unified_to_rust(ty, self.0)
-    }
-}
-
-/// Python type annotation renderer.
-pub struct PythonRenderer;
-
-impl TypeRenderer for PythonRenderer {
-    fn render(&self, ty: &UnifiedType) -> String {
-        unified_to_python_type(ty)
     }
 }
 
@@ -91,7 +81,12 @@ impl TypeRenderer for TypeScriptRenderer {
 pub fn unified_to_rust(unified_type: &UnifiedType, context: RenderContext) -> String {
     let base_type_str = match &unified_type.base_type {
         BaseType::String => {
-            if matches!(context, RenderContext::Constructor) && !unified_type.is_optional {
+            // `impl Into<String>` only for a single string: a repeated one is a plain
+            // `Vec<String>`, which the constructor stores with `.into()`.
+            if matches!(context, RenderContext::Constructor)
+                && !unified_type.is_optional
+                && !unified_type.is_repeated
+            {
                 "impl Into<String>".to_string()
             } else {
                 "String".to_string()
@@ -215,41 +210,6 @@ pub fn field_assignment(
         },
         _ => quote! { #field_ident },
     }
-}
-
-/// Convert a unified type to a Python type annotation string
-pub fn unified_to_python_type(unified_type: &UnifiedType) -> String {
-    let base_type_str = match &unified_type.base_type {
-        BaseType::String => "str".to_string(),
-        BaseType::Int32 | BaseType::Int64 => "int".to_string(),
-        BaseType::Bool => "bool".to_string(),
-        BaseType::Float64 | BaseType::Float32 => "float".to_string(),
-        BaseType::Bytes => "bytes".to_string(),
-        BaseType::Unit => "None".to_string(),
-        // Python typings emit flat classes, so nested types use the parent-qualified name (e.g.
-        // `GenerateTemporaryTableCredentialsRequestOperation`) to stay collision-free. Top-level
-        // types are unaffected (qualified == simple).
-        BaseType::Message(name) => extract_qualified_type_name(name),
-        BaseType::Enum(name) => extract_qualified_type_name(name),
-        BaseType::OneOf(name) => extract_qualified_type_name(name),
-        BaseType::Map(key_type, value_type) => {
-            let key_str = unified_to_python_type(key_type);
-            let value_str = unified_to_python_type(value_type);
-            format!("Dict[{key_str}, {value_str}]")
-        }
-    };
-
-    let mut result = base_type_str;
-
-    if unified_type.is_repeated {
-        result = format!("List[{result}]");
-    }
-
-    if unified_type.is_optional {
-        result = format!("Optional[{result}]");
-    }
-
-    result
 }
 
 /// Convert a unified type to a Rust NAPI parameter type string.

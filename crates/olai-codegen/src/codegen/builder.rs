@@ -18,20 +18,20 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::Path;
 
-/// Generate a `#[doc = "..."]` attribute for a field or method.
+/// Generate the `#[doc = "..."]` attributes for a field or method, one per line.
 ///
 /// Uses `doc` if present; otherwise generates a default `"Set <field_name>"` message.
 fn field_doc_attr(doc: Option<&str>, field_name: &str) -> TokenStream {
-    if let Some(doc) = doc {
-        let doc_spaced = format!(" {}", doc.trim_start());
-        quote! { #[doc = #doc_spaced] }
-    } else {
-        let set_msg = format!(" Set {field_name}");
-        quote! { #[doc = #set_msg] }
+    match doc.filter(|d| !d.trim().is_empty()) {
+        Some(doc) => doc_tokens(Some(doc)),
+        None => {
+            let set_msg = format!(" Set {field_name}");
+            quote! { #[doc = #set_msg] }
+        }
     }
 }
 
-use super::format_tokens;
+use super::{doc_tokens, format_tokens};
 use crate::analysis::{BodyField, RequestParam, RequestType};
 use crate::codegen::config::Runtime;
 use crate::codegen::{MethodHandler, ServiceHandler};
@@ -78,8 +78,7 @@ fn generate_builders_module(
         })
         .collect::<crate::error::Result<_>>()?;
     let mod_path: Path = service.models_path();
-    let result_path: Path =
-        syn::parse_str(&service.config.result_type_path).expect("valid result_type_path");
+    let result_path: Path = service.config.client_result_path();
 
     // The streaming machinery (`into_stream`, `stream_paginated`, the futures
     // `Stream` traits) is emitted only for `List` methods. Pull its imports in
@@ -89,11 +88,11 @@ fn generate_builders_module(
         .any(|m| matches!(m.plan.request_type, RequestType::List));
 
     // Boxed future/stream aliases the `IntoFuture` / `into_stream` impls return.
-    // Natively they're `Send` (`BoxFuture`/`BoxStream`). In dual-transport (WASM)
-    // mode the browser transport's futures are `!Send`, so on wasm32 we alias to
+    // Natively they're `Send` (`BoxFuture`/`BoxStream`). When the client also builds
+    // for wasm32 the browser transport's futures are `!Send`, so on wasm32 we alias to
     // the `Local*` (non-Send) variants — keeping one set of impls that compile
     // for both targets.
-    let box_aliases = if service.config.dual_transport() {
+    let box_aliases = if service.config.builds_for_wasm() {
         let stream_alias = if has_list {
             quote! {
                 #[cfg(not(target_arch = "wasm32"))]
@@ -554,7 +553,7 @@ fn generate_into_stream_impl(
 
     // The browser stream is `!Send`, so on wasm32 box it with `boxed_local()`
     // (→ `LocalBoxStream`, the `BoxStr` alias resolves to). Natively, `boxed()`.
-    let boxer = if method.config.dual_transport() {
+    let boxer = if method.config.builds_for_wasm() {
         quote! {
             #[cfg(not(target_arch = "wasm32"))]
             let stream = stream.boxed();

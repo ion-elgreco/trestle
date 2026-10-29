@@ -39,9 +39,37 @@ pub fn extract_qualified_type_name(name: &str) -> String {
     }
 }
 
+/// A fully-qualified type name in the form the [`CodeGenMetadata`](crate::parsing::CodeGenMetadata)
+/// tables are keyed by: with a leading `.`. Field types carry the name without it
+/// (`demo.v1.Color`).
+pub(crate) fn metadata_key(name: &str) -> String {
+    if name.starts_with('.') {
+        name.to_string()
+    } else {
+        format!(".{name}")
+    }
+}
+
 /// String manipulation utilities
 pub mod strings {
     use super::*;
+
+    /// The proto3 JSON name of a proto field name: `storage_root` → `storageRoot`.
+    pub fn lower_camel(name: &str) -> String {
+        let mut out = String::with_capacity(name.len());
+        let mut upper_next = false;
+        for ch in name.chars() {
+            if ch == '_' {
+                upper_next = true;
+            } else if upper_next {
+                out.push(ch.to_ascii_uppercase());
+                upper_next = false;
+            } else {
+                out.push(ch);
+            }
+        }
+        out
+    }
 
     /// Convert service name to handler trait name
     /// e.g., "CatalogsService" -> "CatalogHandler", "TagPoliciesService" -> "TagPolicyHandler"

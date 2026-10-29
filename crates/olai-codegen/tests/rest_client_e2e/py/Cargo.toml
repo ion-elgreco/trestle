@@ -1,0 +1,29 @@
+# The Python bindings of the fixture, as a binding crate builds them. The tests run the generated
+# Python API in an embedded interpreter against a local axum server.
+#
+# Needs a Python with its shared library: set `PYO3_PYTHON` (e.g. a Homebrew python3.12) when the
+# default `python3` is too old or is a uv standalone build.
+[package]
+name = "rest-client-e2e-py"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rest-client-e2e = { path = "..", features = ["python"] }
+
+futures = "0.3"
+pyo3 = "0.28"
+pyo3-async-runtimes = { version = "0.28", features = ["tokio-runtime"] }
+pyo3-stub-gen = { version = "0.23", default-features = false }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+url = "2"
+
+[dev-dependencies]
+axum = "0.8"
+
+[build-dependencies]
+olai-codegen = { path = "../../../" }
+
+protobuf = "3"

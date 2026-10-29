@@ -43,20 +43,25 @@ mod builder;
 mod client;
 mod config;
 mod connect_client;
+mod error_module;
 mod handler;
+mod json_int64;
 pub(crate) mod node;
 mod python;
 mod resource_client;
 mod resources;
 mod server;
 mod tokens;
+mod transport;
 mod wasm;
 
 pub use config::{
     BindingsConfig, ClientProtocol, ClientProtocols, CodeGenConfig, CodeGenOutput,
-    DEFAULT_TRANSPORT_TYPE_PATH, ModelsPath, PythonApi, Runtime,
+    DEFAULT_TRANSPORT_TYPE_PATH, ErrorModuleConfig, ModelsPath, PyPackageConfig, PythonOptions,
+    RestClientOptions, Runtime,
 };
 pub(crate) use tokens::{doc_tokens, format_tokens, format_tokens_static};
+pub use transport::REQWEST_TRANSPORT_TYPE_PATH;
 
 /// How a language binding lowers a method's call into the underlying Rust client.
 ///
@@ -119,7 +124,7 @@ impl MethodPlan {
 /// | `output.models_gen` | `labels.rs` resource-enum file (falls back to `common` if `None`) |
 /// | `output.server` | Handler trait + Axum route wiring per service |
 /// | `output.client` | HTTP client structs and request builders per service |
-/// | `output.python` | PyO3 binding wrappers + `.pyi` typings stub |
+/// | `output.python` | PyO3 binding wrappers |
 /// | `output.node` | NAPI binding wrappers |
 /// | `output.node_ts` | TypeScript client (`client.ts`) |
 ///
@@ -149,6 +154,7 @@ impl MethodPlan {
 ///   path.
 /// - [`Error::MissingBindingsConfig`] if any of the `python`, `node`, or `node_ts` outputs is
 ///   requested without a `bindings` config.
+/// - [`Error::Build`] if a REST client or Python option lacks an option it needs.
 /// - [`Error::MissingAnnotation`] or [`Error::Build`] surfaced while analyzing the metadata (e.g. a
 ///   required `google.api` annotation is missing, or a service cannot be planned).
 /// - [`Error::InvalidRustPath`] if a proto message or field maps to an invalid Rust path, and
@@ -192,6 +198,8 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
         return Err(Error::MissingConnectClientPath);
     }
 
+    config.validate_options()?;
+
     let plan = analyze_metadata(metadata)?;
 
     // Validate every service's `{service}` substitution up front so a base path that isn't a
@@ -234,7 +242,7 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
         // in the generated `mod.rs`.
         let mut include_pyo3_impls = false;
         if config.output.python.is_some() {
-            let pyo3_impls = python::generate_pyo3_impls(&plan, metadata, config.runtime)?;
+            let pyo3_impls = python::generate_pyo3_impls(&plan, metadata, config)?;
             if !pyo3_impls.is_empty() {
                 let mut pyo3_files = GeneratedCode {
                     files: std::collections::HashMap::new(),
@@ -252,13 +260,16 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
         // generator wrote `<svc>/server.rs` + `<svc>/mod.rs` here), and this
         // `mod.rs` overwrites the common generator's top-level `mod.rs` — so it
         // re-declares the per-service extractor submodules it emitted.
-        let mod_content = generate_models_mod(
+        let mut mod_content = generate_models_mod(
             &plan.services,
             include_labels,
             include_pyo3_impls,
             metadata,
             config.runtime,
         );
+        if config.rest_client.json_int64_as_number {
+            mod_content.push_str(&json_int64::module());
+        }
         // Route through write_generated_code so the `// @generated` header is prepended like
         // every other emitted file, rather than writing it raw.
         let mut mod_files = GeneratedCode {
@@ -281,6 +292,14 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
     if let Some(ref python_dir) = config.output.python {
         let python_code = generate_python_code(&plan, metadata, config)?;
         output::write_generated_code(&python_code, python_dir)?;
+
+        let package_files = python::package_files(config, &plan, metadata);
+        if !package_files.is_empty() {
+            let files = GeneratedCode {
+                files: package_files.into_iter().collect(),
+            };
+            output::write_generated_code(&files, &config.python_options().package.dir)?;
+        }
     }
 
     if let Some(ref node_dir) = config.output.node {
@@ -397,22 +416,7 @@ fn generate_python_code(
 
     let module_code = python::main_module(&handlers)?;
     files.insert("mod.rs".to_string(), module_code);
-
-    let python_api = config
-        .bindings
-        .as_ref()
-        .map(|b| b.python_api)
-        .unwrap_or_default();
-    files.insert(
-        "runtime.rs".to_string(),
-        python::generate_runtime(python_api),
-    );
-
-    let python_typings_code = python::generate_typings(&handlers);
-    files.insert(
-        config.output.python_typings_filename.clone(),
-        python_typings_code,
-    );
+    files.extend(python::helper_files(config));
 
     Ok(GeneratedCode { files })
 }
@@ -579,8 +583,20 @@ fn generate_client_code(
         })
         .is_some();
 
-    let module_code = generate_client_main_module(&plan.services, has_aggregate);
-    files.insert("mod.rs".to_string(), module_code);
+    if config.uses_reqwest_transport() {
+        files.insert("transport.rs".to_string(), transport::generate());
+    }
+    if let Some(errors) = &config.rest_client.error_module {
+        files.insert(
+            "error.rs".to_string(),
+            error_module::generate(config, errors, metadata)?,
+        );
+    }
+
+    files.insert(
+        "mod.rs".to_string(),
+        generate_client_main_module(&plan.services, config, has_aggregate),
+    );
 
     Ok(GeneratedCode { files })
 }
@@ -701,7 +717,12 @@ pub fn main_module(services: &[ServicePlan]) -> String {
     format_tokens_static(tokens)
 }
 
-fn generate_client_main_module(services: &[ServicePlan], has_aggregate: bool) -> String {
+fn generate_client_main_module(
+    services: &[ServicePlan],
+    config: &CodeGenConfig,
+    has_aggregate: bool,
+) -> String {
+    let result_path = config.client_result_path();
     let service_modules: Vec<TokenStream> = services
         .iter()
         .map(|s| {
@@ -739,10 +760,10 @@ fn generate_client_main_module(services: &[ServicePlan], has_aggregate: bool) ->
             pub(super) fn stream_paginated<F, Fut, S, T>(
                 state: S,
                 op: F,
-            ) -> impl futures::Stream<Item = crate::Result<T>>
+            ) -> impl futures::Stream<Item = #result_path<T>>
             where
                 F: Fn(S, Option<String>) -> Fut + Copy,
-                Fut: Future<Output = crate::Result<(T, S, Option<String>)>>,
+                Fut: Future<Output = #result_path<(T, S, Option<String>)>>,
             {
                 enum PaginationState<T> {
                     Start(T),
@@ -782,12 +803,30 @@ fn generate_client_main_module(services: &[ServicePlan], has_aggregate: bool) ->
         quote! {}
     };
 
+    // The generated transport and error module, and the path encoder of the clients.
+    let transport_module = config
+        .uses_reqwest_transport()
+        .then(|| quote! { pub mod transport; });
+    let error_module = config
+        .rest_client
+        .error_module
+        .is_some()
+        .then(|| quote! { pub mod error; });
+    let encode_path_value = services
+        .iter()
+        .flat_map(|s| &s.methods)
+        .any(MethodPlan::formats_path_values)
+        .then(client::encode_path_value_fn);
+
     let tokens = quote! {
         #(#service_modules)*
 
         #aggregate_module
+        #transport_module
+        #error_module
 
         #pagination
+        #encode_path_value
     };
     format_tokens_static(tokens)
 }
@@ -950,11 +989,16 @@ pub fn generate_models_mod(
     let lint_allows = match runtime {
         // The buffa model plugin emits enum variants with their proto SCREAMING_SNAKE
         // names (`non_camel_case_types`) and explicit `Default` impls a `#[derive]`
-        // could replace (`clippy::derivable_impls`). The generated files carry no
-        // allows of their own, so silence both here to keep `clippy -D warnings` green.
+        // could replace (`clippy::derivable_impls`); a message without fields decodes
+        // through a `match` with only the `_` arm (`clippy::match_single_binding`). The
+        // generated files carry no allows of their own, so silence these here, as buffa's
+        // own include file does, to keep `clippy -D warnings` green.
         Runtime::Buffa => quote! {
             #![allow(non_camel_case_types)]
             #![allow(clippy::derivable_impls)]
+            #![allow(clippy::match_single_binding)]
+            #![allow(clippy::uninlined_format_args)]
+            #![allow(clippy::doc_lazy_continuation)]
         },
         Runtime::Prost => quote! {},
     };
@@ -1223,38 +1267,14 @@ impl ServiceHandler<'_> {
     /// segment so the models import path matches where the proto plugin actually wrote the types.
     /// Falls back to `base_path` when the package is empty or unparsable.
     fn models_segment(&self) -> String {
-        let segs: Vec<&str> = self
-            .plan
-            .package
-            .split('.')
-            .filter(|s| !s.is_empty())
-            .collect();
-        match segs.as_slice() {
-            // `unitycatalog.tags.v1` → `tags`
-            [.., name, version] if is_version_segment(version) => name.to_string(),
-            // `unitycatalog.tags` → `tags`
-            [.., name] => name.to_string(),
-            // No package info: fall back to the service-name-derived base path.
-            _ => self.plan.base_path.clone(),
-        }
+        package_models_segment(&self.plan.package)
+            .map_or_else(|| self.plan.base_path.clone(), str::to_string)
     }
 
-    /// The version segment under which this service's generated models live
-    /// (e.g. `unitycatalog.tags.v1` → `v1`, `unitycatalog.agents.v0alpha1` → `v0alpha1`).
-    ///
-    /// Matches where the proto plugin actually wrote the types. Falls back to `v1` when the
-    /// package carries no recognizable version segment.
+    /// The version segment under which this service's generated models live; see
+    /// [`package_models_version`].
     fn models_version(&self) -> String {
-        let segs: Vec<&str> = self
-            .plan
-            .package
-            .split('.')
-            .filter(|s| !s.is_empty())
-            .collect();
-        match segs.as_slice() {
-            [.., _name, version] if is_version_segment(version) => version.to_string(),
-            _ => "v1".to_string(),
-        }
+        package_models_version(&self.plan.package).to_string()
     }
 
     pub(crate) fn models_path(&self) -> syn::Path {
@@ -1277,13 +1297,31 @@ impl ServiceHandler<'_> {
     /// `generate_models_mod`), so the Python bindings import them from this path.
     /// Returns `None` if the template has no `{service}` placeholder to split on.
     pub(crate) fn models_root_path(&self) -> Option<syn::Path> {
-        let template = &self.config.models_path_template;
-        let prefix = template.split("{service}").next()?;
-        let trimmed = prefix.trim_end_matches(':');
-        if trimmed.is_empty() {
-            return None;
-        }
-        syn::parse_str(trimmed).ok()
+        let models_path = ModelsPath::from_template(&self.config.models_path_template);
+        syn::parse_str(models_path.root()?).ok()
+    }
+}
+
+/// The models module segment of a proto package: the segment before the version
+/// (`unitycatalog.tags.v1` → `tags`), else the last one (`unitycatalog.tags` → `tags`). `None` for
+/// an empty package.
+pub(crate) fn package_models_segment(package: &str) -> Option<&str> {
+    let segs: Vec<&str> = package.split('.').filter(|s| !s.is_empty()).collect();
+    match segs.as_slice() {
+        [.., name, version] if is_version_segment(version) => Some(name),
+        [.., name] => Some(name),
+        [] => None,
+    }
+}
+
+/// The models version segment of a proto package (`unitycatalog.tags.v1` → `v1`,
+/// `unitycatalog.agents.v0alpha1` → `v0alpha1`), where the proto plugin wrote its types. `v1`
+/// when the package carries no recognizable version segment.
+pub(crate) fn package_models_version(package: &str) -> &str {
+    let segs: Vec<&str> = package.split('.').filter(|s| !s.is_empty()).collect();
+    match segs.as_slice() {
+        [.., _name, version] if is_version_segment(version) => version,
+        _ => "v1",
     }
 }
 

@@ -825,6 +825,7 @@ mod tests {
             dual_transport: false,
             client_protocols: crate::ClientProtocols::default(),
             connect_client_path: None,
+            rest_client: Default::default(),
             output: CodeGenOutput {
                 common: "/tmp/c".into(),
                 models: None,
@@ -835,7 +836,6 @@ mod tests {
                 node: None,
                 node_ts: None,
                 wasm: None,
-                python_typings_filename: "client.pyi".into(),
                 generate_resource_clients: true,
             },
             generate_resource_enum: false,

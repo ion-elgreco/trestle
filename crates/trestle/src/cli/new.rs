@@ -546,6 +546,8 @@ fn emit_project_config(
         generate: GenerateConfig {
             proto_lib,
             json_field_names: Default::default(),
+            json_field_names_by_package: Default::default(),
+            json_int64: Default::default(),
             descriptors: "api.bin".to_string(),
             servers: Servers {
                 rest: true,
@@ -559,6 +561,9 @@ fn emit_project_config(
                     dual_transport: false,
                     protocols: vec![ClientProtocol::Rest],
                     connect_client_path: None,
+                    ignore_unknown_enum_values: false,
+                    error_module: None,
+                    form_encoded_methods: Vec::new(),
                 }),
                 python: None,
                 node,

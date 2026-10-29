@@ -100,6 +100,7 @@ fn connect_config(client_dir: &Path) -> CodeGenConfig {
             connect: true,
         },
         connect_client_path: Some("myproto::connect_gen::example::read::v1".into()),
+        rest_client: Default::default(),
         output: CodeGenOutput {
             common: client_dir.join("common"),
             models: None,
@@ -110,7 +111,6 @@ fn connect_config(client_dir: &Path) -> CodeGenConfig {
             node: None,
             node_ts: None,
             wasm: None,
-            python_typings_filename: "client.pyi".into(),
             generate_resource_clients: false,
         },
         generate_resource_enum: false,

@@ -10,9 +10,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use olai_codegen::{BindingsConfig, CodeGenConfig, CodeGenOutput, DEFAULT_TRANSPORT_TYPE_PATH};
+use olai_codegen::{
+    BindingsConfig, CodeGenConfig, CodeGenOutput, DEFAULT_TRANSPORT_TYPE_PATH, ErrorModuleConfig,
+    REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions,
+};
 
-use super::{GenerateConfig, MODELS_GEN_SUBDIR, Transport, TrestleConfig};
+use super::{GenerateConfig, JsonInt64, MODELS_GEN_SUBDIR, Transport, TrestleConfig};
 use crate::error::{Error, Result};
 
 /// Convention subdir for handler/client/binding glue (mounted `mod codegen;`).
@@ -87,7 +90,6 @@ impl GenerateConfig {
             node,
             node_ts,
             wasm,
-            python_typings_filename: "client.pyi".to_string(),
         };
 
         let bindings = self.lower_bindings(&output)?;
@@ -126,7 +128,28 @@ impl GenerateConfig {
                 .rust
                 .as_ref()
                 .and_then(|r| r.connect_client_path.clone()),
+            rest_client: self.rest_client_options(),
         })
+    }
+
+    /// The REST client options: the `json_int64` setting plus the `clients.rust` knobs.
+    fn rest_client_options(&self) -> RestClientOptions {
+        let rust = self.clients.rust.as_ref();
+        RestClientOptions {
+            json_int64_as_number: self.json_int64 == JsonInt64::Number,
+            ignore_unknown_enum_values: rust.is_some_and(|r| r.ignore_unknown_enum_values),
+            error_module: rust
+                .and_then(|r| r.error_module.as_ref())
+                .map(|e| ErrorModuleConfig {
+                    code_field: e.code_field.clone(),
+                    message_field: e.message_field.clone(),
+                    details_field: e.details_field.clone(),
+                    code_enum: e.code_enum.clone(),
+                }),
+            form_encoded_methods: rust
+                .map(|r| r.form_encoded_methods.clone())
+                .unwrap_or_default(),
+        }
     }
 
     /// Which client protocol layer(s) to emit for the generated Rust client.
@@ -158,8 +181,10 @@ impl GenerateConfig {
             if let Some(path) = &rust.transport_type_path {
                 return path.clone();
             }
-            if rust.transport == Transport::Wasm {
-                return "olai_http_wasm::WasmClient".to_string();
+            match rust.transport {
+                Transport::Wasm => return "olai_http_wasm::WasmClient".to_string(),
+                Transport::Reqwest => return REQWEST_TRANSPORT_TYPE_PATH.to_string(),
+                Transport::Cloud => {}
             }
         }
         // A WASM browser client implies the wasm transport even without an
@@ -230,20 +255,49 @@ impl GenerateConfig {
             String::new()
         };
 
+        let python = py
+            .map(|py| lower_python(py, b.and_then(|b| b.error_base_class.as_deref())))
+            .transpose()?;
+
         Ok(Some(BindingsConfig {
             aggregate_client_name,
             client_crate_name,
             py_error_type,
             py_result_type,
-            python_api: py.and_then(|c| c.api).unwrap_or_default().to_codegen(),
             napi_error_ext_trait,
-            typings_package_filter: py.and_then(|c| c.typings_package_filter.clone()),
             ts_error_base_class,
             ts_error_code_prefix: b
                 .and_then(|b| b.error_code_prefix.clone())
                 .unwrap_or_default(),
+            python,
         }))
     }
+}
+
+/// Lower the Python client config; the package directory is resolved (and created) like the
+/// outputs. The exception classes of the error module take `error_base_class`
+/// (`bindings.error_base_class`).
+fn lower_python(
+    python: &super::PythonClient,
+    error_base_class: Option<&str>,
+) -> Result<olai_codegen::PythonOptions> {
+    let error_base_class = error_base_class.ok_or_else(|| {
+        Error::other(
+            "`clients.python` needs `bindings.error_base_class`, the base exception class \
+             (it derives from project.name — call derive_defaults first)",
+        )
+    })?;
+    let options = &python.options;
+    Ok(olai_codegen::PythonOptions {
+        package: olai_codegen::PyPackageConfig {
+            dir: resolve_dir(&python.package.dir)?,
+            name: python.package.name.clone(),
+        },
+        error_base_class: error_base_class.to_string(),
+        module: options.module.clone(),
+        async_methods: options.async_methods,
+        keyword_only: options.keyword_only,
+    })
 }
 
 /// Create the directory if missing (the generator owns everything under it) and

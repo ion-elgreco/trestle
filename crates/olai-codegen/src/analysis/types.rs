@@ -255,6 +255,14 @@ impl MethodPlan {
         })
     }
 
+    /// Whether the REST client puts request values into the URL path: the method has path
+    /// parameters, and its template binds them.
+    pub fn formats_path_values(&self) -> bool {
+        self.has_http_route
+            && self.path_parameters().next().is_some()
+            && !self.http_pattern.parameter_names().is_empty()
+    }
+
     pub fn query_parameters(&self) -> impl Iterator<Item = &QueryParam> {
         self.parameters.iter().filter_map(|param| match param {
             RequestParam::Query(query_param) => Some(query_param),

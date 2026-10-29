@@ -7,14 +7,17 @@ pub mod tag_assignments;
 pub mod client;
 #[allow(unused_imports)]
 pub use client::*;
+
+pub mod error;
 use futures::Future;
+
 pub(super) fn stream_paginated<F, Fut, S, T>(
     state: S,
     op: F,
-) -> impl futures::Stream<Item = crate::Result<T>>
+) -> impl futures::Stream<Item = crate::codegen::error::Result<T>>
 where
     F: Fn(S, Option<String>) -> Fut + Copy,
-    Fut: Future<Output = crate::Result<(T, S, Option<String>)>>,
+    Fut: Future<Output = crate::codegen::error::Result<(T, S, Option<String>)>>,
 {
     enum PaginationState<T> {
         Start(T),
@@ -44,4 +47,24 @@ where
             Some((Ok(resp), next_state))
         },
     )
+}
+
+/// Percent-encode a value for a URL path. `keep_slash` keeps `/`, for a value that
+/// spans several path segments.
+fn encode_path_value(value: &impl ::std::fmt::Display, keep_slash: bool) -> String {
+    use ::std::fmt::Write as _;
+    let value = value.to_string();
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char)
+            }
+            b'/' if keep_slash => out.push('/'),
+            _ => {
+                let _ = write!(out, "%{byte:02X}");
+            }
+        }
+    }
+    out
 }
