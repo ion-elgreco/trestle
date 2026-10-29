@@ -117,8 +117,10 @@ impl ApiError {
         let text = |key: &str| {
             object.and_then(|o| o.get(key)).and_then(|v| v.as_str()).map(str::to_string)
         };
-        let code = text("error_code").or_else(|| text("errorCode"));
-        let message = text("message")
+        let code = ["error_code", "errorCode"].into_iter().find_map(text);
+        let message = ["message"]
+            .into_iter()
+            .find_map(text)
             .unwrap_or_else(|| String::from_utf8_lossy(body).trim().to_string());
         let details = object
             .and_then(|o| o.get("details"))

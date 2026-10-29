@@ -4,6 +4,8 @@ package demo.v1;
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
+import "google/protobuf/struct.proto";
+import "olai/trestle/v1/annotations.proto";
 
 enum Color {
   COLOR_UNSPECIFIED = 0;
@@ -41,6 +43,20 @@ message Widget {
   string display_name = 6;
   // A field with an explicit JSON name, kept as is.
   string metadata_location = 7 [json_name = "metadata-location"];
+  // Free-form attributes: any JSON object.
+  google.protobuf.Struct attributes = 8;
+  // A free-form value: any JSON value.
+  google.protobuf.Value extra = 9;
+  // Free-form values.
+  repeated google.protobuf.Value notes = 10;
+  // Rows of free-form values, by table.
+  map<string, google.protobuf.ListValue> rows = 11;
+  // The kind of widget: a field named after a Rust keyword.
+  optional string type = 12;
+  // Sizes, as 64-bit integers.
+  repeated int64 sizes = 13;
+  // Counts by name, as 64-bit integers.
+  map<string, int64> counts = 14;
 }
 
 message ListWidgetsRequest {
@@ -50,6 +66,11 @@ message ListWidgetsRequest {
   optional string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
   // Only the widgets of this color.
   optional Color color = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Index of the first widget, from 1. Its query key is its explicit JSON name.
+  optional int32 first = 4 [json_name = "startIndex"];
+  // The order of the widgets. Its query key is the JSON name that the proto writes out, though
+  // it is the default one.
+  optional string order_by = 5 [json_name = "orderBy"];
 }
 
 // A label of a widget. Only requests take it, so only it gets a Python constructor.
@@ -74,6 +95,14 @@ message CreateWidgetRequest {
   optional string display_name = 3 [(google.api.field_behavior) = OPTIONAL];
   // Labels to set.
   repeated Label labels = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Free-form attributes: any JSON object.
+  google.protobuf.Struct attributes = 5 [(google.api.field_behavior) = OPTIONAL];
+  // The kind of widget.
+  optional string type = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Where the widget comes from, sent as the JSON name that the proto writes out.
+  optional string source_url = 7 [json_name = "sourceUrl"];
+  // Tags, sent even when there are none.
+  repeated string tags = 8 [(olai.trestle.v1.emit_unpopulated) = true];
 }
 
 message GetWidgetRequest {
@@ -121,6 +150,75 @@ service WidgetService {
   // Delete a widget.
   rpc DeleteWidget(DeleteWidgetRequest) returns (Empty) {
     option (google.api.http) = {delete: "/api/v1/widgets/{name}"};
+  }
+}
+
+message WidgetExistsRequest {
+  // The name of the widget.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message SearchWidgetsRequest {
+  // The start of the names to find.
+  string prefix = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message StreamWidgetsRequest {
+  // Only the widgets whose names start with this.
+  optional string prefix = 1;
+}
+
+// One line of a widget stream.
+message WidgetLine {
+  // The name of the widget.
+  string name = 1;
+  // When the widget was created, in epoch milliseconds.
+  int64 created_at = 2;
+}
+
+message WidgetVersionRequest {
+  // The name of the widget.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// The version of a widget, partly from the response headers.
+message WidgetVersion {
+  // The name of the widget, from the body.
+  string name = 1;
+  // The version, from the `Widget-Version` header.
+  int64 version = 2 [(olai.trestle.v1.response_header) = "Widget-Version"];
+  // The entity tag, from the `ETag` header.
+  optional string etag = 3 [(olai.trestle.v1.response_header) = "ETag"];
+}
+
+// Requests that `google.api.http` writes in less common ways.
+service ProbeService {
+  // Whether a widget exists: a `HEAD` request, which fails for a missing widget.
+  rpc WidgetExists(WidgetExistsRequest) returns (Empty) {
+    option (google.api.http) = {
+      custom: {
+        kind: "HEAD"
+        path: "/api/v1/widgets/{name}"
+      }
+    };
+  }
+
+  // Find widgets: a `GET` with a JSON body.
+  rpc SearchWidgets(SearchWidgetsRequest) returns (ListWidgetsResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/search"
+      body: "*"
+    };
+  }
+
+  // Stream widgets: an NDJSON answer, one line per widget.
+  rpc StreamWidgets(StreamWidgetsRequest) returns (stream WidgetLine) {
+    option (google.api.http) = {get: "/api/v1/widget-lines"};
+  }
+
+  // The version of a widget: fields from the response headers.
+  rpc WidgetVersion(WidgetVersionRequest) returns (.demo.v1.WidgetVersion) {
+    option (google.api.http) = {get: "/api/v1/widgets/{name}/version"};
   }
 }
 

@@ -30,12 +30,25 @@ pub(crate) fn generate(
     errors: &ErrorModuleConfig,
     metadata: &CodeGenMetadata,
 ) -> Result<String> {
-    let code_field = &errors.code_field;
-    // The lowerCamelCase form of the code key is read too, when it is another key.
-    let code_alias = Some(lower_camel(code_field))
-        .filter(|alias| alias != code_field)
-        .map(|alias| quote! { .or_else(|| text(#alias)) });
-    let message_field = &errors.message_field;
+    // The keys of the code, in order: the code key, its lowerCamelCase form when that is another
+    // key, then the configured fallbacks. The message keys likewise.
+    let code_alias =
+        Some(lower_camel(&errors.code_field)).filter(|alias| *alias != errors.code_field);
+    let code_fields = std::iter::once(errors.code_field.clone())
+        .chain(code_alias)
+        .chain(errors.more_code_fields.iter().cloned());
+    let message_fields =
+        std::iter::once(&errors.message_field).chain(errors.more_message_fields.iter());
+    let envelope_fields = &errors.envelope_fields;
+    let envelope = (!envelope_fields.is_empty()).then(|| {
+        quote! {
+            // An answer that holds the error object under a key: read the fields from it.
+            let object = [#(#envelope_fields),*]
+                .into_iter()
+                .find_map(|key| object.and_then(|o| o.get(key)).and_then(|v| v.as_object()))
+                .or(object);
+        }
+    });
     let details = match &errors.details_field {
         Some(field) => quote! {
             object
@@ -203,14 +216,17 @@ pub(crate) fn generate(
             pub fn from_body(status: u16, body: &[u8]) -> Self {
                 let json = ::serde_json::from_slice::<::serde_json::Value>(body).ok();
                 let object = json.as_ref().and_then(|v| v.as_object());
+                #envelope
                 let text = |key: &str| {
                     object
                         .and_then(|o| o.get(key))
                         .and_then(|v| v.as_str())
                         .map(str::to_string)
                 };
-                let code = text(#code_field) #code_alias;
-                let message = text(#message_field)
+                let code = [#(#code_fields),*].into_iter().find_map(text);
+                let message = [#(#message_fields),*]
+                    .into_iter()
+                    .find_map(text)
                     .unwrap_or_else(|| String::from_utf8_lossy(body).trim().to_string());
                 let details = #details;
                 Self {

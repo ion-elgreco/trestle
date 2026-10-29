@@ -3,6 +3,9 @@ pub mod catalog;
 pub mod query;
 pub mod schema;
 pub mod tag_assignments;
+pub use catalog::CatalogClient;
+pub use schema::SchemaClient;
+
 #[allow(clippy::too_many_arguments, clippy::doc_lazy_continuation)]
 pub mod client;
 #[allow(unused_imports)]

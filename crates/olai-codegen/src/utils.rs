@@ -110,6 +110,23 @@ pub mod strings {
     }
 }
 
+/// The Rust identifier of a proto field: a raw identifier (`r#type`) for a Rust keyword, as buffa
+/// and prost name such fields. `self`, `Self`, `super` and `crate` cannot be raw identifiers.
+pub(crate) fn field_ident(name: &str) -> proc_macro2::Ident {
+    const KEYWORDS: &[&str] = &[
+        "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "do",
+        "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "gen", "if", "impl", "in",
+        "let", "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref",
+        "return", "static", "struct", "trait", "true", "try", "type", "typeof", "unsafe",
+        "unsized", "use", "virtual", "where", "while", "yield",
+    ];
+    if KEYWORDS.contains(&name) {
+        proc_macro2::Ident::new_raw(name, proc_macro2::Span::call_site())
+    } else {
+        proc_macro2::Ident::new(name, proc_macro2::Span::call_site())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

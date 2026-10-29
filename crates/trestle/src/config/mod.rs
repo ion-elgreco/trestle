@@ -305,6 +305,15 @@ pub struct ErrorModule {
     /// Fully-qualified proto enum whose values are the error codes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_enum: Option<String>,
+    /// More keys of the code, read in order when `code_field` is not in the body.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub more_code_fields: Vec<String>,
+    /// More keys of the message, read in order when `message_field` is not in the body.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub more_message_fields: Vec<String>,
+    /// Keys that hold the whole error object in some answers (`{"error": {...}}`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub envelope_fields: Vec<String>,
 }
 
 impl Default for ErrorModule {
@@ -314,6 +323,9 @@ impl Default for ErrorModule {
             message_field: default_message_field(),
             details_field: default_details_field(),
             code_enum: None,
+            more_code_fields: Vec::new(),
+            more_message_fields: Vec::new(),
+            envelope_fields: Vec::new(),
         }
     }
 }

@@ -269,6 +269,9 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
         );
         if config.rest_client.json_int64_as_number {
             mod_content.push_str(&json_int64::module());
+            if metadata_has_json_fields(metadata) {
+                mod_content.push_str(&json_int64::value_module());
+            }
         }
         // Route through write_generated_code so the `// @generated` header is prepended like
         // every other emitted file, rather than writing it raw.
@@ -318,6 +321,24 @@ pub fn generate_code(metadata: &CodeGenMetadata, config: &CodeGenConfig) -> Resu
     }
 
     Ok(())
+}
+
+/// Whether a message has a free-form JSON field (`google.protobuf.Value`, `Struct`,
+/// `ListValue`), directly, in a map or in a oneof.
+pub(crate) fn metadata_has_json_fields(metadata: &CodeGenMetadata) -> bool {
+    metadata
+        .messages
+        .iter()
+        .filter(|(name, _)| !name.starts_with(".google."))
+        .flat_map(|(_, info)| &info.fields)
+        .any(|field| {
+            types::JsonType::of_field(&field.unified_type).is_some()
+                || field
+                    .oneof_variants
+                    .iter()
+                    .flatten()
+                    .any(|v| types::JsonType::of_field(&v.field_type).is_some())
+        })
 }
 
 fn generate_common_code(
@@ -516,6 +537,8 @@ fn generate_client_code(
     let mut files = HashMap::new();
     let protocols = config.client_protocols.selected();
     let multi = config.client_protocols.is_multi();
+    // The module path and type of every resource-scoped client, re-exported from the client root.
+    let mut resource_clients = Vec::new();
 
     for service in &plan.services {
         let handler = ServiceHandler {
@@ -557,6 +580,9 @@ fn generate_client_code(
                     })
                     .is_some();
 
+            if has_resource_client && let Some(scoped) = handler.scoped_client_type() {
+                resource_clients.push((prefix.clone(), scoped));
+            }
             files.insert(
                 format!("{prefix}/mod.rs"),
                 generate_client_module(has_resource_client),
@@ -595,7 +621,7 @@ fn generate_client_code(
 
     files.insert(
         "mod.rs".to_string(),
-        generate_client_main_module(&plan.services, config, has_aggregate),
+        generate_client_main_module(&plan.services, config, has_aggregate, &resource_clients),
     );
 
     Ok(GeneratedCode { files })
@@ -717,10 +743,14 @@ pub fn main_module(services: &[ServicePlan]) -> String {
     format_tokens_static(tokens)
 }
 
+/// The client root `mod.rs`. `resource_clients` are the module path (`catalogs`, or
+/// `catalogs/rest` with both protocols) and type of each resource-scoped client, re-exported
+/// here so that a crate can export the whole client with `pub use codegen::*;`.
 fn generate_client_main_module(
     services: &[ServicePlan],
     config: &CodeGenConfig,
     has_aggregate: bool,
+    resource_clients: &[(String, Ident)],
 ) -> String {
     let result_path = config.client_result_path();
     let service_modules: Vec<TokenStream> = services
@@ -728,6 +758,13 @@ fn generate_client_main_module(
         .map(|s| {
             let module_name = format_ident!("{}", s.base_path);
             quote! { pub mod #module_name; }
+        })
+        .collect();
+    let resource_exports: Vec<TokenStream> = resource_clients
+        .iter()
+        .map(|(path, scoped)| {
+            let segments = path.split('/').map(|segment| format_ident!("{}", segment));
+            quote! { pub use #(#segments::)*#scoped; }
         })
         .collect();
 
@@ -820,6 +857,8 @@ fn generate_client_main_module(
 
     let tokens = quote! {
         #(#service_modules)*
+
+        #(#resource_exports)*
 
         #aggregate_module
         #transport_module
@@ -1284,6 +1323,29 @@ impl ServiceHandler<'_> {
             .resolve(&self.models_segment(), &self.models_version())
     }
 
+    /// The `use` globs of the models of the other packages whose messages the RPCs of this
+    /// service take or return (a response message shared by two packages, say). Well-known
+    /// `google.*` types are not models.
+    pub(crate) fn foreign_models_imports(&self) -> Vec<TokenStream> {
+        let template = ModelsPath::from_template(&self.config.models_path_template);
+        self.methods()
+            .flat_map(|m| {
+                [
+                    m.plan.metadata.input_type.as_str(),
+                    m.plan.metadata.output_type.as_str(),
+                ]
+            })
+            .filter_map(message_package)
+            .filter(|package| *package != self.plan.package && !package.starts_with("google."))
+            .unique()
+            .filter_map(|package| {
+                let segment = package_models_segment(&package)?;
+                let path = template.resolve(segment, package_models_version(&package));
+                Some(quote! { use #path::*; })
+            })
+            .collect()
+    }
+
     pub(crate) fn models_path_crate(&self) -> syn::Path {
         ModelsPath::from_template(&self.config.models_path_crate_template)
             .resolve(&self.models_segment(), &self.models_version())
@@ -1300,6 +1362,18 @@ impl ServiceHandler<'_> {
         let models_path = ModelsPath::from_template(&self.config.models_path_template);
         syn::parse_str(models_path.root()?).ok()
     }
+}
+
+/// The package of a fully qualified message name (`.unitycatalog.shares.v1.ShareInfo` →
+/// `unitycatalog.shares.v1`): its segments up to the first one that starts with an uppercase
+/// letter, as proto packages are lowercase and message names are not.
+fn message_package(type_name: &str) -> Option<String> {
+    let segments: Vec<&str> = type_name
+        .trim_start_matches('.')
+        .split('.')
+        .take_while(|s| s.starts_with(|c: char| c.is_ascii_lowercase()))
+        .collect();
+    (!segments.is_empty()).then(|| segments.join("."))
 }
 
 /// The models module segment of a proto package: the segment before the version
@@ -1346,6 +1420,26 @@ pub(crate) struct MethodHandler<'a> {
 }
 
 impl MethodHandler<'_> {
+    /// The key of the query parameter `param` in the query string: its JSON name in a package of
+    /// [`RestClientOptions::json_query_packages`] (see [`QueryParam::key`]).
+    pub(crate) fn query_key<'p>(
+        &self,
+        param: &'p crate::analysis::QueryParam,
+    ) -> std::borrow::Cow<'p, str> {
+        let input = self.plan.metadata.input_type.trim_start_matches('.');
+        let json_names = self
+            .config
+            .rest_client
+            .json_query_packages
+            .iter()
+            .any(|package| {
+                input
+                    .strip_prefix(package.as_str())
+                    .is_some_and(|rest| rest.starts_with('.'))
+            });
+        param.key(json_names)
+    }
+
     pub(crate) fn is_collection_method(&self) -> bool {
         crate::analysis::is_collection_method(
             &self.plan.request_type,
@@ -1439,6 +1533,30 @@ impl MethodHandler<'_> {
     pub(crate) fn output_type(&self) -> Option<Ident> {
         self.output_message()
             .map(|t| extract_type_ident(&t.info.name))
+    }
+
+    /// The type a client call resolves to: the output message, a `Vec` of them for a
+    /// server-streaming method (one per NDJSON line), or `()` for `Empty`.
+    pub(crate) fn result_type(&self) -> TokenStream {
+        match self.output_type() {
+            Some(output) if self.plan.metadata.server_streaming => quote! { Vec<#output> },
+            Some(output) => quote! { #output },
+            None => quote! { () },
+        }
+    }
+
+    /// The output fields that come from HTTP response headers instead of the body.
+    pub(crate) fn response_header_fields(&self) -> Vec<&MessageField> {
+        self.output_message()
+            .map(|output| {
+                output
+                    .info
+                    .fields
+                    .iter()
+                    .filter(|f| f.response_header.is_some())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub(crate) fn list_output_field(&self) -> Option<&MessageField> {
@@ -1540,4 +1658,22 @@ impl MethodHandler<'_> {
 /// parent-prefixes nested types — different behavior.)
 pub(crate) fn extract_type_ident(full_type: &str) -> Ident {
     format_ident!("{}", crate::utils::extract_simple_type_name(full_type))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::message_package;
+
+    #[test]
+    fn message_package_stops_at_the_message_name() {
+        assert_eq!(
+            message_package(".unitycatalog.shares.v1.ShareInfo").as_deref(),
+            Some("unitycatalog.shares.v1")
+        );
+        assert_eq!(
+            message_package("demo.v1.Outer.Inner").as_deref(),
+            Some("demo.v1")
+        );
+        assert_eq!(message_package("Empty"), None);
+    }
 }

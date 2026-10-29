@@ -147,9 +147,10 @@ option is off by default.
 |---|---|---|
 | `transport_type_path = REQWEST_TRANSPORT_TYPE_PATH` | `transport: reqwest` | Emit `transport.rs`: an `HttpClient` over `reqwest::Client` with an optional bearer token. No cloud credential providers, no retries; builds for native and `wasm32`. |
 | `error_module` | `error_module: { code_field, message_field, details_field, code_enum }` | Emit `error.rs`: `Error`, `Result`, `ApiError` (HTTP status, code, message, details of the JSON error body) and `parse_error_response`. The clients return this `Result`; `result_type` stays the server's. A code not in `code_enum` is kept as a string. Required with the Python bindings. |
-| `json_int64_as_number` | `json_int64: number` (under `generate`) | 64-bit integers are JSON numbers, not proto3-JSON strings. Reading accepts both. |
+| `json_int64_as_number` | `json_int64: number` (under `generate`) | 64-bit integers are JSON numbers, not proto3-JSON strings, and the whole numbers of `google.protobuf.Value`/`Struct`/`ListValue` fields are integers (`1`, not `1.0`). Reading accepts both. |
 | `ignore_unknown_enum_values` | `ignore_unknown_enum_values: true` | An unknown enum name in a response becomes the zero value instead of failing the response. |
 | `form_encoded_methods` | `form_encoded_methods: [pkg.Service.Method]` | Send the request body of these RPCs form-encoded. |
+| `json_query_packages` | `json_field_names_by_package: {pkg: json}` | Send the query parameters of these packages by their JSON name (`startIndex`), as their bodies. Elsewhere a query key is the proto name, or a `json_name` that differs from the default. |
 
 Path values are always percent-encoded (`/` too, except for multi-segment patterns such as
 `{name=catalogs/*}`). With `json_field_names: proto`, a field with an explicit `json_name`

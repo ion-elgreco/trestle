@@ -99,7 +99,10 @@ pub fn unified_to_rust(unified_type: &UnifiedType, context: RenderContext) -> St
         BaseType::Float32 => "f32".to_string(),
         BaseType::Bytes => "Vec<u8>".to_string(),
         BaseType::Unit => "()".to_string(),
-        BaseType::Message(name) => extract_simple_type_name(name),
+        BaseType::Message(name) => match JsonType::of(name) {
+            Some(json) => json.rust_path().to_string(),
+            None => extract_simple_type_name(name),
+        },
         BaseType::Enum(name) => {
             if matches!(
                 context,
@@ -113,7 +116,11 @@ pub fn unified_to_rust(unified_type: &UnifiedType, context: RenderContext) -> St
         BaseType::OneOf(name) => extract_simple_type_name(name),
         BaseType::Map(key_type, value_type) => {
             if matches!(context, RenderContext::Constructor) && !unified_type.is_optional {
-                "impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>".to_string()
+                let value = match value_type.base_type {
+                    BaseType::String => "impl Into<String>".to_string(),
+                    _ => unified_to_rust(value_type, RenderContext::Parameter),
+                };
+                format!("impl IntoIterator<Item = (impl Into<String>, {value})>")
             } else {
                 let key_str = unified_to_rust(key_type, context);
                 let value_str = unified_to_rust(value_type, context);
@@ -425,6 +432,58 @@ pub struct UnifiedType {
     pub is_optional: bool,
     /// Whether this type is repeated (`Vec<T>` in Rust).
     pub is_repeated: bool,
+}
+
+/// A free-form JSON type of `google/protobuf/struct.proto`. The Rust models hold buffa's types
+/// (`buffa_types`); Python sees plain JSON objects (`dict`, `list`, `str`, numbers, `bool`,
+/// `None`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsonType {
+    /// `google.protobuf.Value`: any JSON value.
+    Value,
+    /// `google.protobuf.Struct`: a JSON object.
+    Struct,
+    /// `google.protobuf.ListValue`: a JSON array.
+    ListValue,
+}
+
+impl JsonType {
+    /// The JSON type that the proto message `name` (with or without the leading `.`) is.
+    pub fn of(name: &str) -> Option<Self> {
+        match name.trim_start_matches('.') {
+            "google.protobuf.Value" => Some(Self::Value),
+            "google.protobuf.Struct" => Some(Self::Struct),
+            "google.protobuf.ListValue" => Some(Self::ListValue),
+            _ => None,
+        }
+    }
+
+    /// The JSON type of a field type: the type itself, or the value type of a map.
+    pub fn of_field(ty: &UnifiedType) -> Option<Self> {
+        match &ty.base_type {
+            BaseType::Message(name) => Self::of(name),
+            BaseType::Map(_, value) => Self::of_field(value),
+            _ => None,
+        }
+    }
+
+    /// The path of the buffa type.
+    pub fn rust_path(self) -> &'static str {
+        match self {
+            Self::Value => "::buffa_types::google::protobuf::Value",
+            Self::Struct => "::buffa_types::google::protobuf::Struct",
+            Self::ListValue => "::buffa_types::google::protobuf::ListValue",
+        }
+    }
+
+    /// The name the conversion functions of the type use: `value`, `struct`, `list`.
+    pub fn fn_suffix(self) -> &'static str {
+        match self {
+            Self::Value => "value",
+            Self::Struct => "struct",
+            Self::ListValue => "list",
+        }
+    }
 }
 
 /// The underlying category of a [`UnifiedType`], independent of optional/repeated wrapping.

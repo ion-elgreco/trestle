@@ -384,7 +384,9 @@ pub struct CodeGenConfig {
 /// Wire-format and error options of the generated REST client.
 #[derive(Debug, Clone, Default)]
 pub struct RestClientOptions {
-    /// Write 64-bit integers as JSON numbers instead of the proto3-JSON quoted strings.
+    /// Write 64-bit integers as JSON numbers instead of the proto3-JSON quoted strings, and the
+    /// whole numbers of free-form JSON fields (`google.protobuf.Value`, `Struct`, `ListValue`)
+    /// as integers (`1`, not buffa's `1.0`).
     ///
     /// Emits a `json_int64` serde helper module into the models `mod.rs`. The `trestle` CLI
     /// rewrites buffa's `int64`/`uint64` helper paths to it (see
@@ -407,6 +409,12 @@ pub struct RestClientOptions {
     /// RPCs, as `package.Service.Method`, whose request body is sent form-encoded
     /// (`application/x-www-form-urlencoded`) instead of as JSON. The response is still JSON.
     pub form_encoded_methods: Vec<String>,
+
+    /// Proto packages whose query parameters are sent by their JSON (lowerCamelCase) name, as
+    /// their bodies are (`startIndex`, not `start_index`). Elsewhere a query parameter is sent
+    /// by its proto name, or by its `json_name` when the proto sets one that differs from the
+    /// default. The generated server extractors read the same keys.
+    pub json_query_packages: Vec<String>,
 }
 
 /// Shape of the JSON error body that the generated error module reads.
@@ -426,6 +434,16 @@ pub struct ErrorModuleConfig {
     /// error codes. When set, the error exposes the code as that enum; a code that is not in it
     /// is still kept as a string.
     pub code_enum: Option<String>,
+    /// More keys of the code, read in order when `code_field` is not a string in the body: the
+    /// codes of other error shapes of the API, such as OAuth's `error`. Default none.
+    pub more_code_fields: Vec<String>,
+    /// More keys of the message, read in order when `message_field` is not a string in the
+    /// body, such as OAuth's `error_description`. Default none.
+    pub more_message_fields: Vec<String>,
+    /// Keys that hold the whole error object in some answers (`{"error": {"message": …}}`).
+    /// When the body has an object under one of them, the fields are read from the first such
+    /// object. Default none.
+    pub envelope_fields: Vec<String>,
 }
 
 impl Default for ErrorModuleConfig {
@@ -435,6 +453,9 @@ impl Default for ErrorModuleConfig {
             message_field: "message".into(),
             details_field: Some("details".into()),
             code_enum: None,
+            more_code_fields: Vec::new(),
+            more_message_fields: Vec::new(),
+            envelope_fields: Vec::new(),
         }
     }
 }
@@ -497,6 +518,19 @@ impl CodeGenConfig {
         }
         let models_path = ModelsPath::from_template(&self.models_path_crate_template);
         Some(format!("{}::json_int64", models_path.root()?))
+    }
+
+    /// The crate-local path of the `json_value` helper module that
+    /// [`RestClientOptions::json_int64_as_number`] emits into the models `mod.rs` when a message
+    /// has free-form JSON fields: the module that
+    /// [`ModelRewrites::json_value_module`](crate::postprocess::ModelRewrites::json_value_module)
+    /// points at. `None` when the option is off.
+    pub fn json_value_module_path(&self) -> Option<String> {
+        if !self.rest_client.json_int64_as_number {
+            return None;
+        }
+        let models_path = ModelsPath::from_template(&self.models_path_crate_template);
+        Some(format!("{}::json_value", models_path.root()?))
     }
 
     /// The `Result` type of the generated clients: the one of the generated error module with

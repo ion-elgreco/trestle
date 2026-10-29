@@ -679,6 +679,7 @@ fn rest_client_and_python_options_generate_valid_code() {
         ignore_unknown_enum_values: true,
         error_module: Some(Default::default()),
         form_encoded_methods: vec![],
+        json_query_packages: vec![],
     };
     config.bindings = Some(BindingsConfig {
         aggregate_client_name: "ExampleClient".into(),

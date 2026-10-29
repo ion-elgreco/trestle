@@ -6,8 +6,8 @@ use std::process::Command;
 
 use olai_codegen::postprocess::{JsonFieldNames, ModelRewrites};
 use olai_codegen::{
-    BindingsConfig, CodeGenConfig, CodeGenOutput, ErrorModuleConfig, PyPackageConfig,
-    PythonOptions, REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions, Runtime,
+    BindingsConfig, CodeGenConfig, CodeGenMetadata, CodeGenOutput, ErrorModuleConfig,
+    PyPackageConfig, PythonOptions, REQWEST_TRANSPORT_TYPE_PATH, RestClientOptions, Runtime,
 };
 
 /// The fixture directory (the one with `proto/`).
@@ -63,9 +63,14 @@ fn demo_config(out: &Path) -> CodeGenConfig {
             ignore_unknown_enum_values: true,
             error_module: Some(ErrorModuleConfig {
                 code_enum: Some(".demo.v1.ErrorCode".into()),
+                // `{"error": {"message", "type"}}` and OAuth's `{"error", "error_description"}`.
+                more_code_fields: vec!["type".into(), "error".into()],
+                more_message_fields: vec!["error_description".into()],
+                envelope_fields: vec!["error".into()],
                 ..Default::default()
             }),
             form_encoded_methods: vec!["demo.v1.TokenService.ExchangeToken".into()],
+            json_query_packages: vec![],
         },
         output: CodeGenOutput {
             common: gen_dir.clone(),
@@ -107,10 +112,12 @@ fn demo_config(out: &Path) -> CodeGenConfig {
 
 /// The rewrites the `trestle` CLI applies to the buffa output after `buf generate`.
 #[allow(dead_code)]
-fn demo_rewrites(config: &CodeGenConfig) -> ModelRewrites {
+fn demo_rewrites(config: &CodeGenConfig, metadata: &CodeGenMetadata) -> ModelRewrites {
     ModelRewrites {
         field_names: JsonFieldNames::Proto,
         packages: Default::default(),
         int64_module: config.json_int64_module_path(),
+        json_value_module: config.json_value_module_path(),
+        fields: olai_codegen::postprocess::field_options(metadata),
     }
 }

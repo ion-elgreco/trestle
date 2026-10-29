@@ -357,7 +357,7 @@ fn render_child_builder_args(
     {
         match source {
             BuilderArg::ParentComponent => {
-                let field = format_ident!("{}", param.name());
+                let field = crate::utils::field_ident(param.name());
                 new_args.push(quote! { &self.#field });
             }
             BuilderArg::MethodArg => {
@@ -676,6 +676,7 @@ mod tests {
     fn query_param_is_not_a_path_param() {
         let q = RequestParam::Query(QueryParam {
             name: "page_token".to_string(),
+            json_name: None,
             field_type: string_type(),
             documentation: None,
             resource_reference: None,

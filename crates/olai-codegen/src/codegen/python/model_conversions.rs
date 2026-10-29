@@ -45,7 +45,7 @@ use quote::{format_ident, quote};
 use super::super::{doc_tokens, format_tokens};
 use crate::analysis::{GenerationPlan, ServicePlan};
 use crate::codegen::{CodeGenConfig, PythonOptions, Runtime};
-use crate::parsing::types::{BaseType, UnifiedType};
+use crate::parsing::types::{BaseType, JsonType, UnifiedType};
 use crate::parsing::{
     CodeGenMetadata, EnumInfo, EnumValue, MessageField, MessageInfo, OneofVariant,
 };
@@ -97,6 +97,9 @@ pub(crate) fn generate_pyo3_impls(
         return Ok(String::new());
     }
     items.push(python_repr_fn());
+    if runtime == Runtime::Buffa && crate::codegen::metadata_has_json_fields(metadata) {
+        items.push(json_conversions());
+    }
 
     // No file-level inner attributes (`#![..]`) or inner doc comments (`//!`):
     // this file is mounted via `#[cfg(feature = "python")] mod pyo3_impls;` in the
@@ -115,6 +118,150 @@ pub(crate) fn generate_pyo3_impls(
     };
 
     format_tokens(tokens)
+}
+
+/// The expression that converts the Python object `value` (a `Bound<PyAny>`) into the Rust
+/// value of a free-form JSON field of type `ty`: a single value, a `Vec` from a list, or a map
+/// from a dict.
+pub(crate) fn json_from_py(json: JsonType, ty: &UnifiedType, value: TokenStream) -> TokenStream {
+    let from_py = format_ident!("json_{}_from_py", json.fn_suffix());
+    if ty.is_repeated {
+        quote! {{
+            let items: ::std::vec::Vec<::pyo3::Bound<'_, ::pyo3::PyAny>> =
+                ::pyo3::types::PyAnyMethods::extract(&#value)?;
+            items.iter().map(#from_py).collect::<::pyo3::PyResult<_>>()?
+        }}
+    } else if matches!(ty.base_type, BaseType::Map(..)) {
+        quote! {{
+            let items: ::std::collections::HashMap<::std::string::String, ::pyo3::Bound<'_, ::pyo3::PyAny>> =
+                ::pyo3::types::PyAnyMethods::extract(&#value)?;
+            items
+                .iter()
+                .map(|(key, item)| ::core::result::Result::Ok((key.clone(), #from_py(item)?)))
+                .collect::<::pyo3::PyResult<_>>()?
+        }}
+    } else {
+        quote! { ::buffa::MessageField::some(#from_py(&#value)?) }
+    }
+}
+
+/// The conversions between Python objects and the free-form JSON types of buffa
+/// (`google.protobuf.Value`, `Struct`, `ListValue`), for the models and the bindings. A whole
+/// number reads as an `int`; Python numbers become JSON numbers.
+fn json_conversions() -> TokenStream {
+    quote! {
+        /// A JSON value as a Python object: `None`, `bool`, `int` for a whole number, `float`,
+        /// `str`, `list` or `dict`.
+        pub fn json_value_to_py(
+            py: ::pyo3::Python<'_>,
+            value: &::buffa_types::google::protobuf::Value,
+        ) -> ::pyo3::PyResult<::pyo3::Py<::pyo3::PyAny>> {
+            use ::buffa_types::google::protobuf::value::Kind;
+            use ::pyo3::IntoPyObjectExt;
+            match &value.kind {
+                ::core::option::Option::None | ::core::option::Option::Some(Kind::NullValue(_)) => {
+                    ::core::result::Result::Ok(py.None())
+                }
+                ::core::option::Option::Some(Kind::BoolValue(b)) => b.into_py_any(py),
+                ::core::option::Option::Some(Kind::NumberValue(n))
+                    if n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_992.0 =>
+                {
+                    (*n as i64).into_py_any(py)
+                }
+                ::core::option::Option::Some(Kind::NumberValue(n)) => n.into_py_any(py),
+                ::core::option::Option::Some(Kind::StringValue(s)) => s.into_py_any(py),
+                ::core::option::Option::Some(Kind::StructValue(s)) => json_struct_to_py(py, s),
+                ::core::option::Option::Some(Kind::ListValue(l)) => json_list_to_py(py, l),
+            }
+        }
+
+        /// A JSON object as a Python `dict`.
+        pub fn json_struct_to_py(
+            py: ::pyo3::Python<'_>,
+            value: &::buffa_types::google::protobuf::Struct,
+        ) -> ::pyo3::PyResult<::pyo3::Py<::pyo3::PyAny>> {
+            let dict = ::pyo3::types::PyDict::new(py);
+            for (key, item) in &value.fields {
+                ::pyo3::types::PyDictMethods::set_item(&dict, key, json_value_to_py(py, item)?)?;
+            }
+            ::core::result::Result::Ok(dict.into_any().unbind())
+        }
+
+        /// A JSON array as a Python `list`.
+        pub fn json_list_to_py(
+            py: ::pyo3::Python<'_>,
+            value: &::buffa_types::google::protobuf::ListValue,
+        ) -> ::pyo3::PyResult<::pyo3::Py<::pyo3::PyAny>> {
+            let items = value
+                .values
+                .iter()
+                .map(|item| json_value_to_py(py, item))
+                .collect::<::pyo3::PyResult<::std::vec::Vec<_>>>()?;
+            ::core::result::Result::Ok(::pyo3::types::PyList::new(py, items)?.into_any().unbind())
+        }
+
+        /// A Python object as a JSON value. It takes `None`, `bool`, `int`, `float`, `str`, and
+        /// `list`, `tuple` and `dict` of those.
+        pub fn json_value_from_py(
+            obj: &::pyo3::Bound<'_, ::pyo3::PyAny>,
+        ) -> ::pyo3::PyResult<::buffa_types::google::protobuf::Value> {
+            use ::buffa_types::google::protobuf::Value;
+            use ::pyo3::types::{PyAnyMethods, PyTypeMethods};
+            if obj.is_none() {
+                return ::core::result::Result::Ok(Value::null());
+            }
+            // `bool` before `int`: a Python `bool` is an `int`.
+            if obj.is_instance_of::<::pyo3::types::PyBool>() {
+                return ::core::result::Result::Ok(Value::from(obj.extract::<bool>()?));
+            }
+            if obj.is_instance_of::<::pyo3::types::PyInt>()
+                || obj.is_instance_of::<::pyo3::types::PyFloat>()
+            {
+                return ::core::result::Result::Ok(Value::from(obj.extract::<f64>()?));
+            }
+            if obj.is_instance_of::<::pyo3::types::PyString>() {
+                return ::core::result::Result::Ok(Value::from(obj.extract::<::std::string::String>()?));
+            }
+            if obj.is_instance_of::<::pyo3::types::PyDict>() {
+                return ::core::result::Result::Ok(Value::from(json_struct_from_py(obj)?));
+            }
+            if obj.is_instance_of::<::pyo3::types::PyList>()
+                || obj.is_instance_of::<::pyo3::types::PyTuple>()
+            {
+                return ::core::result::Result::Ok(Value::from(json_list_from_py(obj)?));
+            }
+            ::core::result::Result::Err(::pyo3::exceptions::PyTypeError::new_err(::std::format!(
+                "not a JSON value: {}",
+                obj.get_type().name()?
+            )))
+        }
+
+        /// A Python `dict` with `str` keys as a JSON object.
+        pub fn json_struct_from_py(
+            obj: &::pyo3::Bound<'_, ::pyo3::PyAny>,
+        ) -> ::pyo3::PyResult<::buffa_types::google::protobuf::Struct> {
+            let items: ::std::collections::HashMap<::std::string::String, ::pyo3::Bound<'_, ::pyo3::PyAny>> =
+                ::pyo3::types::PyAnyMethods::extract(obj)?;
+            let mut value = ::buffa_types::google::protobuf::Struct::default();
+            for (key, item) in &items {
+                value.fields.insert(key.clone(), json_value_from_py(item)?);
+            }
+            ::core::result::Result::Ok(value)
+        }
+
+        /// A Python `list` or `tuple` as a JSON array.
+        pub fn json_list_from_py(
+            obj: &::pyo3::Bound<'_, ::pyo3::PyAny>,
+        ) -> ::pyo3::PyResult<::buffa_types::google::protobuf::ListValue> {
+            let items: ::std::vec::Vec<::pyo3::Bound<'_, ::pyo3::PyAny>> =
+                ::pyo3::types::PyAnyMethods::extract(obj)?;
+            let mut value = ::buffa_types::google::protobuf::ListValue::default();
+            for item in &items {
+                value.values.push(json_value_from_py(item)?);
+            }
+            ::core::result::Result::Ok(value)
+        }
+    }
 }
 
 /// The `Py`-prefixed wrapper ident for a fully-qualified proto type name, using
@@ -537,10 +684,12 @@ fn message_wrapper(
         .has_constructor(fq_name)
         .then(|| constructor(&accessors, &oneofs, &inner));
 
+    // The Python names: a raw identifier (`r#type`) is `type` in Python.
     let fields = accessors
         .iter()
-        .map(|a| a.ident.to_string())
-        .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents));
+        .map(|a| a.ident.clone())
+        .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents))
+        .map(|ident| syn::ext::IdentExt::unraw(&ident).to_string());
 
     let module_arg = ctx.module_arg(fq_name);
     let stub_class = super::stub_class_attr();
@@ -690,9 +839,22 @@ struct FieldAccessor {
     hidden_zero: bool,
     /// Documentation carried from the proto field, for the getter.
     documentation: Option<String>,
+    /// The free-form JSON type of the field (buffa only): Python sees plain JSON objects.
+    json: Option<JsonType>,
 }
 
 impl FieldAccessor {
+    /// The name of the getter function. A raw identifier (`r#type`) becomes `get_type`: PyO3 and
+    /// pyo3-stub-gen both drop the `get_` prefix, while pyo3-stub-gen would keep the `r#`.
+    fn getter_ident(&self) -> proc_macro2::Ident {
+        let name = syn::ext::IdentExt::unraw(&self.ident).to_string();
+        if self.ident == name {
+            self.ident.clone()
+        } else {
+            format_ident!("get_{name}")
+        }
+    }
+
     fn new(
         field: &MessageField,
         runtime: Runtime,
@@ -701,7 +863,7 @@ impl FieldAccessor {
         is_boxed: bool,
         hidden_zero: bool,
     ) -> Self {
-        let ident = format_ident!("{}", super::sanitize_python_field_name(&field.name));
+        let ident = crate::utils::field_ident(&super::sanitize_python_field_name(&field.name));
         let in_project = match &field.unified_type.base_type {
             BaseType::Message(n) | BaseType::Enum(n) => is_in_project(n, packages),
             _ => false,
@@ -723,7 +885,84 @@ impl FieldAccessor {
             is_boxed,
             hidden_zero,
             documentation: field.documentation.clone(),
+            json: JsonType::of_field(&field.unified_type).filter(|_| runtime == Runtime::Buffa),
         }
+    }
+
+    /// The Python type of a free-form JSON field, for the stubs: `dict[str, typing.Any]` for a
+    /// `Struct`, `list[typing.Any]` for a `ListValue`, in a `list` or `dict` when repeated or a
+    /// map.
+    fn json_stub_type(&self, json: JsonType) -> String {
+        let item = match json {
+            JsonType::Value => "typing.Any",
+            JsonType::Struct => "dict[str, typing.Any]",
+            JsonType::ListValue => "list[typing.Any]",
+        };
+        if self.ty.is_repeated {
+            format!("list[{item}]")
+        } else if matches!(self.ty.base_type, BaseType::Map(..)) {
+            format!("dict[str, {item}]")
+        } else if json == JsonType::Value {
+            item.to_string()
+        } else {
+            format!("typing.Optional[{item}]")
+        }
+    }
+
+    /// The `#[getter]` of a free-form JSON field: a Python object (`None`, `bool`, `int`,
+    /// `float`, `str`, `list` or `dict`).
+    fn json_getter(&self, json: JsonType) -> TokenStream {
+        let ident = &self.ident;
+        let getter = self.getter_ident();
+        let doc = doc_tokens(self.documentation.as_deref());
+        let to_py = format_ident!("json_{}_to_py", json.fn_suffix());
+        let any = quote! { ::pyo3::Py<::pyo3::PyAny> };
+        let (ret, body) = if self.ty.is_repeated {
+            (
+                any,
+                quote! {
+                    let items = self.0.#ident
+                        .iter()
+                        .map(|value| #to_py(py, value))
+                        .collect::<::pyo3::PyResult<::std::vec::Vec<_>>>()?;
+                    ::core::result::Result::Ok(::pyo3::types::PyList::new(py, items)?.into_any().unbind())
+                },
+            )
+        } else if matches!(self.ty.base_type, BaseType::Map(..)) {
+            (
+                any,
+                quote! {
+                    let dict = ::pyo3::types::PyDict::new(py);
+                    for (key, value) in &self.0.#ident {
+                        ::pyo3::types::PyDictMethods::set_item(&dict, key, #to_py(py, value)?)?;
+                    }
+                    ::core::result::Result::Ok(dict.into_any().unbind())
+                },
+            )
+        } else {
+            (
+                quote! { ::core::option::Option<#any> },
+                quote! { self.0.#ident.as_option().map(|value| #to_py(py, value)).transpose() },
+            )
+        };
+        let repr = self.json_stub_type(json);
+        let stub_type = quote! {
+            #[gen_stub(override_return_type(type_repr = #repr, imports = ("typing")))]
+        };
+        quote! {
+            #doc
+            #stub_type
+            #[getter]
+            fn #getter(&self, py: ::pyo3::Python<'_>) -> ::pyo3::PyResult<#ret> {
+                #body
+            }
+        }
+    }
+
+    /// The expression that converts the Python object `value` (a `Bound<PyAny>`) into the
+    /// Rust value of a free-form JSON field.
+    fn json_store(&self, json: JsonType) -> TokenStream {
+        json_from_py(json, &self.ty, quote! { value })
     }
 
     /// The Python-visible Rust type for this field (the getter return / constructor
@@ -802,14 +1041,17 @@ impl FieldAccessor {
 
     /// `#[getter]` returning the field as its Python-visible type.
     fn getter(&self) -> TokenStream {
-        let ident = &self.ident;
+        if let Some(json) = self.json {
+            return self.json_getter(json);
+        }
+        let getter = self.getter_ident();
         let ret = self.py_type();
         let body = self.read_expr();
         let doc = doc_tokens(self.documentation.as_deref());
         quote! {
             #doc
             #[getter]
-            fn #ident(&self) -> #ret {
+            fn #getter(&self) -> #ret {
                 #body
             }
         }
@@ -1107,7 +1349,8 @@ impl OneofAccessor {
         runtime: Runtime,
         packages: &BTreeSet<String>,
     ) -> Self {
-        let field_ident = format_ident!("{}", super::sanitize_python_field_name(&field.name));
+        let field_ident =
+            crate::utils::field_ident(&super::sanitize_python_field_name(&field.name));
 
         // The oneof enum's name in the IR is already `<msg_snake>::<OneofPascal>`
         // (built in `parsing/message.rs`); it lives in the message's parent module.
@@ -1136,10 +1379,10 @@ impl OneofAccessor {
     }
 
     /// The flattened keyword-arg idents (proto field names), for the `#[pyo3(signature)]`.
-    fn variant_param_idents(&self) -> Vec<String> {
+    fn variant_param_idents(&self) -> Vec<proc_macro2::Ident> {
         self.variants
             .iter()
-            .map(|v| v.param_ident.to_string())
+            .map(|v| v.param_ident.clone())
             .collect()
     }
 
@@ -1210,7 +1453,7 @@ impl OneofAccessor {
 impl OneofVariantAccessor {
     fn new(variant: &OneofVariant, packages: &BTreeSet<String>) -> Self {
         let param_ident =
-            format_ident!("{}", super::sanitize_python_field_name(&variant.field_name));
+            crate::utils::field_ident(&super::sanitize_python_field_name(&variant.field_name));
         let variant_ident = format_ident!("{}", variant.variant_name);
 
         let (is_message, is_enum) = match &variant.field_type.base_type {
@@ -1374,6 +1617,9 @@ fn constructor(
     // the single `Option` already encodes the "omitted/None" keyword default.
     let field_params = accessors.iter().map(|a| {
         let ident = &a.ident;
+        if a.json.is_some() {
+            return quote! { #ident: ::core::option::Option<::pyo3::Bound<'_, ::pyo3::PyAny>> };
+        }
         let ty = a.py_type();
         if a.py_type_is_optional() {
             quote! { #ident: #ty }
@@ -1388,15 +1634,21 @@ fn constructor(
     // `<name> = None` for every plain field then every oneof variant, in order.
     let sig_parts = accessors
         .iter()
-        .map(|a| a.ident.to_string())
+        .map(|a| a.ident.clone())
         .chain(oneofs.iter().flat_map(OneofAccessor::variant_param_idents))
-        .map(|ident| format!("{ident} = None"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sig: TokenStream = sig_parts.parse().expect("field idents are valid tokens");
+        .map(|ident| quote! { #ident = None });
+    let sig = quote! { #(#sig_parts),* };
 
     let assigns = accessors.iter().map(|a| {
         let ident = &a.ident;
+        if let Some(json) = a.json {
+            let store = a.json_store(json);
+            return quote! {
+                if let ::core::option::Option::Some(value) = #ident {
+                    inner.#ident = #store;
+                }
+            };
+        }
         // Bind `value` for the store expression.
         let store = a.write_expr();
         if a.py_type_is_optional() {
@@ -1417,15 +1669,24 @@ fn constructor(
         }
     });
     let oneof_assigns = oneofs.iter().flat_map(OneofAccessor::ctor_assigns);
+    // Converting a free-form JSON argument can fail.
+    let (ret, result) = if accessors.iter().any(|a| a.json.is_some()) {
+        (
+            quote! { ::pyo3::PyResult<Self> },
+            quote! { ::core::result::Result::Ok(Self(inner)) },
+        )
+    } else {
+        (quote! { Self }, quote! { Self(inner) })
+    };
 
     quote! {
         #[new]
         #[pyo3(signature = (#sig))]
-        fn new(#(#params,)*) -> Self {
+        fn new(#(#params,)*) -> #ret {
             let mut inner = <#inner as ::core::default::Default>::default();
             #(#assigns)*
             #(#oneof_assigns)*
-            Self(inner)
+            #result
         }
     }
 }
@@ -1593,6 +1854,9 @@ mod tests {
     fn msg_field(name: &str, ty: UnifiedType) -> MessageField {
         MessageField {
             name: name.to_string(),
+            json_name: None,
+            response_header: None,
+            emit_unpopulated: false,
             unified_type: ty,
             documentation: None,
             oneof_variants: None,

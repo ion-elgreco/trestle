@@ -85,7 +85,7 @@ pub fn run(args: GenerateArgs) -> Result<()> {
     // numbers, when requested. Runs after all `.rs` are on disk but before `cargo fmt`, so the
     // format pass normalizes any whitespace the edit introduces.
     if cfg.generate.proto_lib == ProtoLib::Buffa {
-        rewrite_models(&cfg, &config)?;
+        rewrite_models(&cfg, &config, &metadata)?;
     }
 
     // Format the emitted code so a fresh regen matches an already-formatted tree.
@@ -239,7 +239,11 @@ fn format_generated(config: &CodeGenConfig, project_dir: &Path) {
 /// Apply the configured [`ModelRewrites`] to every `.rs` file in the model output
 /// (`models_subdir_path`), the only place the buf-plugin model files live. A no-op when the
 /// config has no models dir or asks for no rewrite.
-fn rewrite_models(cfg: &TrestleConfig, config: &CodeGenConfig) -> Result<()> {
+fn rewrite_models(
+    cfg: &TrestleConfig,
+    config: &CodeGenConfig,
+    metadata: &olai_codegen::CodeGenMetadata,
+) -> Result<()> {
     let Some(gen_dir) = config.output.models_subdir_path() else {
         return Ok(());
     };
@@ -252,6 +256,8 @@ fn rewrite_models(cfg: &TrestleConfig, config: &CodeGenConfig) -> Result<()> {
             .map(|(package, names)| (package.clone(), names.lower()))
             .collect(),
         int64_module: config.json_int64_module_path(),
+        json_value_module: config.json_value_module_path(),
+        fields: olai_codegen::postprocess::field_options(metadata),
     };
     let files_changed = rewrites
         .rewrite_dir(&gen_dir)

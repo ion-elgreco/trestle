@@ -104,8 +104,18 @@ pub(super) fn process_message(
         // Extract resource_reference annotation (ext 1055)
         let resource_reference = extract_resource_reference(field)?;
 
+        // protoc fills in `json_name` for every field; only a name the proto writes out has a
+        // source location (field 10 of the field descriptor).
+        let json_name_path = [field_path.as_slice(), &[10]].concat();
+        let json_name = source_code_info
+            .is_some_and(|info| info.location.iter().any(|l| l.path == json_name_path))
+            .then(|| field.json_name().to_string());
+
         let field_info = MessageField {
             name: field.name().to_string(),
+            json_name,
+            response_header: extract_response_header(field),
+            emit_unpopulated: extract_emit_unpopulated(field),
             unified_type,
             documentation,
             field_behavior,
@@ -129,6 +139,9 @@ pub(super) fn process_message(
 
         let oneof_field = MessageField {
             name: oneof_field_name.clone(),
+            json_name: None,
+            response_header: None,
+            emit_unpopulated: false,
             unified_type: UnifiedType {
                 base_type: BaseType::OneOf(enum_type_name.clone()),
                 is_optional: true, // oneof fields are always Option<enum>
@@ -200,6 +213,33 @@ pub(super) fn process_message(
     }
 
     Ok(())
+}
+
+/// The `(olai.trestle.v1.emit_unpopulated)` option of a field.
+fn extract_emit_unpopulated(field: &FieldDescriptorProto) -> bool {
+    field.options.as_ref().is_some_and(|options| {
+        options.unknown_fields().iter().any(|(number, value)| {
+            number == super::TRESTLE_EMIT_UNPOPULATED_EXTENSION
+                && matches!(value, protobuf::UnknownValueRef::Varint(v) if v != 0)
+        })
+    })
+}
+
+/// The `(olai.trestle.v1.response_header)` option of a field: the HTTP response header that the
+/// field comes from.
+fn extract_response_header(field: &FieldDescriptorProto) -> Option<String> {
+    let options = field.options.as_ref()?;
+    options
+        .unknown_fields()
+        .iter()
+        .find_map(|(number, value)| match value {
+            protobuf::UnknownValueRef::LengthDelimited(bytes)
+                if number == super::TRESTLE_RESPONSE_HEADER_EXTENSION =>
+            {
+                String::from_utf8(bytes.to_vec()).ok()
+            }
+            _ => None,
+        })
 }
 
 /// Extract google.api.field_behavior option from field-level options

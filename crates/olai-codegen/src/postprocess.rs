@@ -9,11 +9,17 @@
 //! - **64-bit integers.** buffa writes `int64`/`uint64` as quoted strings. With
 //!   `int64_module = Some(path)` the models write numbers through the `json_int64` helper module
 //!   (see [`RestClientOptions::json_int64_as_number`](crate::RestClientOptions)).
+//! - **Free-form JSON.** buffa writes every number of a `google.protobuf.Value`, `Struct` or
+//!   `ListValue` as an `f64` (`1.0`). With `json_value_module = Some(path)` those fields write
+//!   whole numbers as integers through the `json_value` helper module.
+//! - **Field options** ([`ModelRewrites::fields`], from [`field_options`]): a field whose proto
+//!   writes out a `json_name` keeps that name, even when it equals the default one; a field with
+//!   `(olai.trestle.v1.emit_unpopulated)` is sent even when empty, zero or `false`.
 //!
 //! The rewrites are idempotent: rewritten output does not match again. They leave alone the
 //! files that trestle writes into the models directory itself.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -51,6 +57,56 @@ pub struct ModelRewrites {
     /// Path of the `json_int64` helper module (e.g. `crate::models::json_int64`); when set,
     /// buffa's 64-bit integer helpers are pointed at it.
     pub int64_module: Option<String>,
+    /// Path of the `json_value` helper module (e.g. `crate::models::json_value`); when set, the
+    /// free-form JSON fields serialize through it.
+    pub json_value_module: Option<String>,
+    /// The fields with options that change their JSON, by proto package; see [`field_options`].
+    pub fields: BTreeMap<String, PackageFields>,
+}
+
+/// The fields of one proto package whose JSON the proto sets, keyed `Message.field` (the simple
+/// message name and the proto field name).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PackageFields {
+    /// The `json_name` that the proto writes out, by field.
+    pub json_names: BTreeMap<String, String>,
+    /// The fields with `(olai.trestle.v1.emit_unpopulated)`.
+    pub emit_unpopulated: BTreeSet<String>,
+}
+
+/// The fields of `metadata` whose JSON the proto sets, by package, for [`ModelRewrites::fields`].
+pub fn field_options(
+    metadata: &crate::parsing::CodeGenMetadata,
+) -> BTreeMap<String, PackageFields> {
+    let mut packages: BTreeMap<String, PackageFields> = BTreeMap::new();
+    for message in metadata.messages.values() {
+        let name = message.name.trim_start_matches('.');
+        // The package is the lowercase segments before the message names.
+        let package = name
+            .split('.')
+            .take_while(|s| s.starts_with(|c: char| c.is_ascii_lowercase()))
+            .collect::<Vec<_>>()
+            .join(".");
+        let simple = name.rsplit('.').next().unwrap_or(name);
+        for field in &message.fields {
+            let key = format!("{simple}.{}", field.name);
+            if let Some(json) = &field.json_name {
+                packages
+                    .entry(package.clone())
+                    .or_default()
+                    .json_names
+                    .insert(key.clone(), json.clone());
+            }
+            if field.emit_unpopulated {
+                packages
+                    .entry(package.clone())
+                    .or_default()
+                    .emit_unpopulated
+                    .insert(key);
+            }
+        }
+    }
+    packages
 }
 
 impl ModelRewrites {
@@ -59,15 +115,32 @@ impl ModelRewrites {
         self.field_names == JsonFieldNames::Json
             && self.packages.values().all(|n| *n == JsonFieldNames::Json)
             && self.int64_module.is_none()
+            && self.json_value_module.is_none()
+            && self.fields.is_empty()
     }
 
-    /// The field-name style of the model file `file_name` (`<package>.rs`).
+    /// The field-name style of the model file `file_name`: `<package>.rs` (one file per package,
+    /// as the buf plugin writes) or `<package>.<proto file>.rs` (one per proto file, as
+    /// buffa-build writes).
     fn field_names_for(&self, file_name: &str) -> JsonFieldNames {
-        file_name
-            .strip_suffix(".rs")
-            .and_then(|package| self.packages.get(package))
+        let Some(stem) = file_name.strip_suffix(".rs") else {
+            return self.field_names;
+        };
+        let parent = stem.rsplit_once('.').map(|(package, _)| package);
+        self.packages
+            .get(stem)
+            .or_else(|| parent.and_then(|package| self.packages.get(package)))
             .copied()
             .unwrap_or(self.field_names)
+    }
+
+    /// The [`PackageFields`] of the model file `file_name` (see [`Self::field_names_for`]).
+    fn fields_for(&self, file_name: &str) -> Option<&PackageFields> {
+        let stem = file_name.strip_suffix(".rs")?;
+        let parent = stem.rsplit_once('.').map(|(package, _)| package);
+        self.fields
+            .get(stem)
+            .or_else(|| parent.and_then(|package| self.fields.get(package)))
     }
 
     /// Rewrite the source of the model file `file_name`.
@@ -77,8 +150,15 @@ impl ModelRewrites {
             out = swap_serde_renames(&out);
             out = snakeify_serialize_entries(&out);
         }
+        if let Some(fields) = self.fields_for(file_name) {
+            out = apply_field_options(&out, fields);
+        }
         if let Some(module) = &self.int64_module {
             out = int64_helpers_to(&out, module);
+            out = int64_containers_to(&out, module);
+        }
+        if let Some(module) = &self.json_value_module {
+            out = json_value_serializers(&out, module);
         }
         out
     }
@@ -197,6 +277,215 @@ fn int64_helpers_to(src: &str, module: &str) -> String {
             format!("{module}::{}", &caps["name"])
         })
         .into_owned()
+}
+
+/// Give the fields of `fields` their JSON: the `json_name` that the proto writes out as the
+/// `rename` (after [`swap_serde_renames`], which cannot tell it from a default name), and no
+/// `skip_serializing_if` for an `emit_unpopulated` field. A field is found by the `pub struct`
+/// above it and its name.
+fn apply_field_options(src: &str, fields: &PackageFields) -> String {
+    static STRUCT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\s*pub struct (\w+)").expect("valid regex"));
+    static FIELD: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\s*pub (?:r#)?(\w+):").expect("valid regex"));
+    static RENAME: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"rename = "[^"]*""#).expect("valid regex"));
+    static ALIAS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"alias = "[^"]*""#).expect("valid regex"));
+    static SKIP_IF: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"skip_serializing_if = "[^"]*",?\s*"#).expect("valid regex"));
+
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut message = None;
+    for (i, line) in lines.iter().enumerate() {
+        if let Some(caps) = STRUCT.captures(line) {
+            message = Some(caps[1].to_string());
+        } else if let (Some(message), Some(caps)) = (&message, FIELD.captures(line)) {
+            let name = &caps[1];
+            let key = format!("{message}.{name}");
+            let json = fields.json_names.get(&key);
+            let emit = fields.emit_unpopulated.contains(&key);
+            if json.is_some() || emit {
+                let attrs = attribute_lines(&lines, i);
+                let mut text = lines[attrs.clone()].join("\n");
+                if let Some(json) = json {
+                    // The proto name stays readable, as proto3 JSON asks.
+                    text = RENAME
+                        .replace(&text, format!(r#"rename = "{json}""#))
+                        .into_owned();
+                    text = ALIAS
+                        .replace(&text, format!(r#"alias = "{name}""#))
+                        .into_owned();
+                }
+                if emit {
+                    text = SKIP_IF.replace(&text, "").into_owned();
+                }
+                out.truncate(out.len() - attrs.len());
+                out.extend(text.lines().map(str::to_string));
+            }
+        }
+        out.push(line.to_string());
+    }
+    let mut out = out.join("\n");
+    if src.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+/// Point the repeated `int64`/`uint64` fields and the maps with such values at the
+/// `repeated_int64` and `map_int64` helpers of `module`: buffa sends them through its generic
+/// `proto_seq` and `proto_map`, which write quoted strings.
+fn int64_containers_to(src: &str, module: &str) -> String {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    for i in 0..lines.len() {
+        let trimmed = lines[i].trim_start();
+        if !trimmed.starts_with("pub ") || !trimmed.contains(':') && !trimmed.ends_with('<') {
+            continue;
+        }
+        let (decl, _) = declaration(&lines, i);
+        let int64 = |ty: &str| ty == "i64" || ty == "u64";
+        let (from, to) = if decl
+            .split_once("Vec<")
+            .is_some_and(|(_, rest)| int64(rest.split('>').next().unwrap_or_default()))
+        {
+            ("::buffa::json_helpers::proto_seq", "repeated_int64")
+        } else if decl
+            .split_once("HashMap<")
+            .and_then(|(_, rest)| rest.rsplit_once('>'))
+            .and_then(|(args, _)| args.rsplit_once(','))
+            .is_some_and(|(_, value)| int64(value.trim()))
+        {
+            ("::buffa::json_helpers::proto_map", "map_int64")
+        } else {
+            continue;
+        };
+        for j in attribute_lines(&lines, i) {
+            out[j] = out[j].replace(from, &format!("{module}::{to}"));
+        }
+    }
+    let mut out = out.join("\n");
+    if src.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+/// The declaration of the field at line `start`, whitespace collapsed (`pub a: Vec<i64>,`), and
+/// the line it ends on: up to the `,` outside the type's `<..>`.
+fn declaration(lines: &[&str], start: usize) -> (String, usize) {
+    let mut end = start;
+    let mut decl = String::new();
+    loop {
+        decl.push_str(lines[end].trim());
+        decl.push(' ');
+        let depth = decl.matches('<').count() as isize - decl.matches('>').count() as isize;
+        if (depth <= 0 && lines[end].trim_end().ends_with(',')) || end + 1 == lines.len() {
+            break;
+        }
+        end += 1;
+    }
+    let decl = decl
+        .replace(", >", ">")
+        .replace("< ", "<")
+        .replace(" >", ">");
+    (decl, end)
+}
+
+/// Give each free-form JSON field (`google.protobuf.Value`, `Struct`, `ListValue`; singular,
+/// repeated or a map value) a `serialize_with` of `module`, which writes whole numbers as
+/// integers. A field declaration can span lines, so the field types are read with their
+/// whitespace collapsed. Fields that already have a `serialize_with` are left alone.
+fn json_value_serializers(src: &str, module: &str) -> String {
+    const JSON: &str = "::buffa_types::google::protobuf::";
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = String::with_capacity(src.len() + 256);
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("pub ") && trimmed.contains(": ") && line.contains(JSON) || {
+            // A type that starts on the next lines, as rustfmt breaks a long `HashMap<..>`.
+            trimmed.starts_with("pub ") && trimmed.ends_with('<')
+        } {
+            let (decl, end) = declaration(&lines, i);
+            let kind = if !decl.contains(JSON) {
+                None
+            } else if decl.contains(": ::buffa::MessageField<") {
+                Some("message_field")
+            } else if decl.contains(": ::buffa::alloc::vec::Vec<") {
+                Some("repeated")
+            } else if decl.contains("HashMap<") {
+                Some("map")
+            } else {
+                None
+            };
+            let attrs = field_attributes(&lines, i);
+            if let Some(kind) = kind
+                && !has_serde_key(&attrs, "serialize_with")
+                && !has_serde_key(&attrs, "with")
+            {
+                let indent = &line[..line.len() - trimmed.len()];
+                out.push_str(&format!(
+                    "{indent}#[serde(serialize_with = \"{module}::{kind}\")]\n"
+                ));
+            }
+            for l in &lines[i..=end] {
+                out.push_str(l);
+                out.push('\n');
+            }
+            i = end + 1;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+        i += 1;
+    }
+    if !src.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
+/// Whether the serde attributes `attrs` set `key` (`with`, `serialize_with`): the key as a
+/// whole word, so `deserialize_with` sets neither.
+fn has_serde_key(attrs: &str, key: &str) -> bool {
+    attrs.match_indices(key).any(|(at, _)| {
+        let before = attrs[..at].chars().next_back();
+        let after = attrs[at + key.len()..].trim_start();
+        !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') && after.starts_with('=')
+    })
+}
+
+/// The attributes above the field declaration at line `field`: doc comments are skipped, and an
+/// attribute that spans lines is read whole.
+fn field_attributes(lines: &[&str], field: usize) -> String {
+    attribute_lines(lines, field)
+        .map(|j| lines[j].trim())
+        .collect()
+}
+
+/// The lines of the attributes and doc comments above the field declaration at line `field`.
+fn attribute_lines(lines: &[&str], field: usize) -> std::ops::Range<usize> {
+    let mut j = field;
+    while j > 0 {
+        let prev = lines[j - 1].trim();
+        if prev.starts_with("//") || prev.starts_with("#[") && prev.ends_with(']') {
+            j -= 1;
+        } else if prev.ends_with(")]") {
+            // The end of an attribute that spans lines: up to its `#[`.
+            let mut k = j - 1;
+            while k > 0 && !lines[k].trim_start().starts_with("#[") {
+                k -= 1;
+            }
+            j = k;
+        } else {
+            break;
+        }
+    }
+    j..field
 }
 
 /// Invert the proto3 JSON mapping: each uppercase letter becomes `_` + its lowercase.
@@ -392,11 +681,72 @@ mod tests {
             .insert("demo.scim.v2".into(), JsonFieldNames::Json);
         let src = r#"#[serde(rename = "userName", alias = "user_name")]"#;
         assert_eq!(rewrites.rewrite("demo.scim.v2.rs", src), src);
+        assert_eq!(rewrites.rewrite("demo.scim.v2.users.rs", src), src);
         assert!(
             rewrites
                 .rewrite("demo.v1.rs", src)
                 .contains(r#"rename = "user_name""#)
         );
+    }
+
+    #[test]
+    fn field_options_set_json_names_and_emit_unpopulated_fields() {
+        let src = r#"pub struct Spec {
+    #[serde(
+        rename = "fields",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub fields: ::buffa::alloc::vec::Vec<Field>,
+    #[serde(rename = "spec_id", alias = "specId")]
+    pub spec_id: i32,
+}
+pub struct Other {
+    #[serde(rename = "fields", skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec")]
+    pub fields: ::buffa::alloc::vec::Vec<Field>,
+}
+"#;
+        let fields = PackageFields {
+            json_names: [("Spec.spec_id".to_string(), "specId".to_string())].into(),
+            emit_unpopulated: ["Spec.fields".to_string()].into(),
+        };
+        let out = apply_field_options(src, &fields);
+        assert!(
+            out.contains(r#"rename = "specId", alias = "spec_id""#),
+            "{out}"
+        );
+        // Only `Spec.fields` is sent when empty.
+        assert_eq!(out.matches("skip_serializing_if").count(), 1, "{out}");
+        assert!(
+            out.contains("rename = \"fields\",\n        deserialize_with"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn int64_containers_write_numbers() {
+        let src = r#"    #[serde(rename = "sizes", with = "::buffa::json_helpers::proto_seq")]
+    pub sizes: ::buffa::alloc::vec::Vec<i64>,
+    #[serde(
+        rename = "counts",
+        with = "::buffa::json_helpers::proto_map"
+    )]
+    pub counts: ::buffa::__private::HashMap<
+        ::buffa::alloc::string::String,
+        i64,
+    >,
+    #[serde(rename = "ratios", with = "::buffa::json_helpers::proto_seq")]
+    pub ratios: ::buffa::alloc::vec::Vec<f64>,
+"#;
+        let out = int64_containers_to(src, "crate::models::json_int64");
+        assert!(out.contains(r#"with = "crate::models::json_int64::repeated_int64""#));
+        assert!(out.contains(r#"with = "crate::models::json_int64::map_int64""#));
+        assert_eq!(
+            out.matches("::buffa::json_helpers::proto_seq").count(),
+            1,
+            "{out}"
+        );
+        assert!(out.ends_with(",\n"));
     }
 
     #[test]
@@ -498,5 +848,40 @@ impl S {
 "
         );
         assert_eq!(space_items(&spaced), spaced);
+    }
+
+    #[test]
+    fn json_value_fields_serialize_through_the_module() {
+        let rewrites = ModelRewrites {
+            json_value_module: Some("crate::models::json_value".into()),
+            ..Default::default()
+        };
+        let src = r#"    #[serde(rename = "attributes")]
+    pub attributes: ::buffa::MessageField<::buffa_types::google::protobuf::Struct>,
+    #[serde(rename = "notes", deserialize_with = "::buffa::json_helpers::null_as_default")]
+    pub notes: ::buffa::alloc::vec::Vec<::buffa_types::google::protobuf::Value>,
+    #[serde(rename = "rows")]
+    pub rows: ::buffa::__private::HashMap<
+        ::buffa::alloc::string::String,
+        ::buffa_types::google::protobuf::ListValue,
+    >,
+    #[serde(rename = "name")]
+    pub name: ::buffa::alloc::string::String,
+"#;
+        let out = rewrites.rewrite("demo.v1.rs", src);
+        for kind in ["message_field", "repeated", "map"] {
+            assert!(
+                out.contains(&format!(
+                    "#[serde(serialize_with = \"crate::models::json_value::{kind}\")]"
+                )),
+                "{out}"
+            );
+        }
+        assert_eq!(
+            out.matches("serialize_with = \"crate::models").count(),
+            3,
+            "{out}"
+        );
+        assert!(out.contains("    pub rows: ::buffa::__private::HashMap<\n"));
     }
 }

@@ -332,10 +332,13 @@ fn query_extractions(method: &MethodHandler<'_>) -> TokenStream {
             // None / an empty Vec rather than erroring. Required query params (proto3 fields not
             // marked `optional`) intentionally have NO default: omitting one is a 400/422, which
             // is the correct contract for a required parameter.
+            // The query key that the client sends.
+            let key = method.query_key(p);
+            let rename = (key != p.name).then(|| quote! { #[serde(rename = #key)] });
             if p.is_optional() || p.field_type.is_repeated {
-                quote! { #[serde(default)] #name: #type_tokens }
+                quote! { #rename #[serde(default)] #name: #type_tokens }
             } else {
-                quote! { #name: #type_tokens }
+                quote! { #rename #name: #type_tokens }
             }
         });
 
@@ -413,6 +416,7 @@ mod tests {
                 method_name: "ListThings".to_string(),
                 input_type: "ListThingsRequest".to_string(),
                 output_type: "ListThingsResponse".to_string(),
+                server_streaming: false,
                 operation: None,
                 http_rule: HttpRule {
                     selector: "".to_string(),
@@ -444,6 +448,7 @@ mod tests {
     fn repeated_string_param(name: &str) -> RequestParam {
         RequestParam::Query(QueryParam {
             name: name.to_string(),
+            json_name: None,
             field_type: UnifiedType {
                 base_type: BaseType::String,
                 is_optional: false,
@@ -457,6 +462,7 @@ mod tests {
     fn optional_enum_param(name: &str) -> RequestParam {
         RequestParam::Query(QueryParam {
             name: name.to_string(),
+            json_name: None,
             field_type: UnifiedType {
                 base_type: BaseType::Enum("example.items.v1.ItemType".to_string()),
                 is_optional: true,
@@ -470,6 +476,7 @@ mod tests {
     fn repeated_enum_param(name: &str) -> RequestParam {
         RequestParam::Query(QueryParam {
             name: name.to_string(),
+            json_name: None,
             field_type: UnifiedType {
                 base_type: BaseType::Enum("example.items.v1.ItemType".to_string()),
                 is_optional: false,

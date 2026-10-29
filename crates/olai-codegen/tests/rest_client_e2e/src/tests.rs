@@ -60,6 +60,26 @@ async fn get_widget(
         )
             .into_response(),
         "text" => (StatusCode::BAD_GATEWAY, "bad gateway\n").into_response(),
+        "nested" => (
+            StatusCode::CONFLICT,
+            axum::Json(json!({
+                "error": {"message": "table exists", "type": "AlreadyExistsException", "code": 409}
+            })),
+        )
+            .into_response(),
+        "oauth" => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(json!({"error": "invalid_grant", "error_description": "token expired"})),
+        )
+            .into_response(),
+        "json" => axum::Json(json!({
+            "name": name,
+            "attributes": {"count": 3, "ratio": 0.5, "nested": {"id": 7}},
+            "extra": [1, "two", null, true],
+            "notes": [{"a": 1}, 2.5],
+            "rows": {"t": [1, 2]},
+        }))
+        .into_response(),
         _ => axum::Json(json!({
             "name": name,
             "color": "PURPLE",
@@ -83,12 +103,19 @@ async fn create_widget(
     let body = String::from_utf8(body.to_vec()).unwrap();
     seen.push(format!("body {body}"));
     let request: Value = serde_json::from_str(&body).unwrap();
-    axum::Json(json!({"name": request["name"], "created_at": request["created_at"]}))
-        .into_response()
+    axum::Json(json!({
+        "name": request["name"],
+        "created_at": request["created_at"],
+        "type": request["type"],
+    }))
+    .into_response()
 }
 
 async fn list_widgets(State(seen): State<Seen>, uri: OriginalUri, headers: HeaderMap) -> Response {
     record(&seen, &uri, &headers);
+    if let Some(query) = uri.query() {
+        seen.push(format!("query {query}"));
+    }
     let page = if uri.query().is_some_and(|q| q.contains("page_token=p2")) {
         json!({"widgets": [{"name": "w3"}]})
     } else {
@@ -116,6 +143,52 @@ async fn exchange_token(
     axum::Json(json!({"access_token": "issued", "expires_in": 3600})).into_response()
 }
 
+async fn widget_exists(State(seen): State<Seen>, Path(name): Path<String>) -> StatusCode {
+    seen.push(format!("HEAD {name}"));
+    if name == "missing" {
+        StatusCode::NOT_FOUND
+    } else {
+        StatusCode::OK
+    }
+}
+
+async fn search_widgets(State(seen): State<Seen>, body: Bytes) -> Response {
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    seen.push(format!("GET body {body}"));
+    let prefix = serde_json::from_str::<Value>(&body).unwrap()["prefix"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let widgets: Vec<Value> = ["w1", "w2", "x1"]
+        .into_iter()
+        .filter(|name| name.starts_with(&prefix))
+        .map(|name| json!({"name": name}))
+        .collect();
+    axum::Json(json!({"widgets": widgets})).into_response()
+}
+
+async fn stream_widgets(uri: OriginalUri) -> Response {
+    let prefix = uri
+        .query()
+        .and_then(|q| q.strip_prefix("prefix="))
+        .unwrap_or_default();
+    let lines: String = ["w1", "w2", "x1"]
+        .into_iter()
+        .filter(|name| name.starts_with(prefix))
+        .map(|name| format!("{}\n\n", json!({"name": name, "created_at": 1})))
+        .collect();
+    ([(header::CONTENT_TYPE, "application/x-ndjson")], lines).into_response()
+}
+
+async fn widget_version(Path(name): Path<String>) -> Response {
+    let body = if name == "bare" {
+        String::new()
+    } else {
+        json!({"name": name}).to_string()
+    };
+    ([("Widget-Version", "7"), ("ETag", "abc")], body).into_response()
+}
+
 /// Start the demo server on a free port; returns its base URL and what it saw.
 async fn serve() -> (url::Url, Seen) {
     let seen = Seen::default();
@@ -123,8 +196,11 @@ async fn serve() -> (url::Url, Seen) {
         .route("/api/v1/widgets", get(list_widgets).post(create_widget))
         .route(
             "/api/v1/widgets/{name}",
-            get(get_widget).delete(delete_widget),
+            get(get_widget).delete(delete_widget).head(widget_exists),
         )
+        .route("/api/v1/search", get(search_widgets))
+        .route("/api/v1/widget-lines", get(stream_widgets))
+        .route("/api/v1/widgets/{name}/version", get(widget_version))
         .route("/auth/tokens", post(exchange_token))
         .with_state(seen.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -173,9 +249,12 @@ async fn requests_write_snake_case_and_int64_numbers() {
         .create_widget("w")
         .with_created_at(1_700_000_000_000_i64)
         .with_display_name("Shown".to_string())
+        .with_type("gear".to_string())
+        .with_source_url("s3://w".to_string())
         .await
         .unwrap();
     assert_eq!(created.created_at, Some(1_700_000_000_000));
+    assert_eq!(created.r#type.as_deref(), Some("gear"));
     let body = seen
         .all()
         .into_iter()
@@ -183,6 +262,9 @@ async fn requests_write_snake_case_and_int64_numbers() {
         .unwrap();
     let body: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(body["created_at"], json!(1_700_000_000_000_i64));
+    // An explicit JSON name stays, and an `emit_unpopulated` field is sent when empty.
+    assert_eq!(body["sourceUrl"], json!("s3://w"));
+    assert_eq!(body["tags"], json!([]));
     assert_eq!(body["display_name"], json!("Shown"));
 
     // Models write the same JSON outside the client.
@@ -231,6 +313,14 @@ async fn error_answers_keep_status_code_message_and_details() {
     assert_eq!(err.status(), Some(502));
     assert_eq!(err.code(), None);
     assert_eq!(err.to_string(), "HTTP 502: bad gateway");
+
+    // An error object under `error`, and OAuth's error keys.
+    let err = client.widget("nested").get().await.unwrap_err();
+    assert_eq!(err.code(), Some("AlreadyExistsException"));
+    assert_eq!(err.to_string(), "AlreadyExistsException: table exists");
+    let err = client.widget("oauth").get().await.unwrap_err();
+    assert_eq!(err.code(), Some("invalid_grant"));
+    assert_eq!(err.to_string(), "invalid_grant: token expired");
 }
 
 #[tokio::test]
@@ -247,6 +337,112 @@ async fn list_stream_reads_all_pages() {
         .unwrap();
     let names: Vec<_> = all.iter().map(|w| w.name.as_str()).collect();
     assert_eq!(names, ["w1", "w2", "w3"]);
+}
+
+#[tokio::test]
+async fn free_form_json_keeps_whole_numbers() {
+    use buffa_types::google::protobuf::{Struct, Value};
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    let mut nested = Struct::default();
+    nested.fields.insert("id".into(), Value::from(7_i64));
+    let mut attributes = Struct::default();
+    attributes.fields.insert("count".into(), Value::from(3_i64));
+    attributes.fields.insert("ratio".into(), Value::from(0.5));
+    attributes
+        .fields
+        .insert("nested".into(), Value::from(nested));
+    client
+        .create_widget("w")
+        .with_attributes(attributes)
+        .await
+        .unwrap();
+    let body = seen
+        .all()
+        .into_iter()
+        .find_map(|e| e.strip_prefix("body ").map(str::to_string))
+        .unwrap();
+    for part in [r#""count":3"#, r#""id":7"#, r#""ratio":0.5"#] {
+        assert!(body.contains(part), "{part} in {body}");
+    }
+
+    let widget = client.widget("json").get().await.unwrap();
+    let attributes = widget.attributes.as_option().unwrap();
+    assert_eq!(attributes.fields["count"], Value::from(3_i64));
+    assert_eq!(widget.notes.len(), 2);
+    assert_eq!(
+        widget.rows["t"].values,
+        [Value::from(1_i64), Value::from(2_i64)]
+    );
+    // The models write the whole numbers back as integers too.
+    let json = serde_json::to_string(&widget).unwrap();
+    assert!(json.contains(r#""rows":{"t":[1,2]}"#), "{json}");
+
+    // Repeated 64-bit integers and map values of them are numbers as well.
+    let widget = Widget {
+        sizes: vec![1, 2],
+        counts: [("a".to_string(), 3)].into_iter().collect(),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&widget).unwrap();
+    assert!(json.contains(r#""sizes":[1,2]"#), "{json}");
+    assert!(json.contains(r#""counts":{"a":3}"#), "{json}");
+    let back: Widget = serde_json::from_str(r#"{"sizes":[1,"2"],"counts":{"a":"3"}}"#).unwrap();
+    assert_eq!((back.sizes, back.counts["a"]), (vec![1, 2], 3));
+}
+
+#[tokio::test]
+async fn head_requests_and_get_bodies() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    client.widget_exists("w").await.unwrap();
+    let err = client.widget_exists("missing").await.unwrap_err();
+    assert_eq!(err.status(), Some(404));
+    let found = client.search_widgets("w").await.unwrap();
+    let names: Vec<_> = found.widgets.iter().map(|w| w.name.as_str()).collect();
+    assert_eq!(names, ["w1", "w2"]);
+    let seen = seen.all();
+    assert!(seen.contains(&"HEAD w".to_string()), "{seen:?}");
+    assert!(
+        seen.contains(&r#"GET body {"prefix":"w"}"#.to_string()),
+        "{seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn ndjson_answers_and_header_fields() {
+    let (base, _seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    let widgets = client
+        .stream_widgets()
+        .with_prefix("w".to_string())
+        .await
+        .unwrap();
+    let names: Vec<_> = widgets.iter().map(|w| w.name.as_str()).collect();
+    assert_eq!(names, ["w1", "w2"]);
+    assert_eq!(widgets[0].created_at, 1);
+
+    let version = client.widget_version("w").await.unwrap();
+    assert_eq!(version.name, "w");
+    assert_eq!(version.version, 7);
+    assert_eq!(version.etag.as_deref(), Some("abc"));
+    let bare = client.widget_version("bare").await.unwrap();
+    assert_eq!((bare.name.as_str(), bare.version), ("", 7));
+}
+
+#[tokio::test]
+async fn query_keys_are_explicit_json_names() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_unauthenticated(base);
+    client.list_widgets().with_first(3).await.unwrap();
+    client
+        .list_widgets()
+        .with_order_by("name".to_string())
+        .await
+        .unwrap();
+    let seen = seen.all();
+    assert!(seen.contains(&"query startIndex=3".to_string()), "{seen:?}");
+    assert!(seen.contains(&"query orderBy=name".to_string()), "{seen:?}");
 }
 
 #[tokio::test]

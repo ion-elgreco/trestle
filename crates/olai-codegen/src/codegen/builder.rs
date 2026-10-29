@@ -78,6 +78,7 @@ fn generate_builders_module(
         })
         .collect::<crate::error::Result<_>>()?;
     let mod_path: Path = service.models_path();
+    let foreign_models = service.foreign_models_imports();
     let result_path: Path = service.config.client_result_path();
 
     // The streaming machinery (`into_stream`, `stream_paginated`, the futures
@@ -141,6 +142,7 @@ fn generate_builders_module(
         use std::future::IntoFuture;
         use #result_path;
         use #mod_path::*;
+        #(#foreign_models)*
         use super::client::*;
 
         #(#builder_tokens)*
@@ -162,7 +164,7 @@ fn generate_request_builder(
             method.plan.handler_function_name
         ))
     })?;
-    let output_type_ident = method.output_type();
+    let result_type = method.result_type();
     let client_type_ident = service.low_level_client_type(protocol);
     let method_name = format_ident!("{}", method.plan.handler_function_name);
 
@@ -228,12 +230,7 @@ fn generate_request_builder(
     };
 
     // Generate IntoFuture implementation
-    let into_future_impl = generate_into_future_impl(
-        &builder_ident,
-        &client_type_ident,
-        output_type_ident.as_ref(),
-        &method_name,
-    );
+    let into_future_impl = generate_into_future_impl(&builder_ident, &result_type, &method_name);
 
     let tokens = quote! {
         #[doc = #builder_doc]
@@ -333,20 +330,22 @@ fn generate_with_methods(
 }
 
 fn builder_with_impl(method: &MethodHandler<'_>, field: &BodyField) -> TokenStream {
-    let field_ident = format_ident!("{}", field.name);
+    let field_ident = crate::utils::field_ident(&field.name);
     let method_name = format_ident!("with_{}", field.name);
     let field_name = &field.name;
 
     let doc_attr = field_doc_attr(field.documentation.as_deref(), field_name);
 
-    if matches!(field.field_type.base_type, BaseType::Map(_, _)) {
+    if let BaseType::Map(_, value) = &field.field_type.base_type {
+        // The values convert into the map's value type (`String` for a `map<string, string>`).
+        let value_type = method.field_type(value, RenderContext::BuilderMethod);
         quote! {
             #doc_attr
             pub fn #method_name<I, K, V>(mut self, #field_ident: I) -> Self
             where
                 I: IntoIterator<Item = (K, V)>,
                 K: Into<String>,
-                V: Into<String>,
+                V: Into<#value_type>,
             {
                 self.request.#field_ident = #field_ident
                     .into_iter()
@@ -428,7 +427,7 @@ fn generate_oneof_variant_methods(
     let Some(variants) = field.oneof_variants.as_ref() else {
         return Ok(Vec::new());
     };
-    let oneof_field_ident = format_ident!("{}", field.name);
+    let oneof_field_ident = crate::utils::field_ident(&field.name);
 
     let enum_type_tokens = method.field_type(&field.field_type, RenderContext::BuilderMethod);
 
@@ -470,34 +469,18 @@ fn generate_oneof_variant_methods(
 /// Generate IntoFuture implementation
 fn generate_into_future_impl(
     builder_ident: &proc_macro2::Ident,
-    _client_type_ident: &proc_macro2::Ident,
-    output_type_ident: Option<&proc_macro2::Ident>,
+    result_type: &TokenStream,
     method_name: &proc_macro2::Ident,
 ) -> TokenStream {
-    if let Some(out_ident) = output_type_ident {
-        quote! {
-            impl IntoFuture for #builder_ident {
-                type Output = Result<#out_ident>;
-                type IntoFuture = BoxFut<'static, Self::Output>;
+    quote! {
+        impl IntoFuture for #builder_ident {
+            type Output = Result<#result_type>;
+            type IntoFuture = BoxFut<'static, Self::Output>;
 
-                fn into_future(self) -> Self::IntoFuture {
-                    let client = self.client;
-                    let request = self.request;
-                    Box::pin(async move { client.#method_name(&request).await })
-                }
-            }
-        }
-    } else {
-        quote! {
-            impl IntoFuture for #builder_ident {
-                type Output = Result<()>;
-                type IntoFuture = BoxFut<'static, Self::Output>;
-
-                fn into_future(self) -> Self::IntoFuture {
-                    let client = self.client;
-                    let request = self.request;
-                    Box::pin(async move { client.#method_name(&request).await })
-                }
+            fn into_future(self) -> Self::IntoFuture {
+                let client = self.client;
+                let request = self.request;
+                Box::pin(async move { client.#method_name(&request).await })
             }
         }
     }
@@ -548,7 +531,7 @@ fn generate_into_stream_impl(
             method.plan.handler_function_name
         ))
     })?;
-    let item_field_ident = format_ident!("{}", items_field.name);
+    let item_field_ident = crate::utils::field_ident(&items_field.name);
     let output_type_ident = items_field.unified_type.type_ident();
 
     // The browser stream is `!Send`, so on wasm32 box it with `boxed_local()`
@@ -604,6 +587,9 @@ mod tests {
         let fields = vec![
             MessageField {
                 name: "name".to_string(),
+                json_name: None,
+                response_header: None,
+                emit_unpopulated: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: false,
@@ -617,6 +603,9 @@ mod tests {
             },
             MessageField {
                 name: "comment".to_string(),
+                json_name: None,
+                response_header: None,
+                emit_unpopulated: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: true,
@@ -630,6 +619,9 @@ mod tests {
             },
             MessageField {
                 name: "properties".to_string(),
+                json_name: None,
+                response_header: None,
+                emit_unpopulated: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::Map(
                         Box::new(UnifiedType {

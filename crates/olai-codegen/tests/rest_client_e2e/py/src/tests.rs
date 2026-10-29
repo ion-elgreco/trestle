@@ -21,6 +21,14 @@ async fn get_widget(Path(name): Path<String>) -> Response {
         )
             .into_response(),
         "green" => axum::Json(json!({"name": name, "color": "GREEN"})).into_response(),
+        "json" => axum::Json(json!({
+            "name": name,
+            "attributes": {"count": 3, "ratio": 0.5, "nested": {"id": 7}},
+            "extra": [1, "two", null, true],
+            "notes": [{"a": 1}, 2.5],
+            "rows": {"t": [1, 2]},
+        }))
+        .into_response(),
         _ => axum::Json(json!({
             "name": name,
             "color": "PURPLE",
@@ -43,8 +51,55 @@ async fn list_widgets(uri: OriginalUri) -> Response {
     axum::Json(page).into_response()
 }
 
-async fn create_widget(axum::Json(body): axum::Json<serde_json::Value>) -> Response {
-    axum::Json(json!({"name": body["name"], "created_at": body["created_at"]})).into_response()
+async fn create_widget(body: String) -> Response {
+    let request: serde_json::Value = serde_json::from_str(&body).unwrap();
+    // The raw body comes back as the display name, so the test sees its numbers.
+    axum::Json(json!({
+        "name": request["name"],
+        "created_at": request["created_at"],
+        "attributes": request["attributes"],
+        "display_name": body,
+        "type": request["type"],
+    }))
+    .into_response()
+}
+
+async fn widget_exists(Path(name): Path<String>) -> StatusCode {
+    if name == "missing" {
+        StatusCode::NOT_FOUND
+    } else {
+        StatusCode::OK
+    }
+}
+
+/// A `GET` with a JSON body: the widgets whose names start with `prefix`.
+async fn search_widgets(axum::Json(body): axum::Json<serde_json::Value>) -> Response {
+    let prefix = body["prefix"].as_str().unwrap_or_default().to_string();
+    let widgets: Vec<_> = ["w1", "w2", "x1"]
+        .into_iter()
+        .filter(|name| name.starts_with(&prefix))
+        .map(|name| json!({"name": name}))
+        .collect();
+    axum::Json(json!({"widgets": widgets})).into_response()
+}
+
+/// An NDJSON answer: one widget per line.
+async fn stream_widgets() -> Response {
+    let lines: String = ["w1", "w2"]
+        .into_iter()
+        .map(|name| format!("{}\n", json!({"name": name})))
+        .collect();
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/x-ndjson")],
+        lines,
+    )
+        .into_response()
+}
+
+/// A version in the response headers, the name in the body.
+async fn widget_version(Path(name): Path<String>) -> Response {
+    let body = json!({"name": name}).to_string();
+    ([("Widget-Version", "7"), ("ETag", "abc")], body).into_response()
 }
 
 /// Start the demo server on its own Tokio runtime; returns its base URL and the runtime, which
@@ -56,8 +111,13 @@ fn serve() -> (String, tokio::runtime::Runtime) {
             .route("/api/v1/widgets", get(list_widgets).post(create_widget))
             .route(
                 "/api/v1/widgets/{name}",
-                get(get_widget).delete(|| async { StatusCode::OK }),
-            );
+                get(get_widget)
+                    .delete(|| async { StatusCode::OK })
+                    .head(widget_exists),
+            )
+            .route("/api/v1/search", get(search_widgets))
+            .route("/api/v1/widget-lines", get(stream_widgets))
+            .route("/api/v1/widgets/{name}/version", get(widget_version));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -119,7 +179,8 @@ assert w.created_at == 1700000000000
 assert w.properties == {"a": "1"}
 assert repr(w) == (
     "Widget(name='a/b c', created_at=1700000000000, size_bytes=0, "
-    "properties={'a': '1'}, display_name='', metadata_location='')"
+    "properties={'a': '1'}, display_name='', metadata_location='', notes=[], rows={}, "
+    "sizes=[], counts={})"
 ), repr(w)
 try:
     w.name = "x"
@@ -187,6 +248,38 @@ try:
 except DemoError as e:
     assert type(e) is DemoError and e.status is None and e.code is None
 
+# Free-form JSON fields are plain Python objects; whole numbers are ints both ways.
+w = client.widget("json").get()
+assert w.attributes == {"count": 3, "ratio": 0.5, "nested": {"id": 7}}, w.attributes
+assert type(w.attributes["count"]) is int
+assert w.extra == [1, "two", None, True], w.extra
+assert w.notes == [{"a": 1}, 2.5], w.notes
+assert w.rows == {"t": [1, 2]}, w.rows
+created = client.create_widget("w2", attributes={"count": 3, "flag": True, "list": [1, 2.5]})
+assert created.attributes == {"count": 3, "flag": True, "list": [1, 2.5]}, created.attributes
+assert '"count":3' in created.display_name, created.display_name
+# A field named after a Rust keyword keeps its name in Python.
+assert client.create_widget("w4", type="gear").type == "gear"
+try:
+    client.create_widget("w3", attributes={"bad": object()})
+    raise AssertionError("expected a TypeError")
+except TypeError:
+    pass
+
+# A HEAD request gives None, or raises for a missing widget; a GET can carry a JSON body.
+assert client.widget_exists("w") is None
+try:
+    client.widget_exists("missing")
+    raise AssertionError("expected an error")
+except NotFoundError:
+    pass
+assert [w.name for w in client.search_widgets("w").widgets] == ["w1", "w2"]
+
+# A streaming method gives a list, one item per NDJSON line; fields can come from headers.
+assert [w.name for w in client.stream_widgets()] == ["w1", "w2"]
+version = client.widget_version("w")
+assert (version.name, version.version, version.etag) == ("w", 7, "abc"), version
+
 # Each method has an `_async` twin.
 async def main():
     w = await client.widget("w").get_async()
@@ -226,7 +319,8 @@ fn stubs() {
     for expected in [
         "class DemoClient:",
         "def list_widgets(self, *, max_results: typing.Optional[builtins.int] = None, \
-         color: typing.Optional[_enums.Color | str] = None) -> builtins.list[demo.Widget]:",
+         color: typing.Optional[_enums.Color | str] = None, first: typing.Optional[builtins.int] = None, \
+         order_by: typing.Optional[builtins.str] = None) -> builtins.list[demo.Widget]:",
         "-> asyncio.Future[builtins.list[demo.Widget]]:",
         "def widget(self, widget_name: builtins.str) -> demo.WidgetClient:",
         "class DemoError(builtins.Exception):",
@@ -238,10 +332,16 @@ fn stubs() {
     for expected in [
         "class Widget:",
         "def color(self) -> typing.Optional[_enums.Color]:",
+        // A field named after a Rust keyword keeps its Python name.
+        "def type(self) -> typing.Optional[builtins.str]:",
         "The color of the widget.",
         "def __new__(cls, key: typing.Optional[builtins.str] = None",
         "def get_async(self) -> asyncio.Future[Widget]:",
         "def delete_async(self) -> asyncio.Future[None]:",
+        "def attributes(self) -> typing.Optional[dict[str, typing.Any]]:",
+        "def extra(self) -> typing.Any:",
+        "def notes(self) -> list[typing.Any]:",
+        "def rows(self) -> dict[str, list[typing.Any]]:",
     ] {
         assert!(
             models.contains(expected),
