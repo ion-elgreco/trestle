@@ -231,7 +231,8 @@ pub enum Transport {
     /// `olai_http_wasm::WasmClient` — browser-buildable transport. Requires buffa.
     Wasm,
     /// A generated plain `reqwest` transport (`codegen/transport.rs`) with an optional bearer
-    /// token; builds for native and `wasm32`.
+    /// token, fixed or from a `TokenSource` asked at every request; builds for native and
+    /// `wasm32`.
     Reqwest,
 }
 
