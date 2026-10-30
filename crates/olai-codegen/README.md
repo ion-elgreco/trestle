@@ -146,7 +146,7 @@ option is off by default.
 
 | Option | `trestle.yaml` | Effect |
 |---|---|---|
-| `transport_type_path = REQWEST_TRANSPORT_TYPE_PATH` | `transport: reqwest` | Emit `transport.rs`: an `HttpClient` over `reqwest::Client` with an optional bearer token. No cloud credential providers, no retries; builds for native and `wasm32`. |
+| `transport_type_path = REQWEST_TRANSPORT_TYPE_PATH` | `transport: reqwest` | Emit `transport.rs`: an `HttpClient` over `reqwest::Client` with an optional bearer token, fixed (`with_token`) or from a `TokenSource` asked at every request (`with_token_source`; the aggregate client's `new_with_token_source`, and `token_provider=` in Python). No cloud credential providers, no retries; builds for native and `wasm32`. The client crate needs `futures` and `serde`. |
 | `error_module` | `error_module: { code_field, message_field, details_field, code_enum }` | Emit `error.rs`: `Error`, `Result`, `ApiError` (HTTP status, code, message, details of the JSON error body) and `parse_error_response`. The clients return this `Result`; `result_type` stays the server's. A code not in `code_enum` is kept as a string. Required with the Python bindings. |
 | `json_int64_as_number` | `json_int64: number` (under `generate`) | 64-bit integers are JSON numbers, not proto3-JSON strings, and the whole numbers of `google.protobuf.Value`/`Struct`/`ListValue` fields are integers (`1`, not `1.0`). Reading accepts both. |
 | `ignore_unknown_enum_values` | `ignore_unknown_enum_values: true` | An unknown enum name in a response becomes the zero value instead of failing the response. |

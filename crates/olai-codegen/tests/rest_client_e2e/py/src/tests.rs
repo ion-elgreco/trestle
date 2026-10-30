@@ -8,8 +8,16 @@ use axum::routing::get;
 use pyo3::prelude::*;
 use serde_json::json;
 
-async fn get_widget(Path(name): Path<String>) -> Response {
+async fn get_widget(Path(name): Path<String>, headers: axum::http::HeaderMap) -> Response {
     match name.as_str() {
+        // The `Authorization` header, as the name.
+        "token" => axum::Json(json!({
+            "name": headers
+                .get(axum::http::header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("none"),
+        }))
+        .into_response(),
         "missing" => (
             StatusCode::NOT_FOUND,
             axum::Json(json!({
@@ -169,6 +177,78 @@ fn run_python(code: &str) {
             panic!("{traceback}{e}");
         }
     });
+}
+
+#[test]
+fn token_provider() {
+    run_python(
+        r#"
+import asyncio
+import time
+
+from demo._core import DemoClient, DemoError
+
+calls = []
+
+def provider():
+    calls.append(1)
+    return "provided"
+
+# A bare token is asked for at every request.
+client = DemoClient(BASE, token_provider=provider)
+assert client.widget("token").get().name == "Bearer provided"
+client.widget("token").get()
+assert len(calls) == 2, calls
+
+# A token with its expiry is kept until a minute before it.
+calls.clear()
+def pair():
+    calls.append(1)
+    return ("kept", time.time() + 3600)
+client = DemoClient(BASE, token_provider=pair)
+assert client.widget("token").get().name == "Bearer kept"
+client.widget("token").get()
+assert len(calls) == 1, calls
+
+calls.clear()
+def expiring():
+    calls.append(1)
+    return ("old", time.time() + 30)
+client = DemoClient(BASE, token_provider=expiring)
+client.widget("token").get()
+client.widget("token").get()
+assert len(calls) == 2, calls
+
+# The async methods ask the provider too.
+async def main():
+    return await DemoClient(BASE, token_provider=provider).widget("token").get_async()
+assert asyncio.run(main()).name == "Bearer provided"
+
+# A provider that fails, or returns something else, fails the call.
+def boom():
+    raise RuntimeError("no token today")
+try:
+    DemoClient(BASE, token_provider=boom).widget("token").get()
+    raise AssertionError("a failing provider passed")
+except DemoError as e:
+    assert "no token today" in str(e), str(e)
+try:
+    DemoClient(BASE, token_provider=lambda: 7).widget("token").get()
+    raise AssertionError("a bad provider passed")
+except DemoError as e:
+    assert "token_provider" in str(e), str(e)
+
+# Not both.
+try:
+    DemoClient(BASE, token="t", token_provider=provider)
+    raise AssertionError("both passed")
+except ValueError:
+    pass
+
+# Without either, no token.
+assert DemoClient(BASE).widget("token").get().name == "none"
+"#,
+    );
 }
 
 #[test]

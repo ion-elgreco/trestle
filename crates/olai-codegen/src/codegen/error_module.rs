@@ -94,6 +94,38 @@ pub(crate) fn generate(
         }
     });
 
+    // The generated `reqwest` transport gets its bearer token from a `TokenSource`, which can
+    // fail before the request is sent.
+    let reqwest = config.uses_reqwest_transport();
+    let token_variant = reqwest.then(|| {
+        quote! {
+            /// The token source of the transport failed, so the request was not sent.
+            Token(::std::boxed::Box<dyn ::std::error::Error + Send + Sync>),
+        }
+    });
+    let token_display = reqwest.then(|| {
+        quote! {
+            Error::Token(e) => write!(f, "no bearer token: {e}"),
+        }
+    });
+    let token_source = reqwest.then(|| {
+        quote! {
+            Error::Token(e) => Some(e.as_ref()),
+        }
+    });
+    let token_from = reqwest.then(|| {
+        quote! {
+            impl ::core::convert::From<crate::codegen::transport::SendError> for Error {
+                fn from(e: crate::codegen::transport::SendError) -> Self {
+                    match e {
+                        crate::codegen::transport::SendError::Http(e) => Error::Http(e),
+                        crate::codegen::transport::SendError::Token(e) => Error::Token(e),
+                    }
+                }
+            }
+        }
+    });
+
     let tokens = quote! {
         //! Errors of the generated clients.
 
@@ -109,6 +141,7 @@ pub(crate) fn generate(
             /// The request got no answer, or the answer could not be read.
             Http(::reqwest::Error),
             #transport_variant
+            #token_variant
             /// The request URL could not be built.
             Url(::url::ParseError),
             /// A body could not be written or read as JSON.
@@ -144,6 +177,7 @@ pub(crate) fn generate(
                     Error::Api(e) => ::std::fmt::Display::fmt(e, f),
                     Error::Http(e) => write!(f, "request failed: {e}"),
                     #transport_display
+                    #token_display
                     Error::Url(e) => write!(f, "invalid URL: {e}"),
                     Error::Json(e) => write!(f, "invalid JSON: {e}"),
                 }
@@ -156,6 +190,7 @@ pub(crate) fn generate(
                     Error::Api(e) => Some(e),
                     Error::Http(e) => Some(e),
                     #transport_source
+                    #token_source
                     Error::Url(e) => Some(e),
                     Error::Json(e) => Some(e),
                 }
@@ -175,6 +210,8 @@ pub(crate) fn generate(
         }
 
         #transport_from
+
+        #token_from
 
         impl ::core::convert::From<::url::ParseError> for Error {
             fn from(e: ::url::ParseError) -> Self {
