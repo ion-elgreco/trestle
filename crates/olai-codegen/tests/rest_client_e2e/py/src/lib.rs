@@ -5,9 +5,16 @@ include!(concat!(env!("OUT_DIR"), "/python_mod.rs"));
 /// The directory of the generated Python package `demo`.
 pub const PACKAGE_DIR: &str = concat!(env!("OUT_DIR"), "/pkg");
 
+/// A hand-written submodule of the extension module, `demo._core.extra`, as a binding crate
+/// adds one (`submodules` in the generation config).
+#[pyo3::pymodule]
+pub mod extra {
+    #[pymodule_export]
+    use super::counting_source;
+}
+
 /// A token source made in Rust, as a binding crate hands one to `token_provider=`: the
 /// tokens `t1`, `t2`, … at each request.
-#[cfg(test)]
 #[pyo3::pyfunction]
 fn counting_source() -> codegen::RustTokenSource {
     use rest_client_e2e::transport::{TokenFuture, TokenSource};

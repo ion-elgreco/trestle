@@ -85,9 +85,13 @@ impl<'a> PyBackend<'a> {
     /// PyO3's introspection sees every class. It holds the root client and the exceptions; the
     /// classes of each proto package go in a submodule, which its init also puts in
     /// `sys.modules`.
-    fn extension_module(&self, services: &[&ServiceHandler<'_>], aggregate: &Ident) -> TokenStream {
+    fn extension_module(
+        &self,
+        services: &[&ServiceHandler<'_>],
+        aggregate: &Ident,
+    ) -> crate::error::Result<TokenStream> {
         let Some(first) = services.first() else {
-            return quote! {};
+            return Ok(quote! {});
         };
         // Classes per package segment: the model wrappers, then the scoped clients.
         let mut groups: BTreeMap<&str, Vec<Ident>> = BTreeMap::new();
@@ -118,7 +122,23 @@ impl<'a> PyBackend<'a> {
         let module_option = parent.map(|parent| quote! { , module = #parent });
         let module_doc = format!(" The extension module `{full_name}`.");
         let exceptions = super::errors::class_idents(self.python);
-        let segments = groups.keys();
+        // The hand-written submodules of the binding crate, under their last segment.
+        let mut extra_names = Vec::new();
+        let mut extra_submodules = Vec::new();
+        for path in &self.python.submodules {
+            let parsed: syn::Path = syn::parse_str(path).map_err(|e| {
+                crate::Error::Build(format!("submodule `{path}` is not a Rust path: {e}"))
+            })?;
+            extra_names.push(path.rsplit("::").next().unwrap_or(path).to_string());
+            extra_submodules.push(quote! {
+                #[pymodule_export]
+                use #parsed;
+            });
+        }
+        let segments = groups
+            .keys()
+            .map(|segment| segment.to_string())
+            .chain(extra_names);
         let submodules = groups.iter().map(|(segment, classes)| {
             let ident = crate::utils::field_ident(segment);
             let doc = format!(" The classes of the `{segment}` API.");
@@ -135,7 +155,7 @@ impl<'a> PyBackend<'a> {
             .python
             .async_methods
             .then(|| quote! { crate::codegen::runtime::init_async_runtime(); });
-        quote! {
+        Ok(quote! {
             /// The extension module, as Python imports it.
             pub const CORE_MODULE: &str = #full_name;
 
@@ -162,6 +182,8 @@ impl<'a> PyBackend<'a> {
                 use crate::codegen::error::{#(#exceptions),*};
 
                 #(#submodules)*
+
+                #(#extra_submodules)*
 
                 /// Put the submodules in `sys.modules`. The import system puts the module there
                 /// before it runs this. Not handed the module, so the stubs still describe the
@@ -190,7 +212,7 @@ impl<'a> PyBackend<'a> {
                 }
                 Ok(())
             }
-        }
+        })
     }
 }
 
@@ -336,7 +358,8 @@ impl BindingBackend for PyBackend<'_> {
                 let client = client.with_user_agent(concat!(#prefix, env!("CARGO_PKG_VERSION")));
             }
         });
-        let extension_module = self.extension_module(&sorted_services, &py_aggregate_client_ident);
+        let extension_module =
+            self.extension_module(&sorted_services, &py_aggregate_client_ident)?;
         // The generated `reqwest` transport takes a token source: `token_provider`, a Python
         // callable, asked for the bearer token.
         let reqwest_transport = services

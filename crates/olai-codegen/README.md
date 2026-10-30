@@ -195,6 +195,7 @@ The generated API:
 | `public_modules` | A module `<package>/<service>.py` per submodule of `module`, re-exporting its classes and enums. |
 | `user_agent` | The `User-Agent` product of the Python client, `<product>/<binding crate version>`. Needs the `reqwest` transport. |
 | `default_token_source` | The Rust path of an `async fn(&Url) -> Result<Option<Arc<dyn TokenSource>>, TokenError>` that the client calls for its token source when it gets neither `token` nor `token_provider`, such as one that reads the identity of the environment. Needs the `reqwest` transport. |
+| `submodules` | The Rust paths of hand-written `#[pymodule]` modules of the binding crate, such as `crate::identity::identity`, exported as submodules of `module` under their last segment: in the stubs, and in `sys.modules`. |
 
 With the `reqwest` transport, the client also takes `token_provider=`: a Python callable that
 returns the token, or a `(token, expires_at)` pair, or a `TokenSource` object that the binding

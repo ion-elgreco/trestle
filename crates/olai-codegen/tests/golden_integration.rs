@@ -136,6 +136,7 @@ fn full_config(tmp: &Path, runtime: Runtime) -> CodeGenConfig {
                 public_modules: false,
                 user_agent: None,
                 default_token_source: None,
+                submodules: Vec::new(),
             }),
         }),
     }
