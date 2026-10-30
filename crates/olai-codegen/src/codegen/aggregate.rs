@@ -127,6 +127,19 @@ pub(crate) fn generate(
             }
         }
     });
+    // The generated `reqwest` transport also takes a token source, asked at every request.
+    let token_source_ctor = config.uses_reqwest_transport().then(|| {
+        quote! {
+            /// Create a new aggregate client whose bearer token comes from `source` at every
+            /// request ([`TokenSource`](crate::codegen::transport::TokenSource)).
+            pub fn new_with_token_source(
+                base_url: Url,
+                source: ::std::sync::Arc<dyn crate::codegen::transport::TokenSource>,
+            ) -> Self {
+                Self::new(#transport_ident::default().with_token_source(source), base_url)
+            }
+        }
+    });
     let wasm_ctor = dual.then(|| {
         quote! {
             #[cfg(target_arch = "wasm32")]
@@ -148,6 +161,7 @@ pub(crate) fn generate(
     });
     let convenience_ctors = quote! {
         #token_ctors
+        #token_source_ctor
         #wasm_ctor
         #user_agent
     };

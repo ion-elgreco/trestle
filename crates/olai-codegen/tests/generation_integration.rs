@@ -721,6 +721,12 @@ fn rest_client_and_python_options_generate_valid_code() {
         "reqwest transport missing"
     );
     assert!(
+        client.contains("pub trait TokenSource")
+            && client.contains("pub fn new_with_token_source(")
+            && client.contains("Token(::std::boxed::Box<dyn ::std::error::Error"),
+        "token source missing"
+    );
+    assert!(
         client.contains("pub struct ApiError"),
         "error module missing"
     );

@@ -328,6 +328,132 @@ impl BindingBackend for PyBackend<'_> {
             }
         });
         let extension_module = self.extension_module(&sorted_services, &py_aggregate_client_ident);
+        // The generated `reqwest` transport takes a token source: `token_provider`, a Python
+        // callable, asked for the bearer token.
+        let reqwest_transport = services
+            .first()
+            .is_some_and(|s| s.config.uses_reqwest_transport());
+        let constructor = if reqwest_transport {
+            quote! {
+                /// A client of the API at `base_url`. `token`, when set, goes in every request as
+                /// the bearer token. `token_provider`, a callable, is asked for the token instead:
+                /// it returns the token, or a pair of the token and the time it expires, in
+                /// seconds since the epoch; a token with its expiry is kept until a minute
+                /// before it, a bare token is asked for at every request.
+                #[new]
+                #[pyo3(signature = (base_url, token = None, token_provider = None))]
+                pub fn new(
+                    base_url: String,
+                    token: Option<String>,
+                    token_provider: Option<::pyo3::Py<::pyo3::PyAny>>,
+                ) -> PyResult<Self> {
+                    let base_url = base_url.parse().map_err(#py_error_type::from)?;
+                    let client = match (token, token_provider) {
+                        (Some(_), Some(_)) => {
+                            return Err(::pyo3::exceptions::PyValueError::new_err(
+                                "token and token_provider cannot both be set",
+                            ));
+                        }
+                        (Some(token), None) => {
+                            #aggregate_client_ident::new_with_token(base_url, token)
+                        }
+                        (None, Some(provider)) => #aggregate_client_ident::new_with_token_source(
+                            base_url,
+                            ::std::sync::Arc::new(PyTokenSource::new(provider)),
+                        ),
+                        (None, None) => #aggregate_client_ident::new_unauthenticated(base_url),
+                    };
+                    #user_agent
+                    Ok(Self { client })
+                }
+            }
+        } else {
+            quote! {
+                /// A client of the API at `base_url`. `token`, when set, goes in every
+                /// request as the bearer token.
+                #[new]
+                #[pyo3(signature = (base_url, token = None))]
+                pub fn new(base_url: String, token: Option<String>) -> PyResult<Self> {
+                    let base_url = base_url.parse().map_err(#py_error_type::from)?;
+                    let client = match token {
+                        Some(token) => #aggregate_client_ident::new_with_token(base_url, token),
+                        None => #aggregate_client_ident::new_unauthenticated(base_url),
+                    };
+                    #user_agent
+                    Ok(Self { client })
+                }
+            }
+        };
+        let token_source = reqwest_transport.then(|| {
+            quote! {
+                /// The bearer tokens of a `token_provider` callable: the token, or a
+                /// `(token, expires_at)` pair with the expiry in seconds since the epoch, kept
+                /// until a minute before it.
+                pub struct PyTokenSource {
+                    provider: ::pyo3::Py<::pyo3::PyAny>,
+                    kept: ::std::sync::Mutex<Option<(String, ::std::time::Instant)>>,
+                }
+
+                impl PyTokenSource {
+                    fn new(provider: ::pyo3::Py<::pyo3::PyAny>) -> Self {
+                        Self { provider, kept: ::std::sync::Mutex::new(None) }
+                    }
+
+                    /// Ask the callable: the token, and its expiry when it gives one.
+                    fn ask(&self) -> PyResult<(String, Option<f64>)> {
+                        ::pyo3::Python::attach(|py| {
+                            let value = self.provider.bind(py).call0()?;
+                            if let Ok(token) = value.extract::<String>() {
+                                return Ok((token, None));
+                            }
+                            let (token, expires_at) =
+                                value.extract::<(String, f64)>().map_err(|_| {
+                                    ::pyo3::exceptions::PyTypeError::new_err(
+                                        "token_provider must return the token, or a (token, \
+                                         expires_at) pair with the expiry in seconds since the epoch",
+                                    )
+                                })?;
+                            Ok((token, Some(expires_at)))
+                        })
+                    }
+                }
+
+                impl ::std::fmt::Debug for PyTokenSource {
+                    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                        f.debug_struct("PyTokenSource").finish_non_exhaustive()
+                    }
+                }
+
+                impl #client_crate::transport::TokenSource for PyTokenSource {
+                    fn token(&self) -> #client_crate::transport::TokenFuture<'_> {
+                        Box::pin(async move {
+                            if let Ok(kept) = self.kept.lock()
+                                && let Some((token, until)) = kept.as_ref()
+                                && ::std::time::Instant::now() < *until
+                            {
+                                return Ok(token.clone());
+                            }
+                            let (token, expires_at) = self
+                                .ask()
+                                .map_err(|e| Box::new(e) as #client_crate::transport::TokenError)?;
+                            if let Some(expires_at) = expires_at {
+                                let now = ::std::time::SystemTime::now()
+                                    .duration_since(::std::time::UNIX_EPOCH)
+                                    .map_or(0.0, |d| d.as_secs_f64());
+                                let left = expires_at - now - 60.0;
+                                let left = if left.is_finite() { left.clamp(0.0, 1e9) } else { 0.0 };
+                                let until = ::std::time::Instant::now()
+                                    + ::std::time::Duration::from_secs_f64(left);
+                                if let Ok(mut kept) = self.kept.lock() {
+                                    *kept = Some((token.clone(), until));
+                                }
+                            }
+                            Ok(token)
+                        })
+                    }
+                }
+            }
+        });
 
         let tokens = quote! {
             // The aggregate module file carries the root `#[pyclass]` (flat methods →
@@ -355,24 +481,14 @@ impl BindingBackend for PyBackend<'_> {
 
             #[pymethods]
             impl #py_aggregate_client_ident {
-                /// A client of the API at `base_url`. `token`, when set, goes in every
-                /// request as the bearer token.
-                #[new]
-                #[pyo3(signature = (base_url, token = None))]
-                pub fn new(base_url: String, token: Option<String>) -> PyResult<Self> {
-                    let base_url = base_url.parse().map_err(#py_error_type::from)?;
-                    let client = match token {
-                        Some(token) => #aggregate_client_ident::new_with_token(base_url, token),
-                        None => #aggregate_client_ident::new_unauthenticated(base_url),
-                    };
-                    #user_agent
-                    Ok(Self { client })
-                }
+                #constructor
 
                 #(#methods)*
 
                 #(#resource_accessor_methods)*
             }
+
+            #token_source
 
             #extension_module
         };

@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 
 use crate::codegen::DemoClient;
 use crate::codegen::error::Error;
+use crate::codegen::transport::{HttpClient, TokenError, TokenFuture, TokenSource};
 use crate::models::demo::v1::{Color, CreateWidgetRequest, ErrorCode, Widget};
 
 /// What the server saw: paths, bodies and headers.
@@ -615,8 +616,48 @@ async fn bearer_token_goes_in_every_request_and_form_bodies_are_encoded() {
             .to_string()
     ));
 
-    let transport = crate::codegen::transport::HttpClient::default().with_token("secret");
+    let transport = HttpClient::default().with_token("secret");
     assert!(!format!("{transport:?}").contains("secret"));
+}
+
+/// A token source: `t1`, `t2`, … at each request.
+#[derive(Debug, Default)]
+struct Counting(std::sync::atomic::AtomicUsize);
+
+impl TokenSource for Counting {
+    fn token(&self) -> TokenFuture<'_> {
+        let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        Box::pin(async move { Ok(format!("t{n}")) })
+    }
+}
+
+#[derive(Debug)]
+struct Failing;
+
+impl TokenSource for Failing {
+    fn token(&self) -> TokenFuture<'_> {
+        Box::pin(async { Err::<String, TokenError>("no token today".into()) })
+    }
+}
+
+#[tokio::test]
+async fn the_token_source_is_asked_at_every_request() {
+    let (base, seen) = serve().await;
+    let client = DemoClient::new_with_token_source(base.clone(), Arc::new(Counting::default()));
+    client.widget("w").delete().await.unwrap();
+    client.widget("w").delete().await.unwrap();
+    let seen = seen.all();
+    for token in ["auth Bearer t1", "auth Bearer t2"] {
+        assert!(seen.contains(&token.to_string()), "{seen:?}");
+    }
+
+    // A source that fails fails the call, before any request.
+    let client = DemoClient::new_with_token_source(base, Arc::new(Failing));
+    let err = client.widget("w").delete().await.unwrap_err();
+    assert!(matches!(err, Error::Token(_)), "{err:?}");
+    assert_eq!(err.to_string(), "no bearer token: no token today");
+    let transport = HttpClient::default().with_token_source(Arc::new(Failing));
+    assert!(format!("{transport:?}").contains("<redacted>"));
 }
 
 #[tokio::test]
