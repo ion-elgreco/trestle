@@ -2006,6 +2006,10 @@ mod tests {
         MessageField {
             name: name.to_string(),
             json_name: None,
+            response_header: None,
+            request_header: None,
+            emit_unpopulated: false,
+            raw_body: false,
             unified_type: ty,
             documentation: None,
             oneof_variants: None,

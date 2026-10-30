@@ -45,7 +45,14 @@ fn wrap_single_output(method: &MethodHandler<'_>) -> Option<(TokenStream, TokenS
         return Some((quote! { bool }, quote! { result }));
     }
     let w = wrapper_ident(&method.output_type()?);
-    Some((quote! { #w }, quote! { #w::from(result) }))
+    if method.plan.metadata.server_streaming {
+        Some((
+            quote! { Vec<#w> },
+            quote! { result.into_iter().map(#w::from).collect::<Vec<_>>() },
+        ))
+    } else {
+        Some((quote! { #w }, quote! { #w::from(result) }))
+    }
 }
 
 /// PyO3 binding backend. Holds the configured Python error/result type idents so the method bodies

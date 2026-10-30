@@ -592,6 +592,10 @@ mod tests {
             MessageField {
                 name: "name".to_string(),
                 json_name: None,
+                response_header: None,
+                request_header: None,
+                emit_unpopulated: false,
+                raw_body: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: false,
@@ -606,6 +610,10 @@ mod tests {
             MessageField {
                 name: "comment".to_string(),
                 json_name: None,
+                response_header: None,
+                request_header: None,
+                emit_unpopulated: false,
+                raw_body: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::String,
                     is_optional: true,
@@ -620,6 +628,10 @@ mod tests {
             MessageField {
                 name: "properties".to_string(),
                 json_name: None,
+                response_header: None,
+                request_header: None,
+                emit_unpopulated: false,
+                raw_body: false,
                 unified_type: UnifiedType {
                     base_type: BaseType::Map(
                         Box::new(UnifiedType {
