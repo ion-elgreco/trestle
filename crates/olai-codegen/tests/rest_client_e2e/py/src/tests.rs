@@ -85,25 +85,6 @@ async fn search_widgets(axum::Json(body): axum::Json<serde_json::Value>) -> Resp
     axum::Json(json!({"widgets": widgets})).into_response()
 }
 
-/// An NDJSON answer.
-async fn stream_widgets() -> Response {
-    let lines: String = ["w1", "w2"]
-        .into_iter()
-        .map(|name| format!("{}\n", json!({"name": name})))
-        .collect();
-    (
-        [(axum::http::header::CONTENT_TYPE, "application/x-ndjson")],
-        lines,
-    )
-        .into_response()
-}
-
-/// Fields in the response headers.
-async fn widget_version(Path(name): Path<String>) -> Response {
-    let body = json!({"name": name}).to_string();
-    ([("Widget-Version", "7"), ("ETag", "abc")], body).into_response()
-}
-
 /// Start the demo server on its own runtime, which must outlive the test.
 fn serve() -> (String, tokio::runtime::Runtime) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -117,22 +98,9 @@ fn serve() -> (String, tokio::runtime::Runtime) {
                     .head(widget_exists),
             )
             .route("/api/v1/search", get(search_widgets))
-            .route("/api/v1/widget-lines", get(stream_widgets))
-            .route("/api/v1/widgets/{name}/version", get(widget_version))
             .route(
                 "/api/v1/blobs/{*path}",
-                axum::routing::put(|body: axum::body::Bytes| async move {
-                    assert_eq!(body.as_ref(), b"\x00\x01\xff");
-                    StatusCode::NO_CONTENT
-                })
-                .get(
-                    |Path(path): Path<String>, headers: axum::http::HeaderMap| async move {
-                        match headers.get("Range").and_then(|v| v.to_str().ok()) {
-                            Some(range) => format!("range:{range}"),
-                            None => format!("blob:{path}"),
-                        }
-                    },
-                ),
+                get(|Path(path): Path<String>| async move { axum::Json(json!({"path": path})) }),
             );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -316,16 +284,8 @@ except PermissionDeniedError:
     pass
 assert [w.name for w in client.search_widgets("w", ["a"], {"t": [1, 2]}).widgets] == ["w1", "w2"]
 
-# An NDJSON stream as a list; fields from response headers.
-assert [w.name for w in client.stream_widgets()] == ["w1", "w2"]
-version = client.widget_version("w")
-assert (version.name, version.version, version.etag) == ("w", 7, "abc"), version
-
-# Raw bodies as `bytes`.
-assert client.put_blob("x/y", b"\x00\x01\xff") is None
-blob = client.get_blob("x/y")
-assert (blob.data, blob.size) == (b"blob:x/y", 8), blob
-assert client.get_blob("x/y", range="bytes=0-1").data == b"range:bytes=0-1"
+# A multi-segment path value keeps its `/`.
+assert client.get_blob("x/y").path == "x/y"
 
 # Each method has an `_async` twin.
 async def main():
@@ -372,7 +332,7 @@ fn stubs() {
         "class DemoError(builtins.Exception):",
         "class NotFoundError(DemoError):",
         "def details(self) -> list[typing.Any]:",
-        "def put_blob(self, path: builtins.str, data: bytes) -> None:",
+        "def get_blob(self, path: builtins.str) -> demo.Blob:",
     ] {
         assert!(root.contains(expected), "missing `{expected}` in:\n{root}");
     }
@@ -389,7 +349,6 @@ fn stubs() {
         "def extra(self) -> typing.Any:",
         "def notes(self) -> list[typing.Any]:",
         "def rows(self) -> dict[str, list[typing.Any]]:",
-        "def data(self) -> builtins.bytes:",
     ] {
         assert!(
             models.contains(expected),

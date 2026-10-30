@@ -93,7 +93,6 @@ fn process_method(
         http_rule,
         http_pattern,
         documentation: method_documentation,
-        server_streaming: method.server_streaming(),
     };
 
     // Add to the service's methods

@@ -78,14 +78,6 @@ pub struct MessageField {
     pub name: String,
     /// The explicit `json_name` of the field; `None` for protoc's default.
     pub json_name: Option<String>,
-    /// The HTTP response header this field is read from (`(olai.trestle.v1.response_header)`).
-    pub response_header: Option<String>,
-    /// The HTTP request header this field is sent in (`(olai.trestle.v1.request_header)`).
-    pub request_header: Option<String>,
-    /// Whether the field is sent even when unpopulated (`(olai.trestle.v1.emit_unpopulated)`).
-    pub emit_unpopulated: bool,
-    /// Whether the field is the raw HTTP body of its message (`(olai.trestle.v1.raw_body)`).
-    pub raw_body: bool,
     /// Language-agnostic type; carries `is_optional` and `is_repeated` flags.
     pub unified_type: UnifiedType,
     pub documentation: Option<String>,
@@ -161,8 +153,6 @@ pub struct MethodMetadata {
     /// Pre-parsed HTTP URL pattern. Analysis should use this directly instead of re-parsing.
     pub http_pattern: HttpPattern,
     pub documentation: Option<String>,
-    /// A server-streaming RPC (`returns (stream T)`): NDJSON over REST.
-    pub server_streaming: bool,
 }
 
 impl MethodMetadata {
@@ -213,7 +203,6 @@ mod tests {
             method_name: "TestMethod".to_string(),
             input_type: ".test.TestRequest".to_string(),
             output_type: ".test.TestResponse".to_string(),
-            server_streaming: false,
             operation: None,
             http_pattern: crate::parsing::http::HttpPattern::parse("/test"),
             http_rule,

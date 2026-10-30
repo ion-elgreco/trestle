@@ -5,7 +5,6 @@ import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 import "google/protobuf/struct.proto";
-import "olai/trestle/v1/annotations.proto";
 
 enum Color {
   COLOR_UNSPECIFIED = 0;
@@ -104,8 +103,8 @@ message CreateWidgetRequest {
   optional string type = 6 [(google.api.field_behavior) = OPTIONAL];
   // Where the widget comes from. Sent under its explicit JSON name.
   optional string source_url = 7 [json_name = "sourceUrl"];
-  // Tags, sent even when there are none.
-  repeated string tags = 8 [(olai.trestle.v1.emit_unpopulated) = true];
+  // Tags.
+  repeated string tags = 8;
   // Labels by key.
   map<string, Label> labels_by_key = 9;
   // Free-form notes.
@@ -188,57 +187,15 @@ message RenameWidgetRequest {
   string new_name = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
-message StreamWidgetsRequest {
-  // Only the widgets whose names start with this.
-  optional string prefix = 1;
-}
-
-// One line of a widget stream.
-message WidgetLine {
-  // The name of the widget.
-  string name = 1;
-  // When the widget was created, in epoch milliseconds.
-  int64 created_at = 2;
-}
-
-message WidgetVersionRequest {
-  // The name of the widget.
-  string name = 1 [(google.api.field_behavior) = REQUIRED];
-}
-
-// The version of a widget, partly from the response headers.
-message WidgetVersion {
-  // The name of the widget, from the body.
-  string name = 1;
-  // The version, from the `Widget-Version` header.
-  int64 version = 2 [(olai.trestle.v1.response_header) = "Widget-Version"];
-  // The entity tag, from the `ETag` header.
-  optional string etag = 3 [(olai.trestle.v1.response_header) = "ETag"];
-}
-
-message PutBlobRequest {
-  // The path of the blob, over several segments.
-  string path = 1 [(google.api.field_behavior) = REQUIRED];
-  // The bytes of the blob.
-  bytes data = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (olai.trestle.v1.raw_body) = true
-  ];
-}
-
 message GetBlobRequest {
   // The path of the blob, over several segments.
   string path = 1 [(google.api.field_behavior) = REQUIRED];
-  // The bytes to read, in the `Range` header.
-  optional string range = 2 [(olai.trestle.v1.request_header) = "Range"];
 }
 
-// A blob: its bytes from the body, its size from a header.
+// A blob.
 message Blob {
-  // The bytes of the blob.
-  bytes data = 1 [(olai.trestle.v1.raw_body) = true];
-  // The size, from the `Content-Length` header.
-  optional int64 size = 2 [(olai.trestle.v1.response_header) = "Content-Length"];
+  // The path of the blob.
+  string path = 1;
 }
 
 // Less common `google.api.http` shapes.
@@ -277,25 +234,7 @@ service ProbeService {
     };
   }
 
-  // Stream widgets: an NDJSON answer.
-  rpc StreamWidgets(StreamWidgetsRequest) returns (stream WidgetLine) {
-    option (google.api.http) = {get: "/api/v1/widget-lines"};
-  }
-
-  // The version of a widget: fields from the response headers.
-  rpc WidgetVersion(WidgetVersionRequest) returns (.demo.v1.WidgetVersion) {
-    option (google.api.http) = {get: "/api/v1/widgets/{name}/version"};
-  }
-
-  // Store a blob: a raw request body, at a multi-segment path.
-  rpc PutBlob(PutBlobRequest) returns (Empty) {
-    option (google.api.http) = {
-      put: "/api/v1/blobs/{path=**}"
-      body: "data"
-    };
-  }
-
-  // Read a blob: a raw response body.
+  // Read a blob, at a multi-segment path.
   rpc GetBlob(GetBlobRequest) returns (Blob) {
     option (google.api.http) = {get: "/api/v1/blobs/{path=**}"};
   }

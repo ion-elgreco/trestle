@@ -114,10 +114,6 @@ pub(super) fn process_message(
         let field_info = MessageField {
             name: field.name().to_string(),
             json_name,
-            response_header: string_option(field, super::TRESTLE_RESPONSE_HEADER_EXTENSION),
-            request_header: string_option(field, super::TRESTLE_REQUEST_HEADER_EXTENSION),
-            emit_unpopulated: bool_option(field, super::TRESTLE_EMIT_UNPOPULATED_EXTENSION),
-            raw_body: bool_option(field, super::TRESTLE_RAW_BODY_EXTENSION),
             unified_type,
             documentation,
             field_behavior,
@@ -142,10 +138,6 @@ pub(super) fn process_message(
         let oneof_field = MessageField {
             name: oneof_field_name.clone(),
             json_name: None,
-            response_header: None,
-            request_header: None,
-            emit_unpopulated: false,
-            raw_body: false,
             unified_type: UnifiedType {
                 base_type: BaseType::OneOf(enum_type_name.clone()),
                 is_optional: true, // oneof fields are always Option<enum>
@@ -217,29 +209,6 @@ pub(super) fn process_message(
     }
 
     Ok(())
-}
-
-/// Whether the `bool` field option with extension number `number` is set to `true`.
-fn bool_option(field: &FieldDescriptorProto, number: u32) -> bool {
-    field.options.as_ref().is_some_and(|options| {
-        options.unknown_fields().iter().any(|(n, value)| {
-            n == number && matches!(value, protobuf::UnknownValueRef::Varint(v) if v != 0)
-        })
-    })
-}
-
-/// The `string` field option with extension number `number`.
-fn string_option(field: &FieldDescriptorProto, number: u32) -> Option<String> {
-    let options = field.options.as_ref()?;
-    options
-        .unknown_fields()
-        .iter()
-        .find_map(|(n, value)| match value {
-            protobuf::UnknownValueRef::LengthDelimited(bytes) if n == number => {
-                String::from_utf8(bytes.to_vec()).ok()
-            }
-            _ => None,
-        })
 }
 
 /// Extract google.api.field_behavior option from field-level options
