@@ -312,6 +312,7 @@ fn lower_python(
         keyword_only: options.keyword_only,
         public_modules: options.public_modules,
         user_agent: options.user_agent.clone(),
+        default_token_source: options.default_token_source.clone(),
     })
 }
 

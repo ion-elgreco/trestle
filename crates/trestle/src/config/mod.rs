@@ -397,6 +397,11 @@ pub struct PythonOptions {
     /// Needs the `reqwest` transport.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
+    /// The Rust path of an `async fn(&Url) -> Result<Option<Arc<dyn TokenSource>>, TokenError>`
+    /// that the Python client calls for its token source when it gets neither `token` nor
+    /// `token_provider`. Needs the `reqwest` transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_token_source: Option<String>,
 }
 
 /// The pure-Python package of the generated files.
