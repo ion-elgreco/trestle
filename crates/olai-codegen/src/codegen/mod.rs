@@ -1535,10 +1535,11 @@ impl MethodHandler<'_> {
             .map(|t| extract_type_ident(&t.info.name))
     }
 
-    /// The type a client call resolves to: the output message, `bool` for an existence check,
-    /// or `()`.
+    /// The type a client call resolves to: the output message, a `Vec` of them for a
+    /// server-streaming method, `bool` for an existence check, or `()`.
     pub(crate) fn result_type(&self) -> TokenStream {
         match self.output_type() {
+            Some(output) if self.plan.metadata.server_streaming => quote! { Vec<#output> },
             Some(output) => quote! { #output },
             None if self.is_existence_check() => quote! { bool },
             None => quote! { () },
@@ -1548,6 +1549,20 @@ impl MethodHandler<'_> {
     /// A `HEAD` request without an output: it returns `bool`, `false` for a 404.
     pub(crate) fn is_existence_check(&self) -> bool {
         self.plan.http_method.eq_ignore_ascii_case("head") && self.output_type().is_none()
+    }
+
+    /// The output fields that come from HTTP response headers instead of the body.
+    pub(crate) fn response_header_fields(&self) -> Vec<&MessageField> {
+        self.output_message()
+            .map(|output| {
+                output
+                    .info
+                    .fields
+                    .iter()
+                    .filter(|f| f.response_header.is_some())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub(crate) fn list_output_field(&self) -> Option<&MessageField> {

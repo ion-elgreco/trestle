@@ -6,11 +6,12 @@
 //!   module, which writes numbers.
 //! - **Free-form JSON.** `json_value_module` makes `google.protobuf.Value`/`Struct`/`ListValue`
 //!   fields write whole numbers as integers (`1`, not `1.0`).
-//! - **Field options** ([`field_options`]): explicit `json_name`s.
+//! - **Field options** ([`field_options`]): explicit `json_name`s and
+//!   `(olai.trestle.v1.emit_unpopulated)`.
 //!
 //! The rewrites are idempotent and skip the files trestle writes itself.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -60,6 +61,8 @@ pub struct ModelRewrites {
 pub struct PackageFields {
     /// Explicit `json_name`s, by field.
     pub json_names: BTreeMap<String, String>,
+    /// The fields with `(olai.trestle.v1.emit_unpopulated)`.
+    pub emit_unpopulated: BTreeSet<String>,
 }
 
 /// The fields of `metadata` with JSON options, by package, for [`ModelRewrites::fields`].
@@ -82,7 +85,14 @@ pub fn field_options(
                     .entry(package.clone())
                     .or_default()
                     .json_names
-                    .insert(key, json.clone());
+                    .insert(key.clone(), json.clone());
+            }
+            if field.emit_unpopulated {
+                packages
+                    .entry(package.clone())
+                    .or_default()
+                    .emit_unpopulated
+                    .insert(key);
             }
         }
     }
@@ -254,7 +264,7 @@ fn int64_helpers_to(src: &str, module: &str) -> String {
 }
 
 /// Apply the field options: an explicit `json_name` becomes the `rename` (restoring what
-/// [`swap_serde_renames`] may have swapped).
+/// [`swap_serde_renames`] may have swapped), and `emit_unpopulated` drops `skip_serializing_if`.
 fn apply_field_options(src: &str, fields: &PackageFields) -> String {
     static STRUCT: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^\s*pub struct (\w+)").expect("valid regex"));
@@ -264,6 +274,8 @@ fn apply_field_options(src: &str, fields: &PackageFields) -> String {
         LazyLock::new(|| Regex::new(r#"rename = "[^"]*""#).expect("valid regex"));
     static ALIAS: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"alias = "[^"]*""#).expect("valid regex"));
+    static SKIP_IF: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"skip_serializing_if = "[^"]*",?\s*"#).expect("valid regex"));
 
     let lines: Vec<&str> = src.lines().collect();
     let mut out: Vec<String> = Vec::with_capacity(lines.len());
@@ -274,15 +286,22 @@ fn apply_field_options(src: &str, fields: &PackageFields) -> String {
         } else if let (Some(message), Some(caps)) = (&message, FIELD.captures(line)) {
             let name = &caps[1];
             let key = format!("{message}.{name}");
-            if let Some(json) = fields.json_names.get(&key) {
+            let json = fields.json_names.get(&key);
+            let emit = fields.emit_unpopulated.contains(&key);
+            if json.is_some() || emit {
                 let attrs = attribute_lines(&lines, i);
-                let text = lines[attrs.clone()].join("\n");
-                let text = RENAME
-                    .replace(&text, format!(r#"rename = "{json}""#))
-                    .into_owned();
-                let text = ALIAS
-                    .replace(&text, format!(r#"alias = "{name}""#))
-                    .into_owned();
+                let mut text = lines[attrs.clone()].join("\n");
+                if let Some(json) = json {
+                    text = RENAME
+                        .replace(&text, format!(r#"rename = "{json}""#))
+                        .into_owned();
+                    text = ALIAS
+                        .replace(&text, format!(r#"alias = "{name}""#))
+                        .into_owned();
+                }
+                if emit {
+                    text = SKIP_IF.replace(&text, "").into_owned();
+                }
                 out.truncate(out.len() - attrs.len());
                 out.extend(text.lines().map(str::to_string));
             }
@@ -644,26 +663,37 @@ mod tests {
     }
 
     #[test]
-    fn field_options_set_json_names() {
+    fn field_options_set_json_names_and_emit_unpopulated_fields() {
         let src = r#"pub struct Spec {
+    #[serde(
+        rename = "fields",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub fields: ::buffa::alloc::vec::Vec<Field>,
     #[serde(rename = "spec_id", alias = "specId")]
     pub spec_id: i32,
 }
 pub struct Other {
-    #[serde(rename = "spec_id", alias = "specId")]
-    pub spec_id: i32,
+    #[serde(rename = "fields", skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec")]
+    pub fields: ::buffa::alloc::vec::Vec<Field>,
 }
 "#;
         let fields = PackageFields {
             json_names: [("Spec.spec_id".to_string(), "specId".to_string())].into(),
+            emit_unpopulated: ["Spec.fields".to_string()].into(),
         };
         let out = apply_field_options(src, &fields);
         assert!(
             out.contains(r#"rename = "specId", alias = "spec_id""#),
             "{out}"
         );
-        // Only `Spec.spec_id` is renamed.
-        assert_eq!(out.matches(r#"rename = "specId""#).count(), 1, "{out}");
+        // Only `Spec.fields` is sent when empty.
+        assert_eq!(out.matches("skip_serializing_if").count(), 1, "{out}");
+        assert!(
+            out.contains("rename = \"fields\",\n        deserialize_with"),
+            "{out}"
+        );
     }
 
     #[test]

@@ -18,6 +18,7 @@ use quote::{format_ident, quote};
 use super::{doc_tokens, extract_type_ident, format_tokens};
 use crate::Result;
 use crate::codegen::{MethodHandler, Runtime, ServiceHandler};
+use crate::parsing::MessageField;
 use crate::parsing::types::BaseType;
 
 /// Generate client code for a service
@@ -133,17 +134,20 @@ pub fn client_method(
     let method_name = method.plan.base_method_ident();
     let input_type_ident = method.input_type();
     let http_method = format_ident!("{}", method.plan.http_method.to_lowercase());
-    let has_query_params = method.plan.query_parameters().next().is_some();
+    let has_query_params = method.plan.url_query_parameters().next().is_some();
     let url_formatting = generate_url_formatting(&method, has_query_params);
     let query_handling = generate_query_parameters(&method);
     let error_module = method.config.client_error_module();
     let result_type = method.result_type();
-    let request_ident =
-        if method.plan.formats_path_values() || has_query_params || method.plan.has_request_body {
-            format_ident!("request")
-        } else {
-            format_ident!("_request")
-        };
+    let request_ident = if method.plan.formats_path_values()
+        || has_query_params
+        || method.plan.has_request_body
+        || !method.plan.request_headers.is_empty()
+    {
+        format_ident!("request")
+    } else {
+        format_ident!("_request")
+    };
 
     // Path fields go in the URL, not the body: send a copy with them reset to their defaults.
     let path_fields: Vec<_> = if method.plan.has_request_body
@@ -158,7 +162,12 @@ pub fn client_method(
     } else {
         Vec::new()
     };
-    let (body_copy, body) = if path_fields.is_empty() {
+    let raw_body = method
+        .plan
+        .raw_request_body
+        .as_deref()
+        .map(crate::utils::field_ident);
+    let (body_copy, body) = if path_fields.is_empty() || raw_body.is_some() {
         (quote! {}, quote! { request })
     } else {
         let copy = quote! {
@@ -167,15 +176,40 @@ pub fn client_method(
         };
         (copy, quote! { &body })
     };
-    let body_handling = match (method.plan.has_request_body, form_body) {
-        (true, false) => quote! { .json(#body) },
-        (true, true) => quote! { .form(#body) },
-        (false, _) => quote! {},
+    let body_handling = match (raw_body, method.plan.has_request_body, form_body) {
+        (Some(field), _, _) => quote! {
+            .header("content-type", "application/octet-stream")
+            .body(request.#field.clone())
+        },
+        (None, true, false) => quote! { .json(#body) },
+        (None, true, true) => quote! { .form(#body) },
+        (None, false, _) => quote! {},
     };
 
-    let send = quote! { let response = self.client.#http_method(url)#body_handling.send().await?; };
+    let send = if method.plan.request_headers.is_empty() {
+        quote! { let response = self.client.#http_method(url)#body_handling.send().await?; }
+    } else {
+        let headers = method.plan.request_headers.iter().map(|(field, header)| {
+            let field_ident = crate::utils::field_ident(field);
+            match request_header_is_optional(&method, field) {
+                true => quote! {
+                    if let Some(ref value) = request.#field_ident {
+                        builder = builder.header(#header, value.as_str());
+                    }
+                },
+                false => {
+                    quote! { builder = builder.header(#header, request.#field_ident.as_str()); }
+                }
+            }
+        });
+        quote! {
+            let mut builder = self.client.#http_method(url)#body_handling;
+            #(#headers)*
+            let response = builder.send().await?;
+        }
+    };
     let read_response = match method.output_type() {
-        Some(_) => read_output(&method),
+        Some(output_type) => read_output(&method, &output_type)?,
         None if method.is_existence_check() => quote! { Ok(true) },
         None => quote! { Ok(()) },
     };
@@ -204,8 +238,19 @@ pub fn client_method(
     })
 }
 
+/// Whether the request field `field` is an `Option`.
+fn request_header_is_optional(method: &MethodHandler<'_>, field: &str) -> bool {
+    method
+        .plan
+        .query_parameters()
+        .any(|param| param.name == field && param.field_type.is_optional)
+}
+
 /// The statements that turn a successful `response` into the method's output.
-fn read_output(method: &MethodHandler<'_>) -> TokenStream {
+fn read_output(
+    method: &MethodHandler<'_>,
+    output_type: &proc_macro2::Ident,
+) -> Result<TokenStream> {
     let lenient = method.config.rest_client.ignore_unknown_enum_values
         && method.config.runtime == Runtime::Buffa;
     let options = lenient.then(|| {
@@ -219,12 +264,115 @@ fn read_output(method: &MethodHandler<'_>) -> TokenStream {
         }
     };
 
+    let header_fields = method.response_header_fields();
+    if method.plan.metadata.server_streaming {
+        if !header_fields.is_empty() {
+            return Err(crate::Error::Build(format!(
+                "method `{}` streams its output, so its output fields cannot come from response headers",
+                method.plan.handler_function_name
+            )));
+        }
+        let parse_line = from_slice(quote! { line });
+        return Ok(quote! {
+            let result = response.bytes().await?;
+            #options
+            result
+                .split(|byte| *byte == b'\n')
+                .filter(|line| !line.trim_ascii().is_empty())
+                .map(|line| -> Result<#output_type> { Ok(#parse_line?) })
+                .collect()
+        });
+    }
+
+    let assignments = header_fields
+        .iter()
+        .map(|field| header_assignment(method, field))
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(field) = &method.plan.raw_response_body {
+        let field_ident = crate::utils::field_ident(field);
+        if assignments.is_empty() {
+            return Ok(quote! {
+                Ok(#output_type {
+                    #field_ident: response.bytes().await?.into(),
+                    ..::core::default::Default::default()
+                })
+            });
+        }
+        return Ok(quote! {
+            let headers = response.headers().clone();
+            let mut output = #output_type {
+                #field_ident: response.bytes().await?.into(),
+                ..::core::default::Default::default()
+            };
+            #(#assignments)*
+            Ok(output)
+        });
+    }
+
     let parse = from_slice(quote! { &result });
-    quote! {
+    if header_fields.is_empty() {
+        return Ok(quote! {
+            let result = response.bytes().await?;
+            #options
+            Ok(#parse?)
+        });
+    }
+    Ok(quote! {
+        let headers = response.headers().clone();
         let result = response.bytes().await?;
         #options
-        Ok(#parse?)
+        let mut output: #output_type = if result.trim_ascii().is_empty() {
+            Default::default()
+        } else {
+            #parse?
+        };
+        #(#assignments)*
+        Ok(output)
+    })
+}
+
+/// Set an output field from its response header, when present and parsable.
+fn header_assignment(method: &MethodHandler<'_>, field: &MessageField) -> Result<TokenStream> {
+    let field_ident = crate::utils::field_ident(&field.name);
+    let header = field.response_header.as_deref().unwrap_or_default();
+    let ty = &field.unified_type;
+    let is_string = match ty.base_type {
+        BaseType::String => true,
+        BaseType::Int32
+        | BaseType::Int64
+        | BaseType::Bool
+        | BaseType::Float32
+        | BaseType::Float64 => false,
+        _ => {
+            return Err(crate::Error::Build(format!(
+                "field `{}` of the output of `{}` comes from a response header, so it must be a string, number or bool",
+                field.name, method.plan.handler_function_name
+            )));
+        }
+    };
+    if ty.is_repeated {
+        return Err(crate::Error::Build(format!(
+            "field `{}` of the output of `{}` comes from a response header, so it cannot be repeated",
+            field.name, method.plan.handler_function_name
+        )));
     }
+    let value = quote! { headers.get(#header).and_then(|value| value.to_str().ok()) };
+    Ok(match (is_string, ty.is_optional) {
+        (true, true) => quote! { output.#field_ident = #value.map(str::to_string); },
+        (true, false) => quote! {
+            if let Some(value) = #value {
+                output.#field_ident = value.to_string();
+            }
+        },
+        (false, true) => {
+            quote! { output.#field_ident = #value.and_then(|value| value.parse().ok()); }
+        }
+        (false, false) => quote! {
+            if let Some(value) = #value.and_then(|value| value.parse().ok()) {
+                output.#field_ident = value;
+            }
+        },
+    })
 }
 
 /// Generate URL formatting code that properly substitutes path parameters.
@@ -300,7 +448,7 @@ pub(crate) fn encode_path_value_fn() -> TokenStream {
 /// Generate query parameter handling code
 fn generate_query_parameters(method: &MethodHandler<'_>) -> proc_macro2::TokenStream {
     let mut param_assignments = Vec::new();
-    for param in method.plan.query_parameters() {
+    for param in method.plan.url_query_parameters() {
         let field_ident = crate::utils::field_ident(&param.name);
         let param_name = method.query_key(param);
         let field_type = &param.field_type;
