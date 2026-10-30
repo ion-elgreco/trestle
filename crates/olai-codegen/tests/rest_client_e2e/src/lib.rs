@@ -19,5 +19,19 @@ pub use codegen::*;
 /// Context type of the (unused) server config.
 pub struct Context;
 
+/// The token source of a `DemoClient(url)` without a token: the host `localhost` gets the
+/// token `defaulted`, `fail.invalid` fails, any other host gets none.
+pub async fn default_token_source(
+    base_url: &url::Url,
+) -> Result<Option<std::sync::Arc<dyn transport::TokenSource>>, transport::TokenError> {
+    match base_url.host_str() {
+        Some("localhost") => Ok(Some(std::sync::Arc::new(transport::StaticToken(
+            "defaulted".into(),
+        )))),
+        Some("fail.invalid") => Err("no default token".into()),
+        _ => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests;

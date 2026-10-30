@@ -700,6 +700,7 @@ fn rest_client_and_python_options_generate_valid_code() {
             keyword_only: true,
             public_modules: true,
             user_agent: Some("example-python".into()),
+            default_token_source: Some("example_client::default_token_source".into()),
         }),
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
@@ -762,6 +763,12 @@ fn rest_client_and_python_options_generate_valid_code() {
         "Python User-Agent missing"
     );
     assert!(bindings.contains("pub fn rt()"), "runtime missing");
+    assert!(
+        bindings.contains("token_provider")
+            && bindings.contains("pub struct RustTokenSource")
+            && bindings.contains("example_client::default_token_source"),
+        "token sources missing"
+    );
 
     let enums = std::fs::read_to_string(package.join("_enums.py")).unwrap();
     assert!(enums.contains("(enum.StrEnum):"), "{enums}");

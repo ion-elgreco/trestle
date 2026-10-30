@@ -257,6 +257,11 @@ pub struct PythonOptions {
     /// The `User-Agent` product of the Python client (`<product>/<binding crate version>`).
     /// Needs the `reqwest` transport.
     pub user_agent: Option<String>,
+    /// The Rust path of an `async fn(&Url) -> Result<Option<Arc<dyn TokenSource>>, TokenError>`
+    /// that the Python client calls for its token source when it gets neither `token` nor
+    /// `token_provider`, such as one that reads the identity of the environment. Needs the
+    /// `reqwest` transport.
+    pub default_token_source: Option<String>,
 }
 
 /// Where the generated pure-Python files go.

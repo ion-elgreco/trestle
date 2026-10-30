@@ -103,6 +103,13 @@ impl<'a> PyBackend<'a> {
                 .push(format_ident!("Py{}", service.client_type().to_string()));
         }
 
+        // The `TokenSource` class of the generated `reqwest` transport's bindings.
+        let token_source_export = first.config.uses_reqwest_transport().then(|| {
+            quote! {
+                #[pymodule_export]
+                use super::RustTokenSource;
+            }
+        });
         let full_name = &self.python.module;
         let (parent, name) = match full_name.rsplit_once('.') {
             Some((parent, name)) => (Some(parent), name),
@@ -148,6 +155,8 @@ impl<'a> PyBackend<'a> {
 
                 #[pymodule_export]
                 use super::#aggregate;
+
+                #token_source_export
 
                 #[pymodule_export]
                 use crate::codegen::error::{#(#exceptions),*};
@@ -333,16 +342,44 @@ impl BindingBackend for PyBackend<'_> {
         let reqwest_transport = services
             .first()
             .is_some_and(|s| s.config.uses_reqwest_transport());
+        // Without a token or a provider: the client crate's default source, when configured.
+        let default_source = match self
+            .python
+            .default_token_source
+            .as_deref()
+            .filter(|_| reqwest_transport)
+        {
+            Some(path) => {
+                let hook: syn::Path = syn::parse_str(path).map_err(|e| {
+                    crate::Error::Build(format!(
+                        "default_token_source `{path}` is not a Rust path: {e}"
+                    ))
+                })?;
+                quote! {{
+                    let source = py
+                        .detach(|| crate::codegen::runtime::rt().block_on(#hook(&base_url)))
+                        .map_err(|e| #py_error_type::from(#client_crate::error::Error::Token(e)))?;
+                    match source {
+                        Some(source) => {
+                            #aggregate_client_ident::new_with_token_source(base_url, source)
+                        }
+                        None => #aggregate_client_ident::new_unauthenticated(base_url),
+                    }
+                }}
+            }
+            None => quote! { #aggregate_client_ident::new_unauthenticated(base_url) },
+        };
         let constructor = if reqwest_transport {
             quote! {
                 /// A client of the API at `base_url`. `token`, when set, goes in every request as
-                /// the bearer token. `token_provider`, a callable, is asked for the token instead:
-                /// it returns the token, or a pair of the token and the time it expires, in
-                /// seconds since the epoch; a token with its expiry is kept until a minute
-                /// before it, a bare token is asked for at every request.
+                /// the bearer token. `token_provider` is asked for the token instead: a
+                /// `TokenSource`, or a callable that returns the token, or a pair of the token
+                /// and the time it expires, in seconds since the epoch; a token with its expiry
+                /// is kept until a minute before it, a bare token is asked for at every request.
                 #[new]
                 #[pyo3(signature = (base_url, token = None, token_provider = None))]
                 pub fn new(
+                    py: Python<'_>,
                     base_url: String,
                     token: Option<String>,
                     token_provider: Option<::pyo3::Py<::pyo3::PyAny>>,
@@ -357,11 +394,15 @@ impl BindingBackend for PyBackend<'_> {
                         (Some(token), None) => {
                             #aggregate_client_ident::new_with_token(base_url, token)
                         }
-                        (None, Some(provider)) => #aggregate_client_ident::new_with_token_source(
-                            base_url,
-                            ::std::sync::Arc::new(PyTokenSource::new(provider)),
-                        ),
-                        (None, None) => #aggregate_client_ident::new_unauthenticated(base_url),
+                        (None, Some(provider)) => {
+                            let source: ::std::sync::Arc<dyn #client_crate::transport::TokenSource> =
+                                match provider.bind(py).cast::<RustTokenSource>() {
+                                    Ok(source) => source.get().source.clone(),
+                                    Err(_) => ::std::sync::Arc::new(PyTokenSource::new(provider)),
+                                };
+                            #aggregate_client_ident::new_with_token_source(base_url, source)
+                        }
+                        (None, None) => #default_source,
                     };
                     #user_agent
                     Ok(Self { client })
@@ -386,6 +427,13 @@ impl BindingBackend for PyBackend<'_> {
         };
         let token_source = reqwest_transport.then(|| {
             quote! {
+                /// A token source made in Rust, for `token_provider=`. The binding crate makes
+                /// one from any `TokenSource` of the client crate.
+                #[pyclass(name = "TokenSource", frozen, #root_module_arg)]
+                pub struct RustTokenSource {
+                    pub(crate) source: ::std::sync::Arc<dyn #client_crate::transport::TokenSource>,
+                }
+
                 /// The bearer tokens of a `token_provider` callable: the token, or a
                 /// `(token, expires_at)` pair with the expiry in seconds since the epoch, kept
                 /// until a minute before it.
