@@ -45,7 +45,7 @@ pub(crate) fn package_files(
 ) -> Vec<(String, String)> {
     let python = config.python_options();
     let services: Vec<_> = plan.services.iter().collect();
-    let classes = model_conversions::ModelClasses::new(&services, metadata, python);
+    let classes = model_conversions::ModelClasses::new(&services, metadata);
     let mut files = Vec::new();
     if !classes.enums.is_empty() {
         files.push((
@@ -53,7 +53,7 @@ pub(crate) fn package_files(
             package::enums_py(metadata, &classes.enums),
         ));
     }
-    if let Some(module) = python.module.as_deref().filter(|_| python.public_modules) {
+    if python.public_modules {
         let handlers: Vec<_> = plan
             .services
             .iter()
@@ -73,7 +73,7 @@ pub(crate) fn package_files(
                 )
             });
         files.extend(package::public_modules(
-            module,
+            &python.module,
             &python.package.name,
             classes.public_names(),
             clients,
@@ -82,25 +82,15 @@ pub(crate) fn package_files(
     files
 }
 
-/// The `pyo3-stub-gen` attribute of a `#[pyclass]`.
-fn stub_class_attr() -> TokenStream {
-    quote! { #[::pyo3_stub_gen::derive::gen_stub_pyclass] }
-}
-
-/// The `pyo3-stub-gen` attribute of a `#[pymethods]`.
-fn stub_methods_attr() -> TokenStream {
-    quote! { #[::pyo3_stub_gen::derive::gen_stub_pymethods] }
-}
-
-/// The `module = "…",` argument of a `#[pyclass]` with [`PythonOptions::module`]: the module
-/// itself, or its submodule `segment`.
-fn module_arg(options: &PythonOptions, segment: Option<&str>) -> Option<TokenStream> {
-    let root = options.module.as_deref()?;
+/// The `module = "…",` argument of a `#[pyclass]`: [`PythonOptions::module`], or its submodule
+/// `segment`. The classes are defined outside the `#[pymodule]`, which sets it only for its own.
+fn module_arg(options: &PythonOptions, segment: Option<&str>) -> TokenStream {
+    let root = &options.module;
     let module = match segment {
         Some(segment) => format!("{root}.{segment}"),
-        None => root.to_string(),
+        None => root.clone(),
     };
-    Some(quote! { module = #module, })
+    quote! { module = #module, }
 }
 
 /// The Python submodule segment of a proto package (`a.catalogs.v1` → `catalogs`).

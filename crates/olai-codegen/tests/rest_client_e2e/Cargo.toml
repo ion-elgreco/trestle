@@ -11,7 +11,7 @@ publish = false
 
 [features]
 # The PyO3 wrappers of the models, used by the `py` crate.
-python = ["dep:pyo3", "dep:pyo3-stub-gen"]
+python = ["dep:pyo3"]
 
 [dependencies]
 buffa = { version = "0.7", features = ["json"] }
@@ -21,8 +21,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
-pyo3 = { version = "0.28", optional = true }
-pyo3-stub-gen = { version = "0.23", default-features = false, optional = true }
+pyo3 = { version = "0.30", features = ["experimental-inspect"], optional = true }
 
 [dev-dependencies]
 axum = "0.8"
@@ -36,4 +35,4 @@ protobuf = "3"
 
 [package.metadata.cargo-machete]
 # Used only by the generated code.
-ignored = ["buffa-types", "futures", "serde", "pyo3", "pyo3-stub-gen"]
+ignored = ["buffa-types", "futures", "serde", "pyo3"]

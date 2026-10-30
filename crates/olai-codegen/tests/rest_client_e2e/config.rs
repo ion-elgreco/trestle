@@ -110,7 +110,7 @@ fn demo_config(out: &Path) -> CodeGenConfig {
                     name: "demo".into(),
                 },
                 error_base_class: "DemoError".into(),
-                module: Some("demo._core".into()),
+                module: "demo._core".into(),
                 async_methods: true,
                 keyword_only: true,
                 public_modules: false,

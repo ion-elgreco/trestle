@@ -1,5 +1,5 @@
 //! The docstrings of the generated Python methods: the proto comment of the RPC with `Args:`
-//! and `Returns:` sections, which the bindings carry as `#[doc]` attributes for `pyo3-stub-gen`.
+//! and `Returns:` sections, which the bindings carry as `#[doc]` attributes for the stubs.
 
 use textwrap::{Options, fill, refill};
 

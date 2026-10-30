@@ -354,8 +354,8 @@ fn default_protocols() -> Vec<ClientProtocol> {
 /// Python (PyO3) client config.
 ///
 /// The generated API is frozen model classes with a Python-style `repr`, keyword constructors on
-/// the input models, `enum.StrEnum` enums (Python 3.11+) in `<package>/_enums.py`,
-/// `pyo3-stub-gen` annotations (the bindings crate writes the `.pyi`), a Tokio runtime that the
+/// the input models, `enum.StrEnum` enums (Python 3.11+) in `<package>/_enums.py`, a declarative
+/// `#[pymodule]` that PyO3's introspection writes the `.pyi` from, a Tokio runtime that the
 /// methods block on, and PyO3 exception classes for the client errors, which need
 /// `clients.rust.error_module`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -370,6 +370,9 @@ pub struct PythonClient {
     pub result_type: String,
     /// The pure-Python package that gets `_enums.py` and the `public_modules`. Required.
     pub package: PythonPackage,
+    /// The extension module (e.g. `my_pkg._core`); classes go in `<module>.<service>`.
+    /// Required.
+    pub module: String,
     /// Shape of the generated Python API. Every option is off by default.
     #[serde(default)]
     pub options: PythonOptions,
@@ -379,9 +382,6 @@ pub struct PythonClient {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PythonOptions {
-    /// The extension module (e.g. `my_pkg._core`); classes go in `<module>.<service>`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub module: Option<String>,
     /// Every client method also gets an `_async` twin that returns an `asyncio.Future`.
     #[serde(default)]
     pub async_methods: bool,
@@ -389,7 +389,7 @@ pub struct PythonOptions {
     #[serde(default)]
     pub keyword_only: bool,
     /// A public module `<package>/<service>.py` per submodule of `module`, re-exporting its
-    /// classes and enums. Needs `module`.
+    /// classes and enums.
     #[serde(default)]
     pub public_modules: bool,
     /// The `User-Agent` product of the Python client (`<product>/<binding crate version>`).
@@ -644,8 +644,8 @@ mod tests {
              \x20     package:\n\
              \x20       dir: python/client/demo\n\
              \x20       name: demo\n\
+             \x20     module: demo._core\n\
              \x20     options:\n\
-             \x20       module: demo._core\n\
              \x20       public_modules: true\n";
         let mut cfg: TrestleConfig = serde_yaml::from_str(yaml).unwrap();
         let g = &cfg.generate;
@@ -667,16 +667,8 @@ mod tests {
         );
         let python = g.clients.python.as_ref().unwrap();
         assert_eq!(python.package.name, "demo");
-        let py = &python.options;
-        assert!(py.public_modules);
-        assert_eq!(py.module.as_deref(), Some("demo._core"));
-        assert!(cfg.validate(false).is_ok());
-
-        // `public_modules` builds on `module`.
-        let options = &mut cfg.generate.clients.python.as_mut().unwrap().options;
-        options.module = None;
-        assert!(cfg.validate(false).is_err());
-        cfg.generate.clients.python.as_mut().unwrap().options.module = Some("demo._core".into());
+        assert_eq!(python.module, "demo._core");
+        assert!(python.options.public_modules);
         assert!(cfg.validate(false).is_ok());
 
         // The Python exception classes raise the errors of the client error module.

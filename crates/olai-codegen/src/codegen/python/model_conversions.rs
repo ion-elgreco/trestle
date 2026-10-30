@@ -65,7 +65,7 @@ pub(crate) fn generate_pyo3_impls(
     let runtime = config.runtime;
     let options = config.python_options();
     let services: Vec<&ServicePlan> = plan.services.iter().collect();
-    let classes = ModelClasses::new(&services, metadata, options);
+    let classes = ModelClasses::new(&services, metadata);
     let ctx = Ctx {
         options,
         classes: &classes,
@@ -160,9 +160,64 @@ pub(crate) fn json_from_py(
     }
 }
 
-/// Conversions between Python objects and buffa's `google.protobuf.Value`/`Struct`/`ListValue`.
+/// Conversions between Python objects and buffa's `google.protobuf.Value`/`Struct`/`ListValue`,
+/// and `PyJson`, the typed return value of a JSON getter.
 fn json_conversions() -> TokenStream {
     quote! {
+        /// The type hint of a JSON getter.
+        pub trait JsonTypeHint {
+            /// The hint.
+            const HINT: ::pyo3::inspect::PyStaticExpr;
+        }
+
+        /// `typing.Any`.
+        pub struct JsonAny;
+
+        impl JsonTypeHint for JsonAny {
+            const HINT: ::pyo3::inspect::PyStaticExpr = ::pyo3::type_hint_identifier!("typing", "Any");
+        }
+
+        /// `dict[str, V]`.
+        pub struct JsonDict<V>(::core::marker::PhantomData<V>);
+
+        impl<V: JsonTypeHint> JsonTypeHint for JsonDict<V> {
+            const HINT: ::pyo3::inspect::PyStaticExpr = ::pyo3::type_hint_subscript!(
+                ::pyo3::type_hint_identifier!("builtins", "dict"),
+                ::pyo3::type_hint_identifier!("builtins", "str"),
+                V::HINT
+            );
+        }
+
+        /// `list[V]`.
+        pub struct JsonList<V>(::core::marker::PhantomData<V>);
+
+        impl<V: JsonTypeHint> JsonTypeHint for JsonList<V> {
+            const HINT: ::pyo3::inspect::PyStaticExpr = ::pyo3::type_hint_subscript!(
+                ::pyo3::type_hint_identifier!("builtins", "list"),
+                V::HINT
+            );
+        }
+
+        /// The Python object of a JSON getter, typed `H` in the stubs.
+        pub struct PyJson<H>(::pyo3::Py<::pyo3::PyAny>, ::core::marker::PhantomData<H>);
+
+        impl<H> PyJson<H> {
+            fn new(object: ::pyo3::Py<::pyo3::PyAny>) -> Self {
+                Self(object, ::core::marker::PhantomData)
+            }
+        }
+
+        impl<'py, H: JsonTypeHint> ::pyo3::IntoPyObject<'py> for PyJson<H> {
+            type Target = ::pyo3::PyAny;
+            type Output = ::pyo3::Bound<'py, ::pyo3::PyAny>;
+            type Error = ::core::convert::Infallible;
+            const OUTPUT_TYPE: ::pyo3::inspect::PyStaticExpr = H::HINT;
+
+            fn into_pyobject(self, py: ::pyo3::Python<'py>) -> ::core::result::Result<Self::Output, Self::Error> {
+                ::core::result::Result::Ok(self.0.into_bound(py))
+            }
+        }
+
         /// A JSON value as a Python object: `None`, `bool`, `int` for a whole number, `float`,
         /// `str`, `list` or `dict`.
         pub fn json_value_to_py(
@@ -294,26 +349,22 @@ pub(crate) fn python_class_name(fq_name: &str) -> String {
     extract_qualified_type_name(fq_name)
 }
 
-/// The models that the bindings wrap, shared by `pyo3_impls.rs`, `register` and `_enums.py`.
+/// The models that the bindings wrap, shared by `pyo3_impls.rs`, the `#[pymodule]` and
+/// `_enums.py`.
 pub(crate) struct ModelClasses<'a> {
     /// The project's own packages (those of the plan's services). Types of other packages
     /// (google, gnostic, ...) get no wrapper: orphan rule, and no in-crate path.
     packages: BTreeSet<&'a str>,
     /// The project enums that have values, sorted by name.
     pub(crate) enums: Vec<&'a String>,
-    /// The project messages, sorted by name; with [`PythonOptions::module`], only the ones
-    /// Python sees (see [`surfaced_messages`]).
+    /// The project messages that Python sees (see [`surfaced_messages`]), sorted by name.
     messages: Vec<&'a String>,
     /// Messages that a request takes; see [`input_messages`].
     inputs: BTreeSet<String>,
 }
 
 impl<'a> ModelClasses<'a> {
-    pub(crate) fn new(
-        services: &[&'a ServicePlan],
-        metadata: &'a CodeGenMetadata,
-        options: &PythonOptions,
-    ) -> Self {
+    pub(crate) fn new(services: &[&'a ServicePlan], metadata: &'a CodeGenMetadata) -> Self {
         let packages: BTreeSet<&str> = services.iter().map(|s| s.package.as_str()).collect();
         let mut enums: Vec<&String> = metadata
             .enums
@@ -325,17 +376,11 @@ impl<'a> ModelClasses<'a> {
             .collect();
         enums.sort();
         let inputs = input_messages(services, metadata);
-        let surfaced = options
-            .module
-            .is_some()
-            .then(|| surfaced_messages(services, metadata, &inputs));
+        let surfaced = surfaced_messages(services, metadata, &inputs);
         let mut messages: Vec<&String> = metadata
             .messages
             .keys()
-            .filter(|name| {
-                type_rust_path(name, &packages).is_some()
-                    && surfaced.as_ref().is_none_or(|s| s.contains(*name))
-            })
+            .filter(|name| type_rust_path(name, &packages).is_some() && surfaced.contains(*name))
             .collect();
         messages.sort();
         Self {
@@ -471,7 +516,10 @@ impl Ctx<'_> {
     /// The `module = "…",` argument of `#[pyclass]` for a type, with its trailing comma.
     fn module_arg(&self, fq_name: &str) -> Option<TokenStream> {
         let package = package_of(fq_name, &self.classes.packages)?;
-        super::module_arg(self.options, Some(super::package_segment(package)))
+        Some(super::module_arg(
+            self.options,
+            Some(super::package_segment(package)),
+        ))
     }
 
     /// Whether the class of message `fq_name` gets a keyword constructor: the models that a
@@ -548,32 +596,6 @@ fn str_enum_wrapper(
         ),
     };
 
-    let stub_impl = {
-        let output = format!("_enums.{class_name}");
-        let input = format!("{output} | str");
-        quote! {
-            impl ::pyo3_stub_gen::PyStubType for #wrapper {
-                fn type_output() -> ::pyo3_stub_gen::TypeInfo {
-                    ::pyo3_stub_gen::TypeInfo {
-                        name: #output.to_string(),
-                        source_module: None,
-                        import: ::std::collections::HashSet::from([#enums_module.into()]),
-                        type_refs: ::std::collections::HashMap::new(),
-                    }
-                }
-
-                fn type_input() -> ::pyo3_stub_gen::TypeInfo {
-                    ::pyo3_stub_gen::TypeInfo {
-                        name: #input.to_string(),
-                        source_module: None,
-                        import: ::std::collections::HashSet::from([#enums_module.into()]),
-                        type_refs: ::std::collections::HashMap::new(),
-                    }
-                }
-            }
-        }
-    };
-
     let doc = format!(" A member of `{enums_module}.{class_name}`, or its name.");
     Ok(quote! {
         #[doc = #doc]
@@ -604,6 +626,14 @@ fn str_enum_wrapper(
 
         impl<'a, 'py> ::pyo3::FromPyObject<'a, 'py> for #wrapper {
             type Error = ::pyo3::PyErr;
+            const INPUT_TYPE: ::pyo3::inspect::PyStaticExpr = {
+                // The macro calls itself without a path.
+                use ::pyo3::type_hint_union;
+                type_hint_union!(
+                    ::pyo3::type_hint_identifier!(#enums_module, #class_name),
+                    ::pyo3::type_hint_identifier!("builtins", "str")
+                )
+            };
 
             fn extract(obj: ::pyo3::Borrowed<'a, 'py, ::pyo3::PyAny>) -> ::pyo3::PyResult<Self> {
                 let name: ::pyo3::pybacked::PyBackedStr = ::pyo3::types::PyAnyMethods::extract(&*obj)?;
@@ -623,6 +653,8 @@ fn str_enum_wrapper(
             type Target = ::pyo3::PyAny;
             type Output = ::pyo3::Bound<'py, ::pyo3::PyAny>;
             type Error = ::pyo3::PyErr;
+            const OUTPUT_TYPE: ::pyo3::inspect::PyStaticExpr =
+                ::pyo3::type_hint_identifier!(#enums_module, #class_name);
 
             fn into_pyobject(self, py: ::pyo3::Python<'py>) -> ::pyo3::PyResult<Self::Output> {
                 static CLASS: ::pyo3::sync::PyOnceLock<::pyo3::Py<::pyo3::types::PyType>> =
@@ -634,8 +666,6 @@ fn str_enum_wrapper(
                 ::pyo3::types::PyAnyMethods::getattr(class.as_any(), name)
             }
         }
-
-        #stub_impl
     })
 }
 
@@ -728,13 +758,10 @@ fn message_wrapper(
         });
 
     let module_arg = ctx.module_arg(fq_name);
-    let stub_class = super::stub_class_attr();
-    let stub_methods = super::stub_methods_attr();
     let doc = doc_tokens(info.documentation.as_deref());
 
     Ok(quote! {
         #doc
-        #stub_class
         // `from_py_object`: these wrappers are `Clone`, and pyo3 0.28 made the auto
         // `FromPyObject` derive for `Clone` `#[pyclass]` types opt-in. Keep the pre-0.28
         // behavior (derive it) explicitly so Python callers can still pass a wrapper into
@@ -744,7 +771,6 @@ fn message_wrapper(
         pub struct #wrapper(pub #inner);
 
         #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-        #stub_methods
         #[::pyo3::pymethods]
         impl #wrapper {
             #ctor
@@ -881,17 +907,6 @@ struct FieldAccessor {
 }
 
 impl FieldAccessor {
-    /// The getter function name. A raw identifier (`r#type`) becomes `get_type`, as PyO3 drops
-    /// the `get_` prefix but pyo3-stub-gen would keep the `r#`.
-    fn getter_ident(&self) -> proc_macro2::Ident {
-        let name = syn::ext::IdentExt::unraw(&self.ident).to_string();
-        if self.ident == name {
-            self.ident.clone()
-        } else {
-            format_ident!("get_{name}")
-        }
-    }
-
     fn new(
         field: &MessageField,
         runtime: Runtime,
@@ -935,68 +950,66 @@ impl FieldAccessor {
         }
     }
 
-    /// The stub type of a free-form JSON field.
-    fn json_stub_type(&self, json: JsonType) -> String {
-        let item = match json {
-            JsonType::Value => "typing.Any",
-            JsonType::Struct => "dict[str, typing.Any]",
-            JsonType::ListValue => "list[typing.Any]",
-        };
-        if self.ty.is_repeated {
-            format!("list[{item}]")
-        } else if matches!(self.ty.base_type, BaseType::Map(..)) {
-            format!("dict[str, {item}]")
-        } else if json == JsonType::Value {
-            item.to_string()
-        } else {
-            format!("typing.Optional[{item}]")
-        }
-    }
-
-    /// The `#[getter]` of a free-form JSON field, which returns a plain Python object.
+    /// The `#[getter]` of a free-form JSON field, which returns a plain Python object typed by
+    /// a [`json_conversions`] hint: `typing.Any`, `dict[str, typing.Any]` or `list[typing.Any]`,
+    /// in a `list` or `dict` for a repeated or map field.
     fn json_getter(&self, json: JsonType) -> TokenStream {
         let ident = &self.ident;
-        let getter = self.getter_ident();
         let doc = doc_tokens(self.documentation.as_deref());
         let to_py = format_ident!("json_{}_to_py", json.fn_suffix());
-        let any = quote! { ::pyo3::Py<::pyo3::PyAny> };
+        let item = match json {
+            JsonType::Value => quote! { JsonAny },
+            JsonType::Struct => quote! { JsonDict<JsonAny> },
+            JsonType::ListValue => quote! { JsonList<JsonAny> },
+        };
         let (ret, body) = if self.ty.is_repeated {
             (
-                any,
+                quote! { PyJson<JsonList<#item>> },
                 quote! {
                     let items = self.0.#ident
                         .iter()
                         .map(|value| #to_py(py, value))
                         .collect::<::pyo3::PyResult<::std::vec::Vec<_>>>()?;
-                    ::core::result::Result::Ok(::pyo3::types::PyList::new(py, items)?.into_any().unbind())
+                    ::core::result::Result::Ok(PyJson::new(
+                        ::pyo3::types::PyList::new(py, items)?.into_any().unbind(),
+                    ))
                 },
             )
         } else if matches!(self.ty.base_type, BaseType::Map(..)) {
             (
-                any,
+                quote! { PyJson<JsonDict<#item>> },
                 quote! {
                     let dict = ::pyo3::types::PyDict::new(py);
                     for (key, value) in &self.0.#ident {
                         ::pyo3::types::PyDictMethods::set_item(&dict, key, #to_py(py, value)?)?;
                     }
-                    ::core::result::Result::Ok(dict.into_any().unbind())
+                    ::core::result::Result::Ok(PyJson::new(dict.into_any().unbind()))
+                },
+            )
+        } else if json == JsonType::Value {
+            // A JSON value is `typing.Any`, `None` included.
+            (
+                quote! { PyJson<#item> },
+                quote! {
+                    let value = self.0.#ident.as_option().map(|value| #to_py(py, value)).transpose()?;
+                    ::core::result::Result::Ok(PyJson::new(value.unwrap_or_else(|| py.None())))
                 },
             )
         } else {
             (
-                quote! { ::core::option::Option<#any> },
-                quote! { self.0.#ident.as_option().map(|value| #to_py(py, value)).transpose() },
+                quote! { ::core::option::Option<PyJson<#item>> },
+                quote! {
+                    self.0.#ident
+                        .as_option()
+                        .map(|value| #to_py(py, value).map(PyJson::new))
+                        .transpose()
+                },
             )
-        };
-        let repr = self.json_stub_type(json);
-        let stub_type = quote! {
-            #[gen_stub(override_return_type(type_repr = #repr, imports = ("typing")))]
         };
         quote! {
             #doc
-            #stub_type
             #[getter]
-            fn #getter(&self, py: ::pyo3::Python<'_>) -> ::pyo3::PyResult<#ret> {
+            fn #ident(&self, py: ::pyo3::Python<'_>) -> ::pyo3::PyResult<#ret> {
                 #body
             }
         }
@@ -1085,7 +1098,7 @@ impl FieldAccessor {
         if let Some(json) = self.json {
             return self.json_getter(json);
         }
-        let getter = self.getter_ident();
+        let ident = &self.ident;
         let (ret, body) = match self.ty.is_singular_bytes() {
             true => self.bytes_getter(),
             false => (self.py_type(), self.read_expr()),
@@ -1094,7 +1107,7 @@ impl FieldAccessor {
         quote! {
             #doc
             #[getter]
-            fn #getter(&self) -> #ret {
+            fn #ident(&self) -> #ret {
                 #body
             }
         }

@@ -162,8 +162,9 @@ overrides the style per proto package.
 ## Python API
 
 `BindingsConfig::python` (`clients.python` in `trestle.yaml`) shapes the PyO3 API. The bindings
-crate depends on `pyo3-stub-gen` and `tokio`, and the Rust client needs the `error_module` above:
-the Python exception classes raise its errors.
+crate and the models crate depend on `pyo3` 0.30 with the `experimental-inspect` feature, the
+bindings crate also on `tokio`, and the Rust client needs the `error_module` above: the Python
+exception classes raise its errors.
 
 The generated API:
 
@@ -172,24 +173,28 @@ The generated API:
 - Enums are `enum.StrEnum` classes (Python 3.11+) in `<package>/_enums.py`; parameters take a
   member or a name. The zero `*_UNSPECIFIED` value is not a member; a field that holds it reads
   as `None`.
-- The classes and methods carry `pyo3-stub-gen` annotations, with the proto comments as
-  docstrings; the bindings crate writes the `.pyi` from them.
+- The extension module is a declarative `#[pymodule]`, `codegen::extension_module`, with the
+  proto comments as docstrings. PyO3's introspection writes the `.pyi` from the built library:
+  `maturin generate-stubs` (maturin 1.16+), or the `pyo3-introspection` crate. The module
+  also has `__version__`, the version of the bindings crate. Its init puts the
+  submodules in `sys.modules`; for a module made with `wrap_pymodule!`, call
+  `codegen::add_submodules_to_sys_modules`.
 - `codegen/error.rs` holds the PyO3 exception classes: a base class (`error_base_class`;
   `bindings.error_base_class` in `trestle.yaml`) with `message`, `code`, `status` and `details`,
   and one subclass per kind of HTTP error status.
 - The methods block on the Tokio runtime of `codegen/runtime.rs` (`rt()`, made on first use; it
-  panics in a forked child). With `async_methods`, `register` installs it in
+  panics in a forked child). With `async_methods`, the module installs it in
   `pyo3-async-runtimes`.
 
 | Option | Effect |
 |---|---|
 | `package` | Where `_enums.py` and the public modules go: `{ dir, name }`. Required. |
-| `module` | Classes go in `<module>.<service>`, the root client in `<module>`; `register(module)` adds them all. Request messages get no class. |
+| `module` | The extension module (e.g. `my_pkg._core`). Classes go in `<module>.<service>`, the root client and the exceptions in `<module>`. Request messages get no class. Required. |
 | `async_methods` | Each method gets a `<name>_async` twin that returns an `asyncio.Future` (needs `pyo3-async-runtimes`). |
 | `keyword_only` | Optional parameters are keyword-only. |
-| `public_modules` | A module `<package>/<service>.py` per submodule of `module`, re-exporting its classes and enums. Needs `module`. |
+| `public_modules` | A module `<package>/<service>.py` per submodule of `module`, re-exporting its classes and enums. |
 
-In `trestle.yaml`, `package` sits under `clients.python` and the rest under
+In `trestle.yaml`, `package` and `module` sit under `clients.python` and the rest under
 `clients.python.options`. `tests/rest_client_e2e` runs a client and Python bindings with all of
 these against a server.
 

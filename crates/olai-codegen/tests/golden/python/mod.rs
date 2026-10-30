@@ -20,13 +20,11 @@ use crate::codegen::catalog::PyCatalogClient;
 use crate::codegen::schema::PySchemaClient;
 
 /// A client of the API at one base URL.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[pyclass(name = "ExampleClient")]
+#[pyclass(name = "ExampleClient", module = "example._core")]
 pub struct PyExampleClient {
     pub(crate) client: ExampleClient,
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[pymethods]
 impl PyExampleClient {
     /// A client of the API at `base_url`. `token`, when set, goes in every
@@ -342,47 +340,81 @@ impl PyExampleClient {
     }
 }
 
-/// Add the generated classes to the extension module `module`.
-pub fn register(
+/// The extension module, as Python imports it.
+pub const CORE_MODULE: &str = "example._core";
+/// The submodules of the extension module.
+const SUBMODULES: &[&str] = &["catalog", "schemas", "tags"];
+/// The extension module `example._core`.
+#[::pyo3::pymodule]
+#[pyo3(name = "_core", module = "example")]
+pub mod extension_module {
+    use ::pyo3::prelude::*;
+
+    /// The version of the bindings crate.
+    #[pymodule_export]
+    #[allow(non_upper_case_globals)]
+    const __version__: &str = env!("CARGO_PKG_VERSION");
+    #[pymodule_export]
+    use super::PyExampleClient;
+
+    #[pymodule_export]
+    use crate::codegen::error::{
+        ExampleError, BadRequestError, UnauthenticatedError, PermissionDeniedError,
+        NotFoundError, ConflictError, RateLimitError, ServerError,
+    };
+
+    /// The classes of the `catalog` API.
+    #[pymodule]
+    pub mod catalog {
+        #[pymodule_export]
+        use super::super::{
+            PyAzureConfig, PyCatalog, PyCatalogStatus, PyCatalogToken,
+            PyDeleteCatalogResponse, PyListByTagsResponse, PyListCatalogsResponse,
+            PyS3Config, PyStorageConfig, PyCatalogClient,
+        };
+    }
+
+    /// The classes of the `schemas` API.
+    #[pymodule]
+    pub mod schemas {
+        #[pymodule_export]
+        use super::super::{
+            PyDeleteSchemaResponse, PyListSchemasResponse, PySchema, PySchemaClient,
+        };
+    }
+
+    /// The classes of the `tags` API.
+    #[pymodule]
+    pub mod tags {
+        #[pymodule_export]
+        use super::super::{
+            PyDeleteTagAssignmentResponse, PyListTagAssignmentsResponse, PyTagAssignment,
+        };
+    }
+
+    /// Put the submodules in `sys.modules`. The import system puts the module there
+    /// before it runs this. Not handed the module, so the stubs still describe the
+    /// module in full.
+    #[pymodule_init]
+    fn init(py: Python<'_>) -> PyResult<()> {
+        let modules = py.import("sys")?.getattr("modules")?;
+        match modules.get_item(super::CORE_MODULE) {
+            Ok(module) => super::add_submodules_to_sys_modules(module.cast()?),
+            Err(_) => Ok(()),
+        }
+    }
+}
+
+/// Put the submodules of the extension module `module` in `sys.modules`, so that
+/// `import <module>.<submodule>` finds them. The module does this on import; call it
+/// for a module made otherwise, such as with `wrap_pymodule!`.
+pub fn add_submodules_to_sys_modules(
     module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>,
 ) -> ::pyo3::PyResult<()> {
-    crate::codegen::error::add_exceptions(module)?;
-    module.add_class::<PyExampleClient>()?;
-    module.add_class::<PyAzureConfig>()?;
-    module.add_class::<PyCatalog>()?;
-    module.add_class::<PyCatalogStatus>()?;
-    module.add_class::<PyCatalogToken>()?;
-    module.add_class::<PyCreateCatalogRequest>()?;
-    module.add_class::<PyDeleteCatalogRequest>()?;
-    module.add_class::<PyDeleteCatalogResponse>()?;
-    module.add_class::<PyGenerateCatalogTokenRequest>()?;
-    module.add_class::<PyGetCatalogRequest>()?;
-    module.add_class::<PyGetCatalogStatusRequest>()?;
-    module.add_class::<PyListByCatalogTypeRequest>()?;
-    module.add_class::<PyListByTagsRequest>()?;
-    module.add_class::<PyListByTagsResponse>()?;
-    module.add_class::<PyListCatalogsRequest>()?;
-    module.add_class::<PyListCatalogsResponse>()?;
-    module.add_class::<PyS3Config>()?;
-    module.add_class::<PyStorageConfig>()?;
-    module.add_class::<PyUpdateCatalogRequest>()?;
-    module.add_class::<PyCatalogClient>()?;
-    module.add_class::<PyCreateSchemaRequest>()?;
-    module.add_class::<PyDeleteSchemaRequest>()?;
-    module.add_class::<PyDeleteSchemaResponse>()?;
-    module.add_class::<PyGetSchemaRequest>()?;
-    module.add_class::<PyListSchemasRequest>()?;
-    module.add_class::<PyListSchemasResponse>()?;
-    module.add_class::<PySchema>()?;
-    module.add_class::<PyUpdateSchemaRequest>()?;
-    module.add_class::<PySchemaClient>()?;
-    module.add_class::<PyCreateTagAssignmentRequest>()?;
-    module.add_class::<PyDeleteTagAssignmentRequest>()?;
-    module.add_class::<PyDeleteTagAssignmentResponse>()?;
-    module.add_class::<PyGetTagAssignmentRequest>()?;
-    module.add_class::<PyListTagAssignmentsRequest>()?;
-    module.add_class::<PyListTagAssignmentsResponse>()?;
-    module.add_class::<PyTagAssignment>()?;
-    module.add_class::<PyTouchTagAssignmentRequest>()?;
+    let modules = module.py().import("sys")?.getattr("modules")?;
+    let name = module.name()?;
+    for submodule in SUBMODULES {
+        modules.set_item(format!("{name}.{submodule}"), module.getattr(*submodule)?)?;
+    }
     Ok(())
 }

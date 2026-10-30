@@ -66,7 +66,7 @@ fn make_test_config(
                     name: "example".to_string(),
                 },
                 error_base_class: "ExampleError".to_string(),
-                module: None,
+                module: "example._core".into(),
                 async_methods: false,
                 keyword_only: false,
                 public_modules: false,

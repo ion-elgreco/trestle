@@ -229,12 +229,12 @@ pub struct BindingsConfig {
 ///
 /// The model classes are frozen, `eq`, with a Python-style `repr`, and only the models that a
 /// request takes get a keyword constructor. Enums are `enum.StrEnum` classes (Python 3.11+) in
-/// `<package>/_enums.py`, without the zero `*_UNSPECIFIED` member. The classes and methods are
-/// annotated for `pyo3-stub-gen`, with the proto comments as docs; the bindings crate writes the
-/// `.pyi` with it. The methods block on the Tokio runtime of the generated `codegen/runtime.rs`
-/// (needs `tokio`), which `register` also installs for the `_async` methods. Client errors raise
-/// the PyO3 exception classes of the generated `codegen/error.rs`, which needs
-/// [`RestClientOptions::error_module`].
+/// `<package>/_enums.py`, without the zero `*_UNSPECIFIED` member. The extension module is a
+/// declarative `#[pymodule]` with the proto comments as docs, so PyO3's introspection
+/// (`experimental-inspect`) writes the `.pyi`. The methods block on the Tokio runtime of the
+/// generated `codegen/runtime.rs` (needs `tokio`), which the module also installs for the
+/// `_async` methods. Client errors raise the PyO3 exception classes of the generated
+/// `codegen/error.rs`, which needs [`RestClientOptions::error_module`].
 #[derive(Debug, Clone)]
 pub struct PythonOptions {
     /// The pure-Python package that gets `_enums.py` and the public modules.
@@ -242,17 +242,17 @@ pub struct PythonOptions {
     /// Name of the base exception class (e.g. `MyServiceError`): the class with `message`,
     /// `code`, `status` and `details` that the subclasses per kind of HTTP error status extend.
     pub error_base_class: String,
-    /// The extension module (e.g. `my_pkg._core`). Classes of a package `a.<service>.v1` go in
-    /// `<module>.<service>`, the root client in `<module>`; `register` creates the submodules.
-    /// When `None`, `register` adds every class to one module.
-    pub module: Option<String>,
+    /// The extension module (e.g. `my_pkg._core`): the generated `#[pymodule]`. Classes of a
+    /// package `a.<service>.v1` go in the submodule `<module>.<service>`, the root client and
+    /// the exceptions in `<module>`.
+    pub module: String,
     /// Every client method also gets a `<name>_async` twin returning an `asyncio.Future`. Needs
     /// `pyo3-async-runtimes` with `tokio-runtime`.
     pub async_methods: bool,
     /// Optional parameters are keyword-only; constructors take `REQUIRED` fields positionally.
     pub keyword_only: bool,
     /// Write `<package>/<service>.py` per submodule of [`module`](Self::module), re-exporting
-    /// its classes and enums. Needs [`module`](Self::module).
+    /// its classes and enums.
     pub public_modules: bool,
     /// The `User-Agent` product of the Python client (`<product>/<binding crate version>`).
     /// Needs the `reqwest` transport.
@@ -580,9 +580,6 @@ impl CodeGenConfig {
                     "PythonOptions::user_agent",
                     "the generated `reqwest` transport",
                 );
-            }
-            if python.public_modules && python.module.is_none() {
-                return needs("PythonOptions::public_modules", "`PythonOptions::module`");
             }
         }
         if self.rest_client.json_int64_as_number

@@ -1,12 +1,12 @@
 //! The generated `codegen/runtime.rs` of the Python bindings: the Tokio runtime that the methods
-//! block on, and that `register` installs for the `_async` methods.
+//! block on, and that the extension module installs for the `_async` methods.
 
 use quote::quote;
 
 use crate::codegen::format_tokens_static;
 
-/// The `runtime.rs` file. With `async_methods`, it also has the `init_async_runtime` that
-/// `register` calls.
+/// The `runtime.rs` file. With `async_methods`, it also has the `init_async_runtime` that the
+/// extension module calls.
 pub(crate) fn generate(async_methods: bool) -> String {
     let init_async = async_methods.then(|| {
         quote! {

@@ -105,7 +105,7 @@ fn main() {
                     name: "demo".into(),
                 },
                 error_base_class: "DemoError".into(),
-                module: None,
+                module: "demo._core".into(),
                 async_methods: false,
                 keyword_only: false,
                 public_modules: false,

@@ -74,18 +74,18 @@ impl<'a> PyBackend<'a> {
         Self::from_service(services.first().expect("python output has a service"))
     }
 
-    /// The `register` function that adds the generated classes to the extension module. With
-    /// [`PythonOptions::module`], the classes of each proto package go in a submodule
-    /// (`register_submodule!` also puts it in `sys.modules`); otherwise all go in the module.
-    fn register_fn(&self, services: &[&ServiceHandler<'_>], aggregate: &Ident) -> TokenStream {
+    /// The extension module [`PythonOptions::module`]: a declarative `#[pymodule]`, so that
+    /// PyO3's introspection sees every class. It holds the root client and the exceptions; the
+    /// classes of each proto package go in a submodule, which its init also puts in
+    /// `sys.modules`.
+    fn extension_module(&self, services: &[&ServiceHandler<'_>], aggregate: &Ident) -> TokenStream {
         let Some(first) = services.first() else {
             return quote! {};
         };
         // Classes per package segment: the model wrappers, then the scoped clients.
         let mut groups: BTreeMap<&str, Vec<Ident>> = BTreeMap::new();
         let plans: Vec<_> = services.iter().map(|s| s.plan).collect();
-        let classes =
-            super::model_conversions::ModelClasses::new(&plans, first.metadata, self.python);
+        let classes = super::model_conversions::ModelClasses::new(&plans, first.metadata);
         for (segment, wrapper) in classes.pyclasses() {
             groups.entry(segment).or_default().push(wrapper);
         }
@@ -96,74 +96,87 @@ impl<'a> PyBackend<'a> {
                 .push(format_ident!("Py{}", service.client_type().to_string()));
         }
 
-        let (helpers, body) = match &self.python.module {
-            Some(root) => {
-                let children = groups.iter().map(|(segment, classes)| {
-                    quote! {
-                        register_submodule!(module, #segment, [#(#classes),*])?;
-                    }
-                });
-                // A placeholder; `REGISTER_SUBMODULE_MACRO` replaces it after formatting.
-                let helpers = quote! {
-                    /// The extension module, as Python imports it.
-                    pub const CORE_MODULE: &str = #root;
-
-                    macro_rules! register_submodule { () => {}; }
-                };
-                let body = quote! {
-                    module.add_class::<#aggregate>()?;
-                    #(#children)*
-                };
-                (helpers, body)
-            }
-            None => {
-                let classes = groups.values().flatten();
-                let body = quote! {
-                    module.add_class::<#aggregate>()?;
-                    #(module.add_class::<#classes>()?;)*
-                };
-                (quote! {}, body)
-            }
+        let full_name = &self.python.module;
+        let (parent, name) = match full_name.rsplit_once('.') {
+            Some((parent, name)) => (Some(parent), name),
+            None => (None, full_name.as_str()),
         };
+        let module_option = parent.map(|parent| quote! { , module = #parent });
+        let module_doc = format!(" The extension module `{full_name}`.");
+        let exceptions = super::errors::class_idents(self.python);
+        let segments = groups.keys();
+        let submodules = groups.iter().map(|(segment, classes)| {
+            let ident = crate::utils::field_ident(segment);
+            let doc = format!(" The classes of the `{segment}` API.");
+            quote! {
+                #[doc = #doc]
+                #[pymodule]
+                pub mod #ident {
+                    #[pymodule_export]
+                    use super::super::{#(#classes),*};
+                }
+            }
+        });
         let init_async = self
             .python
             .async_methods
             .then(|| quote! { crate::codegen::runtime::init_async_runtime(); });
         quote! {
-            #helpers
+            /// The extension module, as Python imports it.
+            pub const CORE_MODULE: &str = #full_name;
 
-            /// Add the generated classes to the extension module `module`.
-            pub fn register(module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>) -> ::pyo3::PyResult<()> {
-                #init_async
-                crate::codegen::error::add_exceptions(module)?;
-                #body
+            /// The submodules of the extension module.
+            const SUBMODULES: &[&str] = &[#(#segments),*];
+
+            #[doc = #module_doc]
+            #[::pyo3::pymodule]
+            #[pyo3(name = #name #module_option)]
+            pub mod extension_module {
+                use ::pyo3::prelude::*;
+
+                /// The version of the bindings crate.
+                #[pymodule_export]
+                #[allow(non_upper_case_globals)]
+                const __version__: &str = env!("CARGO_PKG_VERSION");
+
+                #[pymodule_export]
+                use super::#aggregate;
+
+                #[pymodule_export]
+                use crate::codegen::error::{#(#exceptions),*};
+
+                #(#submodules)*
+
+                /// Put the submodules in `sys.modules`. The import system puts the module there
+                /// before it runs this. Not handed the module, so the stubs still describe the
+                /// module in full.
+                #[pymodule_init]
+                fn init(py: Python<'_>) -> PyResult<()> {
+                    #init_async
+                    let modules = py.import("sys")?.getattr("modules")?;
+                    match modules.get_item(super::CORE_MODULE) {
+                        Ok(module) => super::add_submodules_to_sys_modules(module.cast()?),
+                        Err(_) => Ok(()),
+                    }
+                }
+            }
+
+            /// Put the submodules of the extension module `module` in `sys.modules`, so that
+            /// `import <module>.<submodule>` finds them. The module does this on import; call it
+            /// for a module made otherwise, such as with `wrap_pymodule!`.
+            pub fn add_submodules_to_sys_modules(
+                module: &::pyo3::Bound<'_, ::pyo3::types::PyModule>,
+            ) -> ::pyo3::PyResult<()> {
+                let modules = module.py().import("sys")?.getattr("modules")?;
+                let name = module.name()?;
+                for submodule in SUBMODULES {
+                    modules.set_item(format!("{name}.{submodule}"), module.getattr(*submodule)?)?;
+                }
                 Ok(())
             }
         }
     }
 }
-
-/// The `register_submodule!` macro, spliced in as text because prettyplease and rustfmt do not
-/// format macro bodies. It replaces [`REGISTER_SUBMODULE_PLACEHOLDER`].
-const REGISTER_SUBMODULE_MACRO: &str = r#"
-/// Register the submodule `<CORE_MODULE>.<name>` with its classes, and put it in `sys.modules`
-/// so that `import <CORE_MODULE>.<name>` finds it.
-macro_rules! register_submodule {
-    ($parent:expr, $mod_name:expr, [$($type:ty),* $(,)?]) => {{
-        let py = $parent.py();
-        let child = ::pyo3::types::PyModule::new(py, $mod_name)?;
-        $(
-            child.add_class::<$type>()?;
-        )*
-        $parent.add_submodule(&child)?;
-        py.import("sys")?
-            .getattr("modules")?
-            .set_item(format!("{}.{}", CORE_MODULE, $mod_name), child)
-    }};
-}"#;
-
-/// How prettyplease prints the placeholder of [`REGISTER_SUBMODULE_MACRO`].
-const REGISTER_SUBMODULE_PLACEHOLDER: &str = "macro_rules! register_submodule {\n    () => {};\n}";
 
 pub fn main_module(services: &[ServiceHandler<'_>]) -> crate::error::Result<String> {
     PyBackend::from_services(services).main_module(services)
@@ -197,8 +210,6 @@ impl BindingBackend for PyBackend<'_> {
             .models_root_path()
             .map(|root| quote! { use #root::*; });
 
-        let stub_class = super::stub_class_attr();
-        let stub_methods = super::stub_methods_attr();
         let module_arg = super::module_arg(
             self.python,
             Some(super::package_segment(&service.plan.package)),
@@ -223,13 +234,11 @@ impl BindingBackend for PyBackend<'_> {
             #futures_import
 
             #[doc = #class_doc]
-            #stub_class
             #[pyclass(name = #rust_client_name, #module_arg)]
             pub struct #client_ident {
                 pub(crate) client: #rust_client_ident,
             }
 
-            #stub_methods
             #[pymethods]
             impl #client_ident {
                 #(#methods)*
@@ -297,8 +306,6 @@ impl BindingBackend for PyBackend<'_> {
         let methods = driver::root_client_methods(self, &sorted_services);
         let resource_accessor_methods = driver::resource_accessor_methods(self, &sorted_services);
 
-        let stub_class = super::stub_class_attr();
-        let stub_methods = super::stub_methods_attr();
         let root_module_arg = super::module_arg(self.python, None);
         let helper_modules = {
             let future = self
@@ -313,7 +320,7 @@ impl BindingBackend for PyBackend<'_> {
                 let client = client.with_user_agent(concat!(#prefix, env!("CARGO_PKG_VERSION")));
             }
         });
-        let register = self.register_fn(&sorted_services, &py_aggregate_client_ident);
+        let extension_module = self.extension_module(&sorted_services, &py_aggregate_client_ident);
 
         let tokens = quote! {
             // The aggregate module file carries the root `#[pyclass]` (flat methods →
@@ -333,14 +340,12 @@ impl BindingBackend for PyBackend<'_> {
             #(#codegen_imports)*
 
             /// A client of the API at one base URL.
-            #stub_class
             #[pyclass(name = #aggregate_client_name, #root_module_arg)]
             pub struct #py_aggregate_client_ident {
                 // `pub(crate)` so the binding crate can add `#[pymethods]` of its own.
                 pub(crate) client: #aggregate_client_ident
             }
 
-            #stub_methods
             #[pymethods]
             impl #py_aggregate_client_ident {
                 /// A client of the API at `base_url`. `token`, when set, goes in every
@@ -362,19 +367,10 @@ impl BindingBackend for PyBackend<'_> {
                 #(#resource_accessor_methods)*
             }
 
-            #register
+            #extension_module
         };
 
-        let code = format_tokens(tokens)?;
-        if self.python.module.is_none() {
-            return Ok(code);
-        }
-        if !code.contains(REGISTER_SUBMODULE_PLACEHOLDER) {
-            return Err(crate::Error::Build(
-                "the placeholder of register_submodule! is not in the formatted bindings".into(),
-            ));
-        }
-        Ok(code.replacen(REGISTER_SUBMODULE_PLACEHOLDER, REGISTER_SUBMODULE_MACRO, 1))
+        format_tokens(tokens)
     }
 
     fn param_defs(&self, method: &MethodHandler<'_>, mode: BindingMode) -> Vec<TokenStream> {

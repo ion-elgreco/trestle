@@ -48,8 +48,13 @@ impl ::core::convert::From<PyExampleError> for PyErr {
 }
 
 /// An error answer of the server, or a request that got no answer.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(extends = PyException, subclass, frozen, name = "ExampleError")]
+#[::pyo3::pyclass(
+    extends = PyException,
+    subclass,
+    frozen,
+    name = "ExampleError",
+    module = "example._core",
+)]
 pub struct ExampleError {
     message: String,
     code: Option<String>,
@@ -57,7 +62,6 @@ pub struct ExampleError {
     details: Py<PyList>,
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl ExampleError {
     #[new]
@@ -110,9 +114,6 @@ impl ExampleError {
     }
 
     /// The details of the answer.
-    #[gen_stub(
-        override_return_type(type_repr = "list[typing.Any]", imports = ("typing"))
-    )]
     #[getter]
     fn details<'py>(&self, py: Python<'py>) -> Bound<'py, PyList> {
         self.details.bind(py).clone()
@@ -159,10 +160,13 @@ impl ExampleError {
 }
 
 /// The server answered `400 Bad Request`: the request is not valid.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(extends = ExampleError, frozen, name = "BadRequestError")]
+#[::pyo3::pyclass(
+    extends = ExampleError,
+    frozen,
+    name = "BadRequestError",
+    module = "example._core",
+)]
 pub struct BadRequestError;
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl BadRequestError {
     #[new]
@@ -180,10 +184,13 @@ impl BadRequestError {
 }
 
 /// The server answered `401 Unauthorized`: the request has no valid credentials.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(extends = ExampleError, frozen, name = "UnauthenticatedError")]
+#[::pyo3::pyclass(
+    extends = ExampleError,
+    frozen,
+    name = "UnauthenticatedError",
+    module = "example._core",
+)]
 pub struct UnauthenticatedError;
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl UnauthenticatedError {
     #[new]
@@ -201,10 +208,13 @@ impl UnauthenticatedError {
 }
 
 /// The server answered `403 Forbidden`: the caller may not do this.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(extends = ExampleError, frozen, name = "PermissionDeniedError")]
+#[::pyo3::pyclass(
+    extends = ExampleError,
+    frozen,
+    name = "PermissionDeniedError",
+    module = "example._core",
+)]
 pub struct PermissionDeniedError;
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PermissionDeniedError {
     #[new]
@@ -222,10 +232,13 @@ impl PermissionDeniedError {
 }
 
 /// The server answered `404 Not Found`: the resource does not exist.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(extends = ExampleError, frozen, name = "NotFoundError")]
+#[::pyo3::pyclass(
+    extends = ExampleError,
+    frozen,
+    name = "NotFoundError",
+    module = "example._core",
+)]
 pub struct NotFoundError;
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl NotFoundError {
     #[new]
@@ -243,10 +256,13 @@ impl NotFoundError {
 }
 
 /// The server answered `409 Conflict`: the resource exists or changed.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(extends = ExampleError, frozen, name = "ConflictError")]
+#[::pyo3::pyclass(
+    extends = ExampleError,
+    frozen,
+    name = "ConflictError",
+    module = "example._core",
+)]
 pub struct ConflictError;
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl ConflictError {
     #[new]
@@ -264,10 +280,13 @@ impl ConflictError {
 }
 
 /// The server answered `429 Too Many Requests`.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(extends = ExampleError, frozen, name = "RateLimitError")]
+#[::pyo3::pyclass(
+    extends = ExampleError,
+    frozen,
+    name = "RateLimitError",
+    module = "example._core",
+)]
 pub struct RateLimitError;
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl RateLimitError {
     #[new]
@@ -285,10 +304,13 @@ impl RateLimitError {
 }
 
 /// The server answered with a `5xx` status: it failed to do the request.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(extends = ExampleError, frozen, name = "ServerError")]
+#[::pyo3::pyclass(
+    extends = ExampleError,
+    frozen,
+    name = "ServerError",
+    module = "example._core",
+)]
 pub struct ServerError;
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl ServerError {
     #[new]
@@ -303,19 +325,6 @@ impl ServerError {
         PyClassInitializer::from(ExampleError::new(py, message, code, status, details))
             .add_subclass(Self)
     }
-}
-
-/// Add the exception classes to the extension module `module`.
-pub fn add_exceptions(module: &Bound<'_, ::pyo3::types::PyModule>) -> PyResult<()> {
-    module.add_class::<ExampleError>()?;
-    module.add_class::<BadRequestError>()?;
-    module.add_class::<UnauthenticatedError>()?;
-    module.add_class::<PermissionDeniedError>()?;
-    module.add_class::<NotFoundError>()?;
-    module.add_class::<ConflictError>()?;
-    module.add_class::<RateLimitError>()?;
-    module.add_class::<ServerError>()?;
-    Ok(())
 }
 
 /// The exception of a client error: the subclass of its HTTP status.

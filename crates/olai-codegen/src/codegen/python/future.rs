@@ -9,28 +9,6 @@ use crate::codegen::format_tokens_static;
 
 /// The `py_future.rs` file. `PyFuture<T>` is `asyncio.Future[T]` in the stubs.
 pub(crate) fn generate() -> String {
-    let stub_impls = quote! {
-            impl ::pyo3_stub_gen::PyStubType for NoResult {
-                fn type_output() -> ::pyo3_stub_gen::TypeInfo {
-                    ::pyo3_stub_gen::TypeInfo::none()
-                }
-            }
-
-            impl<T: ::pyo3_stub_gen::PyStubType> ::pyo3_stub_gen::PyStubType for PyFuture<'_, T> {
-                fn type_output() -> ::pyo3_stub_gen::TypeInfo {
-                    let result = T::type_output();
-                    let mut import = result.import;
-                    import.insert("asyncio".into());
-                    ::pyo3_stub_gen::TypeInfo {
-                        name: ::std::format!("asyncio.Future[{}]", result.name),
-                        source_module: None,
-                        import,
-                        type_refs: result.type_refs,
-                    }
-                }
-            }
-    };
-
     let tokens = quote! {
         //! What the `_async` methods return.
 
@@ -65,10 +43,14 @@ pub(crate) fn generate() -> String {
             }
         }
 
-        impl<'py, T> IntoPyObject<'py> for PyFuture<'py, T> {
+        impl<'py, T: IntoPyObject<'py>> IntoPyObject<'py> for PyFuture<'py, T> {
             type Target = PyAny;
             type Output = Bound<'py, PyAny>;
             type Error = ::std::convert::Infallible;
+            const OUTPUT_TYPE: ::pyo3::inspect::PyStaticExpr = ::pyo3::type_hint_subscript!(
+                ::pyo3::type_hint_identifier!("asyncio", "Future"),
+                T::OUTPUT_TYPE
+            );
 
             fn into_pyobject(self, _py: Python<'py>) -> ::core::result::Result<Self::Output, Self::Error> {
                 Ok(self.future)
@@ -82,13 +64,13 @@ pub(crate) fn generate() -> String {
             type Target = PyAny;
             type Output = Bound<'py, PyAny>;
             type Error = ::std::convert::Infallible;
+            const OUTPUT_TYPE: ::pyo3::inspect::PyStaticExpr =
+                <::pyo3::types::PyNone as ::pyo3::PyTypeInfo>::TYPE_HINT;
 
             fn into_pyobject(self, py: Python<'py>) -> ::core::result::Result<Self::Output, Self::Error> {
                 Ok(py.None().into_bound(py))
             }
         }
-
-        #stub_impls
     };
     format_tokens_static(tokens)
 }

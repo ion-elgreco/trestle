@@ -47,6 +47,14 @@ const ERROR_CLASSES: &[(&str, &[u16], &str)] = &[
     ),
 ];
 
+/// The exception classes: the base class, then its subclasses.
+pub(crate) fn class_idents(python: &PythonOptions) -> Vec<proc_macro2::Ident> {
+    std::iter::once(python.error_base_class.as_str())
+        .chain(ERROR_CLASSES.iter().map(|(name, _, _)| *name))
+        .map(|name| format_ident!("{}", name))
+        .collect()
+}
+
 /// The `error.rs` file of the Python bindings.
 pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> String {
     let error = format_ident!("{}", bindings.py_error_type);
@@ -55,11 +63,6 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
     let base_name = &python.error_base_class;
     let base = format_ident!("{}", python.error_base_class);
     let module_arg = super::module_arg(python, None);
-    let stub_class = super::stub_class_attr();
-    let stub_methods = super::stub_methods_attr();
-    let details_stub_type = quote! {
-        #[gen_stub(override_return_type(type_repr = "list[typing.Any]", imports = ("typing")))]
-    };
     let error_doc = format!(
         " The error of a binding call: a client error (raised as a `{base_name}`) or a Python error."
     );
@@ -69,11 +72,9 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
         let doc = format!(" {doc}");
         quote! {
             #[doc = #doc]
-            #stub_class
             #[::pyo3::pyclass(extends = #base, frozen, name = #name, #module_arg)]
             pub struct #ident;
 
-            #stub_methods
             #[::pyo3::pymethods]
             impl #ident {
                 #[new]
@@ -101,10 +102,6 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
         };
         quote! { #pattern => Bound::new(py, base.add_subclass(#ident))?.into_any(), }
     });
-    let class_idents = ERROR_CLASSES
-        .iter()
-        .map(|(name, _, _)| format_ident!("{}", name));
-
     let tokens = quote! {
         //! Errors of the Python bindings.
 
@@ -157,15 +154,7 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
         }
 
         /// An error answer of the server, or a request that got no answer.
-        #stub_class
-        #[::pyo3::pyclass(
-            // A single ident: pyo3-stub-gen reads `extends` only in that form.
-            extends = PyException,
-            subclass,
-            frozen,
-            name = #base_name,
-            #module_arg
-        )]
+        #[::pyo3::pyclass(extends = PyException, subclass, frozen, name = #base_name, #module_arg)]
         pub struct #base {
             message: String,
             code: Option<String>,
@@ -173,7 +162,6 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
             details: Py<PyList>,
         }
 
-        #stub_methods
         #[::pyo3::pymethods]
         impl #base {
             #[new]
@@ -226,7 +214,6 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
             }
 
             /// The details of the answer.
-            #details_stub_type
             #[getter]
             fn details<'py>(&self, py: Python<'py>) -> Bound<'py, PyList> {
                 self.details.bind(py).clone()
@@ -273,13 +260,6 @@ pub(crate) fn generate(bindings: &BindingsConfig, python: &PythonOptions) -> Str
         }
 
         #(#subclasses)*
-
-        /// Add the exception classes to the extension module `module`.
-        pub fn add_exceptions(module: &Bound<'_, ::pyo3::types::PyModule>) -> PyResult<()> {
-            module.add_class::<#base>()?;
-            #(module.add_class::<#class_idents>()?;)*
-            Ok(())
-        }
 
         /// The exception of a client error: the subclass of its HTTP status.
         fn client_exception(py: Python<'_>, e: ClientError) -> PyResult<PyErr> {

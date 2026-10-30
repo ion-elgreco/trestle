@@ -7,8 +7,9 @@ From `proto/demo/v1/svc.proto`, with every option on (see `config.rs`), it gener
 
 - the buffa models with the `trestle` rewrites (snake_case JSON names, int64 as numbers);
 - the Rust client with the generated `reqwest` transport and error module (`rest-client-e2e`);
-- the Python bindings (`py/`, `rest-client-e2e-py`), tested in an embedded interpreter together
-  with the stubs that `pyo3-stub-gen` writes.
+- the Python bindings (`py/`, `rest-client-e2e-py`), tested in an embedded interpreter; built as
+  an extension module, they are imported by a Python process and give the stubs that
+  `pyo3-introspection` writes.
 
 ## Running
 

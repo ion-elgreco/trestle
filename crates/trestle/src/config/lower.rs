@@ -307,7 +307,7 @@ fn lower_python(
             name: python.package.name.clone(),
         },
         error_base_class: error_base_class.to_string(),
-        module: options.module.clone(),
+        module: python.module.clone(),
         async_methods: options.async_methods,
         keyword_only: options.keyword_only,
         public_modules: options.public_modules,

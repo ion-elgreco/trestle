@@ -248,13 +248,15 @@ fn apply_flags(cfg: &mut TrestleConfig, args: &ConfigArgs) {
     }
 }
 
-/// The Python client of a new config: its package is named after the project.
+/// The Python client of a new config: its package is named after the project, and the extension
+/// module is the package's `_core`.
 fn python_client(project_name: &str) -> PythonClient {
     let package = project_name.to_case(Case::Snake);
     PythonClient {
         output: "crates/client/python/src".to_string(),
         error_type: String::new(),
         result_type: String::new(),
+        module: format!("{package}._core"),
         package: PythonPackage {
             dir: format!("crates/client/python/{package}"),
             name: package,

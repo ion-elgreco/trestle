@@ -27,7 +27,7 @@ publish = false
 # Compiles the generated `pyo3_impls.rs` (the `#[pyclass]` wrappers of the buffa
 # model types) and the PyO3 round-trip tests. Off by default so the base fixture
 # stays pyo3-free; the dedicated tests run with `--features python`.
-python = ["dep:pyo3", "dep:pyo3-stub-gen", "dep:pythonize"]
+python = ["dep:pyo3"]
 
 [dependencies]
 # local crates (in alphabetical order)
@@ -38,12 +38,9 @@ async-trait = "0.1"
 buffa = { version = "0.7", features = ["json"] }
 buffa-types = "0.7"
 futures = "0.3"
-# pyo3 >= 0.28: the generated wrappers use `#[pyclass(..., from_py_object)]`,
-# opt-in only from 0.28 (see `generate_pyo3_impls`).
-pyo3 = { version = "0.28", optional = true }
-# The wrappers are annotated for pyo3-stub-gen.
-pyo3-stub-gen = { version = "0.23", default-features = false, optional = true }
-pythonize = { version = "0.28", optional = true }
+# The generated wrappers declare their stub types (`FromPyObject::INPUT_TYPE`, ...), which
+# exist with `experimental-inspect` only.
+pyo3 = { version = "0.30", features = ["experimental-inspect"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -61,7 +58,6 @@ protobuf = "3"
 # build time (the buffa client traits + models) rather than referenced directly
 # in this crate's source, so its static scan reports them as unused.
 [package.metadata.cargo-machete]
-# pyo3/pythonize are exercised only through the build-time-generated
-# `pyo3_impls.rs` (under the `python` feature), so machete's static scan can't
-# see them.
-ignored = ["async-trait", "buffa-types", "futures", "serde", "pyo3", "pyo3-stub-gen", "pythonize"]
+# pyo3 is exercised only through the build-time-generated `pyo3_impls.rs` (under
+# the `python` feature), so machete's static scan can't see it.
+ignored = ["async-trait", "buffa-types", "futures", "serde", "pyo3"]

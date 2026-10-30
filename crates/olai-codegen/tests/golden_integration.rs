@@ -130,7 +130,7 @@ fn full_config(tmp: &Path, runtime: Runtime) -> CodeGenConfig {
                     name: "example".into(),
                 },
                 error_base_class: "ExampleError".into(),
-                module: None,
+                module: "example._core".into(),
                 async_methods: false,
                 keyword_only: false,
                 public_modules: false,

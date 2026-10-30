@@ -7,13 +7,11 @@ use example_common::models::*;
 use crate::codegen::error::{PyExampleError, PyExampleResult};
 
 /// The requests on one `Catalog`.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[pyclass(name = "CatalogClient")]
+#[pyclass(name = "CatalogClient", module = "example._core.catalog")]
 pub struct PyCatalogClient {
     pub(crate) client: CatalogClient,
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[pymethods]
 impl PyCatalogClient {
     /// Returns:

@@ -29,6 +29,14 @@ impl ::core::convert::From<PyCatalogType> for super::catalog::v1::CatalogType {
 
 impl<'a, 'py> ::pyo3::FromPyObject<'a, 'py> for PyCatalogType {
     type Error = ::pyo3::PyErr;
+    const INPUT_TYPE: ::pyo3::inspect::PyStaticExpr = {
+        use ::pyo3::type_hint_union;
+        type_hint_union!(
+            ::pyo3::type_hint_identifier!("example._enums", "CatalogType"),
+            ::pyo3::type_hint_identifier!("builtins", "str")
+        )
+    };
+
     fn extract(obj: ::pyo3::Borrowed<'a, 'py, ::pyo3::PyAny>) -> ::pyo3::PyResult<Self> {
         let name: ::pyo3::pybacked::PyBackedStr = ::pyo3::types::PyAnyMethods::extract(
             &*obj,
@@ -60,6 +68,9 @@ impl<'py> ::pyo3::IntoPyObject<'py> for PyCatalogType {
     type Target = ::pyo3::PyAny;
     type Output = ::pyo3::Bound<'py, ::pyo3::PyAny>;
     type Error = ::pyo3::PyErr;
+    const OUTPUT_TYPE: ::pyo3::inspect::PyStaticExpr = ::pyo3::type_hint_identifier!(
+        "example._enums", "CatalogType"
+    );
     fn into_pyobject(self, py: ::pyo3::Python<'py>) -> ::pyo3::PyResult<Self::Output> {
         static CLASS: ::pyo3::sync::PyOnceLock<::pyo3::Py<::pyo3::types::PyType>> = ::pyo3::sync::PyOnceLock::new();
         let class = CLASS.import(py, "example._enums", "CatalogType")?;
@@ -75,26 +86,6 @@ impl<'py> ::pyo3::IntoPyObject<'py> for PyCatalogType {
                 )
             })?;
         ::pyo3::types::PyAnyMethods::getattr(class.as_any(), name)
-    }
-}
-
-impl ::pyo3_stub_gen::PyStubType for PyCatalogType {
-    fn type_output() -> ::pyo3_stub_gen::TypeInfo {
-        ::pyo3_stub_gen::TypeInfo {
-            name: "_enums.CatalogType".to_string(),
-            source_module: None,
-            import: ::std::collections::HashSet::from(["example._enums".into()]),
-            type_refs: ::std::collections::HashMap::new(),
-        }
-    }
-
-    fn type_input() -> ::pyo3_stub_gen::TypeInfo {
-        ::pyo3_stub_gen::TypeInfo {
-            name: "_enums.CatalogType | str".to_string(),
-            source_module: None,
-            import: ::std::collections::HashSet::from(["example._enums".into()]),
-            type_refs: ::std::collections::HashMap::new(),
-        }
     }
 }
 
@@ -130,6 +121,14 @@ for super::schemas::v1::get_schema_request::View {
 
 impl<'a, 'py> ::pyo3::FromPyObject<'a, 'py> for PyGetSchemaRequestView {
     type Error = ::pyo3::PyErr;
+    const INPUT_TYPE: ::pyo3::inspect::PyStaticExpr = {
+        use ::pyo3::type_hint_union;
+        type_hint_union!(
+            ::pyo3::type_hint_identifier!("example._enums", "GetSchemaRequestView"),
+            ::pyo3::type_hint_identifier!("builtins", "str")
+        )
+    };
+
     fn extract(obj: ::pyo3::Borrowed<'a, 'py, ::pyo3::PyAny>) -> ::pyo3::PyResult<Self> {
         let name: ::pyo3::pybacked::PyBackedStr = ::pyo3::types::PyAnyMethods::extract(
             &*obj,
@@ -163,6 +162,9 @@ impl<'py> ::pyo3::IntoPyObject<'py> for PyGetSchemaRequestView {
     type Target = ::pyo3::PyAny;
     type Output = ::pyo3::Bound<'py, ::pyo3::PyAny>;
     type Error = ::pyo3::PyErr;
+    const OUTPUT_TYPE: ::pyo3::inspect::PyStaticExpr = ::pyo3::type_hint_identifier!(
+        "example._enums", "GetSchemaRequestView"
+    );
     fn into_pyobject(self, py: ::pyo3::Python<'py>) -> ::pyo3::PyResult<Self::Output> {
         static CLASS: ::pyo3::sync::PyOnceLock<::pyo3::Py<::pyo3::types::PyType>> = ::pyo3::sync::PyOnceLock::new();
         let class = CLASS.import(py, "example._enums", "GetSchemaRequestView")?;
@@ -178,26 +180,6 @@ impl<'py> ::pyo3::IntoPyObject<'py> for PyGetSchemaRequestView {
                 )
             })?;
         ::pyo3::types::PyAnyMethods::getattr(class.as_any(), name)
-    }
-}
-
-impl ::pyo3_stub_gen::PyStubType for PyGetSchemaRequestView {
-    fn type_output() -> ::pyo3_stub_gen::TypeInfo {
-        ::pyo3_stub_gen::TypeInfo {
-            name: "_enums.GetSchemaRequestView".to_string(),
-            source_module: None,
-            import: ::std::collections::HashSet::from(["example._enums".into()]),
-            type_refs: ::std::collections::HashMap::new(),
-        }
-    }
-
-    fn type_input() -> ::pyo3_stub_gen::TypeInfo {
-        ::pyo3_stub_gen::TypeInfo {
-            name: "_enums.GetSchemaRequestView | str".to_string(),
-            source_module: None,
-            import: ::std::collections::HashSet::from(["example._enums".into()]),
-            type_refs: ::std::collections::HashMap::new(),
-        }
     }
 }
 
@@ -229,6 +211,14 @@ impl ::core::convert::From<PySchemaType> for super::schemas::v1::SchemaType {
 
 impl<'a, 'py> ::pyo3::FromPyObject<'a, 'py> for PySchemaType {
     type Error = ::pyo3::PyErr;
+    const INPUT_TYPE: ::pyo3::inspect::PyStaticExpr = {
+        use ::pyo3::type_hint_union;
+        type_hint_union!(
+            ::pyo3::type_hint_identifier!("example._enums", "SchemaType"),
+            ::pyo3::type_hint_identifier!("builtins", "str")
+        )
+    };
+
     fn extract(obj: ::pyo3::Borrowed<'a, 'py, ::pyo3::PyAny>) -> ::pyo3::PyResult<Self> {
         let name: ::pyo3::pybacked::PyBackedStr = ::pyo3::types::PyAnyMethods::extract(
             &*obj,
@@ -260,6 +250,9 @@ impl<'py> ::pyo3::IntoPyObject<'py> for PySchemaType {
     type Target = ::pyo3::PyAny;
     type Output = ::pyo3::Bound<'py, ::pyo3::PyAny>;
     type Error = ::pyo3::PyErr;
+    const OUTPUT_TYPE: ::pyo3::inspect::PyStaticExpr = ::pyo3::type_hint_identifier!(
+        "example._enums", "SchemaType"
+    );
     fn into_pyobject(self, py: ::pyo3::Python<'py>) -> ::pyo3::PyResult<Self::Output> {
         static CLASS: ::pyo3::sync::PyOnceLock<::pyo3::Py<::pyo3::types::PyType>> = ::pyo3::sync::PyOnceLock::new();
         let class = CLASS.import(py, "example._enums", "SchemaType")?;
@@ -278,32 +271,16 @@ impl<'py> ::pyo3::IntoPyObject<'py> for PySchemaType {
     }
 }
 
-impl ::pyo3_stub_gen::PyStubType for PySchemaType {
-    fn type_output() -> ::pyo3_stub_gen::TypeInfo {
-        ::pyo3_stub_gen::TypeInfo {
-            name: "_enums.SchemaType".to_string(),
-            source_module: None,
-            import: ::std::collections::HashSet::from(["example._enums".into()]),
-            type_refs: ::std::collections::HashMap::new(),
-        }
-    }
-
-    fn type_input() -> ::pyo3_stub_gen::TypeInfo {
-        ::pyo3_stub_gen::TypeInfo {
-            name: "_enums.SchemaType | str".to_string(),
-            source_module: None,
-            import: ::std::collections::HashSet::from(["example._enums".into()]),
-            type_refs: ::std::collections::HashMap::new(),
-        }
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "AzureConfig", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "AzureConfig",
+    eq,
+    frozen,
+    module = "example._core.catalog",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyAzureConfig(pub super::catalog::v1::AzureConfig);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyAzureConfig {
     #[new]
@@ -340,12 +317,16 @@ impl ::core::convert::From<PyAzureConfig> for super::catalog::v1::AzureConfig {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "Catalog", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "Catalog",
+    eq,
+    frozen,
+    module = "example._core.catalog",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalog(pub super::catalog::v1::Catalog);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyCatalog {
     #[new]
@@ -468,12 +449,16 @@ impl ::core::convert::From<PyCatalog> for super::catalog::v1::Catalog {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CatalogStatus", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "CatalogStatus",
+    eq,
+    frozen,
+    module = "example._core.catalog",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalogStatus(pub super::catalog::v1::CatalogStatus);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyCatalogStatus {
     #[getter]
@@ -500,12 +485,16 @@ impl ::core::convert::From<PyCatalogStatus> for super::catalog::v1::CatalogStatu
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CatalogToken", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "CatalogToken",
+    eq,
+    frozen,
+    module = "example._core.catalog",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyCatalogToken(pub super::catalog::v1::CatalogToken);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyCatalogToken {
     #[getter]
@@ -532,80 +521,16 @@ impl ::core::convert::From<PyCatalogToken> for super::catalog::v1::CatalogToken 
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CreateCatalogRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyCreateCatalogRequest(pub super::catalog::v1::CreateCatalogRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyCreateCatalogRequest {
-    #[getter]
-    fn catalog(&self) -> ::core::option::Option<PyCatalog> {
-        self.0.catalog.clone().into_option().map(PyCatalog::from)
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("catalog", false)])
-    }
-}
-
-impl ::core::convert::From<super::catalog::v1::CreateCatalogRequest>
-for PyCreateCatalogRequest {
-    fn from(value: super::catalog::v1::CreateCatalogRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyCreateCatalogRequest>
-for super::catalog::v1::CreateCatalogRequest {
-    fn from(value: PyCreateCatalogRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteCatalogRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyDeleteCatalogRequest(pub super::catalog::v1::DeleteCatalogRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyDeleteCatalogRequest {
-    #[getter]
-    fn name(&self) -> ::std::string::String {
-        self.0.name.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("name", false)])
-    }
-}
-
-impl ::core::convert::From<super::catalog::v1::DeleteCatalogRequest>
-for PyDeleteCatalogRequest {
-    fn from(value: super::catalog::v1::DeleteCatalogRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyDeleteCatalogRequest>
-for super::catalog::v1::DeleteCatalogRequest {
-    fn from(value: PyDeleteCatalogRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteCatalogResponse", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "DeleteCatalogResponse",
+    eq,
+    frozen,
+    module = "example._core.catalog",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteCatalogResponse(pub super::catalog::v1::DeleteCatalogResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyDeleteCatalogResponse {
     fn __repr__(
@@ -629,197 +554,16 @@ for super::catalog::v1::DeleteCatalogResponse {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GenerateCatalogTokenRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyGenerateCatalogTokenRequest(
-    pub super::catalog::v1::GenerateCatalogTokenRequest,
-);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyGenerateCatalogTokenRequest {
-    #[getter]
-    fn catalog_id(&self) -> ::std::string::String {
-        self.0.catalog_id.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("catalog_id", false)])
-    }
-}
-
-impl ::core::convert::From<super::catalog::v1::GenerateCatalogTokenRequest>
-for PyGenerateCatalogTokenRequest {
-    fn from(value: super::catalog::v1::GenerateCatalogTokenRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyGenerateCatalogTokenRequest>
-for super::catalog::v1::GenerateCatalogTokenRequest {
-    fn from(value: PyGenerateCatalogTokenRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GetCatalogRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyGetCatalogRequest(pub super::catalog::v1::GetCatalogRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyGetCatalogRequest {
-    #[getter]
-    fn name(&self) -> ::std::string::String {
-        self.0.name.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("name", false)])
-    }
-}
-
-impl ::core::convert::From<super::catalog::v1::GetCatalogRequest>
-for PyGetCatalogRequest {
-    fn from(value: super::catalog::v1::GetCatalogRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyGetCatalogRequest>
-for super::catalog::v1::GetCatalogRequest {
-    fn from(value: PyGetCatalogRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GetCatalogStatusRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyGetCatalogStatusRequest(pub super::catalog::v1::GetCatalogStatusRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyGetCatalogStatusRequest {
-    #[getter]
-    fn name(&self) -> ::std::string::String {
-        self.0.name.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("name", false)])
-    }
-}
-
-impl ::core::convert::From<super::catalog::v1::GetCatalogStatusRequest>
-for PyGetCatalogStatusRequest {
-    fn from(value: super::catalog::v1::GetCatalogStatusRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyGetCatalogStatusRequest>
-for super::catalog::v1::GetCatalogStatusRequest {
-    fn from(value: PyGetCatalogStatusRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListByCatalogTypeRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyListByCatalogTypeRequest(pub super::catalog::v1::ListByCatalogTypeRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyListByCatalogTypeRequest {
-    /// enum as query param
-    #[getter]
-    fn catalog_type(&self) -> ::core::option::Option<PyCatalogType> {
-        self.0
-            .catalog_type
-            .as_known()
-            .filter(|e| {
-                <super::catalog::v1::CatalogType as ::buffa::Enumeration>::to_i32(e) != 0
-            })
-            .map(PyCatalogType::from)
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("catalog_type", false)])
-    }
-}
-
-impl ::core::convert::From<super::catalog::v1::ListByCatalogTypeRequest>
-for PyListByCatalogTypeRequest {
-    fn from(value: super::catalog::v1::ListByCatalogTypeRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyListByCatalogTypeRequest>
-for super::catalog::v1::ListByCatalogTypeRequest {
-    fn from(value: PyListByCatalogTypeRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListByTagsRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyListByTagsRequest(pub super::catalog::v1::ListByTagsRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyListByTagsRequest {
-    /// becomes repeated query param
-    #[getter]
-    fn tags(&self) -> ::std::vec::Vec<::std::string::String> {
-        self.0.tags.clone()
-    }
-
-    #[getter]
-    fn max_results(&self) -> i32 {
-        self.0.max_results
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("tags", false), ("max_results", false)])
-    }
-}
-
-impl ::core::convert::From<super::catalog::v1::ListByTagsRequest>
-for PyListByTagsRequest {
-    fn from(value: super::catalog::v1::ListByTagsRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyListByTagsRequest>
-for super::catalog::v1::ListByTagsRequest {
-    fn from(value: PyListByTagsRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListByTagsResponse", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "ListByTagsResponse",
+    eq,
+    frozen,
+    module = "example._core.catalog",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyListByTagsResponse(pub super::catalog::v1::ListByTagsResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyListByTagsResponse {
     #[getter]
@@ -848,51 +592,16 @@ for super::catalog::v1::ListByTagsResponse {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListCatalogsRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyListCatalogsRequest(pub super::catalog::v1::ListCatalogsRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyListCatalogsRequest {
-    #[getter]
-    fn max_results(&self) -> i32 {
-        self.0.max_results
-    }
-
-    #[getter]
-    fn page_token(&self) -> ::std::string::String {
-        self.0.page_token.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("max_results", false), ("page_token", false)])
-    }
-}
-
-impl ::core::convert::From<super::catalog::v1::ListCatalogsRequest>
-for PyListCatalogsRequest {
-    fn from(value: super::catalog::v1::ListCatalogsRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyListCatalogsRequest>
-for super::catalog::v1::ListCatalogsRequest {
-    fn from(value: PyListCatalogsRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListCatalogsResponse", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "ListCatalogsResponse",
+    eq,
+    frozen,
+    module = "example._core.catalog",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyListCatalogsResponse(pub super::catalog::v1::ListCatalogsResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyListCatalogsResponse {
     #[getter]
@@ -926,12 +635,16 @@ for super::catalog::v1::ListCatalogsResponse {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "S3Config", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "S3Config",
+    eq,
+    frozen,
+    module = "example._core.catalog",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyS3Config(pub super::catalog::v1::S3Config);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyS3Config {
     #[new]
@@ -968,12 +681,16 @@ impl ::core::convert::From<PyS3Config> for super::catalog::v1::S3Config {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "StorageConfig", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "StorageConfig",
+    eq,
+    frozen,
+    module = "example._core.catalog",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyStorageConfig(pub super::catalog::v1::StorageConfig);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyStorageConfig {
     #[new]
@@ -1039,142 +756,16 @@ impl ::core::convert::From<PyStorageConfig> for super::catalog::v1::StorageConfi
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "UpdateCatalogRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyUpdateCatalogRequest(pub super::catalog::v1::UpdateCatalogRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyUpdateCatalogRequest {
-    #[getter]
-    fn name(&self) -> ::std::string::String {
-        self.0.name.clone()
-    }
-
-    #[getter]
-    fn catalog(&self) -> ::core::option::Option<PyCatalog> {
-        self.0.catalog.clone().into_option().map(PyCatalog::from)
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("name", false), ("catalog", false)])
-    }
-}
-
-impl ::core::convert::From<super::catalog::v1::UpdateCatalogRequest>
-for PyUpdateCatalogRequest {
-    fn from(value: super::catalog::v1::UpdateCatalogRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyUpdateCatalogRequest>
-for super::catalog::v1::UpdateCatalogRequest {
-    fn from(value: PyUpdateCatalogRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CreateSchemaRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyCreateSchemaRequest(pub super::schemas::v1::CreateSchemaRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyCreateSchemaRequest {
-    /// Schema's own name (the new component supplied by the caller).
-    #[getter]
-    fn name(&self) -> ::std::string::String {
-        self.0.name.clone()
-    }
-
-    /// Parent catalog name — filled from the parent `CatalogClient`'s captured component.
-    #[getter]
-    fn catalog_name(&self) -> ::std::string::String {
-        self.0.catalog_name.clone()
-    }
-
-    /// Required enum parameter whose type lives in this (schemas) models module — exercises the
-    /// child-model import on the parent's generated `create_schema` method.
-    #[getter]
-    fn schema_type(&self) -> ::core::option::Option<PySchemaType> {
-        self.0
-            .schema_type
-            .as_known()
-            .filter(|e| {
-                <super::schemas::v1::SchemaType as ::buffa::Enumeration>::to_i32(e) != 0
-            })
-            .map(PySchemaType::from)
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(
-            slf.as_any(),
-            &[("name", false), ("catalog_name", false), ("schema_type", false)],
-        )
-    }
-}
-
-impl ::core::convert::From<super::schemas::v1::CreateSchemaRequest>
-for PyCreateSchemaRequest {
-    fn from(value: super::schemas::v1::CreateSchemaRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyCreateSchemaRequest>
-for super::schemas::v1::CreateSchemaRequest {
-    fn from(value: PyCreateSchemaRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteSchemaRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyDeleteSchemaRequest(pub super::schemas::v1::DeleteSchemaRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyDeleteSchemaRequest {
-    #[getter]
-    fn full_name(&self) -> ::std::string::String {
-        self.0.full_name.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("full_name", false)])
-    }
-}
-
-impl ::core::convert::From<super::schemas::v1::DeleteSchemaRequest>
-for PyDeleteSchemaRequest {
-    fn from(value: super::schemas::v1::DeleteSchemaRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyDeleteSchemaRequest>
-for super::schemas::v1::DeleteSchemaRequest {
-    fn from(value: PyDeleteSchemaRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteSchemaResponse", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "DeleteSchemaResponse",
+    eq,
+    frozen,
+    module = "example._core.schemas",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteSchemaResponse(pub super::schemas::v1::DeleteSchemaResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyDeleteSchemaResponse {
     fn __repr__(
@@ -1198,105 +789,16 @@ for super::schemas::v1::DeleteSchemaResponse {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GetSchemaRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyGetSchemaRequest(pub super::schemas::v1::GetSchemaRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyGetSchemaRequest {
-    #[getter]
-    fn full_name(&self) -> ::std::string::String {
-        self.0.full_name.clone()
-    }
-
-    #[getter]
-    fn view(&self) -> ::core::option::Option<PyGetSchemaRequestView> {
-        self.0
-            .view
-            .as_known()
-            .filter(|e| {
-                <super::schemas::v1::get_schema_request::View as ::buffa::Enumeration>::to_i32(
-                    e,
-                ) != 0
-            })
-            .map(PyGetSchemaRequestView::from)
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("full_name", false), ("view", false)])
-    }
-}
-
-impl ::core::convert::From<super::schemas::v1::GetSchemaRequest> for PyGetSchemaRequest {
-    fn from(value: super::schemas::v1::GetSchemaRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyGetSchemaRequest> for super::schemas::v1::GetSchemaRequest {
-    fn from(value: PyGetSchemaRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListSchemasRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyListSchemasRequest(pub super::schemas::v1::ListSchemasRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyListSchemasRequest {
-    /// Parent scoping field carrying the child-type reference that makes Schema a child of Catalog.
-    #[getter]
-    fn catalog_name(&self) -> ::std::string::String {
-        self.0.catalog_name.clone()
-    }
-
-    #[getter]
-    fn max_results(&self) -> i32 {
-        self.0.max_results
-    }
-
-    #[getter]
-    fn page_token(&self) -> ::std::string::String {
-        self.0.page_token.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(
-            slf.as_any(),
-            &[("catalog_name", false), ("max_results", false), ("page_token", false)],
-        )
-    }
-}
-
-impl ::core::convert::From<super::schemas::v1::ListSchemasRequest>
-for PyListSchemasRequest {
-    fn from(value: super::schemas::v1::ListSchemasRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyListSchemasRequest>
-for super::schemas::v1::ListSchemasRequest {
-    fn from(value: PyListSchemasRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListSchemasResponse", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "ListSchemasResponse",
+    eq,
+    frozen,
+    module = "example._core.schemas",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyListSchemasResponse(pub super::schemas::v1::ListSchemasResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyListSchemasResponse {
     #[getter]
@@ -1333,12 +835,16 @@ for super::schemas::v1::ListSchemasResponse {
 /// A Schema is a child resource of a Catalog. This fixture exercises the generated nested
 /// resource-scoped client: `catalog.schema(name)` navigation, `catalog.create_schema(...)`, and the
 /// cross-module model import for the create method's enum parameter (`SchemaType`).
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "Schema", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "Schema",
+    eq,
+    frozen,
+    module = "example._core.schemas",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PySchema(pub super::schemas::v1::Schema);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PySchema {
     #[new]
@@ -1469,147 +975,18 @@ impl ::core::convert::From<PySchema> for super::schemas::v1::Schema {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "UpdateSchemaRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyUpdateSchemaRequest(pub super::schemas::v1::UpdateSchemaRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyUpdateSchemaRequest {
-    #[getter]
-    fn full_name(&self) -> ::std::string::String {
-        self.0.full_name.clone()
-    }
-
-    #[getter]
-    fn schema(&self) -> ::core::option::Option<PySchema> {
-        self.0.schema.clone().into_option().map(PySchema::from)
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(slf.as_any(), &[("full_name", false), ("schema", false)])
-    }
-}
-
-impl ::core::convert::From<super::schemas::v1::UpdateSchemaRequest>
-for PyUpdateSchemaRequest {
-    fn from(value: super::schemas::v1::UpdateSchemaRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyUpdateSchemaRequest>
-for super::schemas::v1::UpdateSchemaRequest {
-    fn from(value: PyUpdateSchemaRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "CreateTagAssignmentRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyCreateTagAssignmentRequest(pub super::tags::v1::CreateTagAssignmentRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyCreateTagAssignmentRequest {
-    #[getter]
-    fn entity_type(&self) -> ::std::string::String {
-        self.0.entity_type.clone()
-    }
-
-    #[getter]
-    fn entity_name(&self) -> ::std::string::String {
-        self.0.entity_name.clone()
-    }
-
-    #[getter]
-    fn tag(&self) -> ::core::option::Option<PyTagAssignment> {
-        self.0.tag.clone().into_option().map(PyTagAssignment::from)
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(
-            slf.as_any(),
-            &[("entity_type", false), ("entity_name", false), ("tag", false)],
-        )
-    }
-}
-
-impl ::core::convert::From<super::tags::v1::CreateTagAssignmentRequest>
-for PyCreateTagAssignmentRequest {
-    fn from(value: super::tags::v1::CreateTagAssignmentRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyCreateTagAssignmentRequest>
-for super::tags::v1::CreateTagAssignmentRequest {
-    fn from(value: PyCreateTagAssignmentRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteTagAssignmentRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyDeleteTagAssignmentRequest(pub super::tags::v1::DeleteTagAssignmentRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyDeleteTagAssignmentRequest {
-    #[getter]
-    fn entity_type(&self) -> ::std::string::String {
-        self.0.entity_type.clone()
-    }
-
-    #[getter]
-    fn entity_name(&self) -> ::std::string::String {
-        self.0.entity_name.clone()
-    }
-
-    #[getter]
-    fn tag_key(&self) -> ::std::string::String {
-        self.0.tag_key.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(
-            slf.as_any(),
-            &[("entity_type", false), ("entity_name", false), ("tag_key", false)],
-        )
-    }
-}
-
-impl ::core::convert::From<super::tags::v1::DeleteTagAssignmentRequest>
-for PyDeleteTagAssignmentRequest {
-    fn from(value: super::tags::v1::DeleteTagAssignmentRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyDeleteTagAssignmentRequest>
-for super::tags::v1::DeleteTagAssignmentRequest {
-    fn from(value: PyDeleteTagAssignmentRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "DeleteTagAssignmentResponse", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "DeleteTagAssignmentResponse",
+    eq,
+    frozen,
+    module = "example._core.tags",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyDeleteTagAssignmentResponse(
     pub super::tags::v1::DeleteTagAssignmentResponse,
 );
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyDeleteTagAssignmentResponse {
     fn __repr__(
@@ -1633,116 +1010,16 @@ for super::tags::v1::DeleteTagAssignmentResponse {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "GetTagAssignmentRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyGetTagAssignmentRequest(pub super::tags::v1::GetTagAssignmentRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyGetTagAssignmentRequest {
-    #[getter]
-    fn entity_type(&self) -> ::std::string::String {
-        self.0.entity_type.clone()
-    }
-
-    #[getter]
-    fn entity_name(&self) -> ::std::string::String {
-        self.0.entity_name.clone()
-    }
-
-    #[getter]
-    fn tag_key(&self) -> ::std::string::String {
-        self.0.tag_key.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(
-            slf.as_any(),
-            &[("entity_type", false), ("entity_name", false), ("tag_key", false)],
-        )
-    }
-}
-
-impl ::core::convert::From<super::tags::v1::GetTagAssignmentRequest>
-for PyGetTagAssignmentRequest {
-    fn from(value: super::tags::v1::GetTagAssignmentRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyGetTagAssignmentRequest>
-for super::tags::v1::GetTagAssignmentRequest {
-    fn from(value: PyGetTagAssignmentRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListTagAssignmentsRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyListTagAssignmentsRequest(pub super::tags::v1::ListTagAssignmentsRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyListTagAssignmentsRequest {
-    #[getter]
-    fn entity_type(&self) -> ::std::string::String {
-        self.0.entity_type.clone()
-    }
-
-    #[getter]
-    fn entity_name(&self) -> ::std::string::String {
-        self.0.entity_name.clone()
-    }
-
-    #[getter]
-    fn max_results(&self) -> i32 {
-        self.0.max_results
-    }
-
-    #[getter]
-    fn page_token(&self) -> ::std::string::String {
-        self.0.page_token.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(
-            slf.as_any(),
-            &[
-                ("entity_type", false),
-                ("entity_name", false),
-                ("max_results", false),
-                ("page_token", false),
-            ],
-        )
-    }
-}
-
-impl ::core::convert::From<super::tags::v1::ListTagAssignmentsRequest>
-for PyListTagAssignmentsRequest {
-    fn from(value: super::tags::v1::ListTagAssignmentsRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyListTagAssignmentsRequest>
-for super::tags::v1::ListTagAssignmentsRequest {
-    fn from(value: PyListTagAssignmentsRequest) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "ListTagAssignmentsResponse", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "ListTagAssignmentsResponse",
+    eq,
+    frozen,
+    module = "example._core.tags",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyListTagAssignmentsResponse(pub super::tags::v1::ListTagAssignmentsResponse);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyListTagAssignmentsResponse {
     #[getter]
@@ -1779,12 +1056,16 @@ for super::tags::v1::ListTagAssignmentsResponse {
     }
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "TagAssignment", eq, frozen, from_py_object)]
+#[::pyo3::pyclass(
+    name = "TagAssignment",
+    eq,
+    frozen,
+    module = "example._core.tags",
+    from_py_object
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PyTagAssignment(pub super::tags::v1::TagAssignment);
 #[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[::pyo3::pymethods]
 impl PyTagAssignment {
     #[new]
@@ -1861,53 +1142,6 @@ impl ::core::convert::From<super::tags::v1::TagAssignment> for PyTagAssignment {
 
 impl ::core::convert::From<PyTagAssignment> for super::tags::v1::TagAssignment {
     fn from(value: PyTagAssignment) -> Self {
-        value.0
-    }
-}
-
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[::pyo3::pyclass(name = "TouchTagAssignmentRequest", eq, frozen, from_py_object)]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PyTouchTagAssignmentRequest(pub super::tags::v1::TouchTagAssignmentRequest);
-#[allow(clippy::too_many_arguments, clippy::useless_conversion)]
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
-#[::pyo3::pymethods]
-impl PyTouchTagAssignmentRequest {
-    #[getter]
-    fn entity_type(&self) -> ::std::string::String {
-        self.0.entity_type.clone()
-    }
-
-    #[getter]
-    fn entity_name(&self) -> ::std::string::String {
-        self.0.entity_name.clone()
-    }
-
-    #[getter]
-    fn tag_key(&self) -> ::std::string::String {
-        self.0.tag_key.clone()
-    }
-
-    fn __repr__(
-        slf: &::pyo3::Bound<'_, Self>,
-    ) -> ::pyo3::PyResult<::std::string::String> {
-        __python_repr(
-            slf.as_any(),
-            &[("entity_type", false), ("entity_name", false), ("tag_key", false)],
-        )
-    }
-}
-
-impl ::core::convert::From<super::tags::v1::TouchTagAssignmentRequest>
-for PyTouchTagAssignmentRequest {
-    fn from(value: super::tags::v1::TouchTagAssignmentRequest) -> Self {
-        Self(value)
-    }
-}
-
-impl ::core::convert::From<PyTouchTagAssignmentRequest>
-for super::tags::v1::TouchTagAssignmentRequest {
-    fn from(value: PyTouchTagAssignmentRequest) -> Self {
         value.0
     }
 }

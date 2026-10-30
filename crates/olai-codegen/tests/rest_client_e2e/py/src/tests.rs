@@ -6,7 +6,6 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
 use serde_json::json;
 
 async fn get_widget(Path(name): Path<String>) -> Response {
@@ -116,10 +115,14 @@ fn run_python(code: &str) {
     Python::initialize();
     Python::attach(|py| {
         let result = (|| -> PyResult<()> {
-            let core = PyModule::new(py, "_core")?;
-            crate::codegen::register(&core)?;
             let sys = py.import("sys")?;
-            sys.getattr("modules")?.set_item("demo._core", &core)?;
+            let modules = sys.getattr("modules")?;
+            if !modules.contains("demo._core")? {
+                let core = pyo3::wrap_pymodule!(crate::codegen::extension_module)(py);
+                let core = core.bind(py);
+                modules.set_item("demo._core", core)?;
+                crate::codegen::add_submodules_to_sys_modules(core)?;
+            }
             sys.getattr("path")?
                 .call_method1("insert", (0, crate::PACKAGE_DIR))?;
             let globals = pyo3::types::PyDict::new(py);
@@ -303,61 +306,4 @@ async def main():
 asyncio.run(main())
 "#,
     );
-}
-
-/// The stubs that `pyo3-stub-gen` writes from the generated annotations.
-#[test]
-fn stubs() {
-    let dir = std::path::PathBuf::from(concat!(env!("OUT_DIR"), "/stubs"));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    pyo3_stub_gen::StubInfo::from_project_root(
-        "demo._core".into(),
-        dir.clone(),
-        true,
-        Default::default(),
-    )
-    .unwrap()
-    .generate()
-    .unwrap();
-    let root = std::fs::read_to_string(dir.join("demo/_core/__init__.pyi")).unwrap();
-    let models = std::fs::read_to_string(dir.join("demo/_core/demo/__init__.pyi")).unwrap();
-    for expected in [
-        "class DemoClient:",
-        "def list_widgets(self, *, max_results: typing.Optional[builtins.int] = None, \
-         color: typing.Optional[_enums.Color | str] = None, first: typing.Optional[builtins.int] = None, \
-         order_by: typing.Optional[builtins.str] = None) -> builtins.list[demo.Widget]:",
-        "-> asyncio.Future[builtins.list[demo.Widget]]:",
-        "def widget(self, widget_name: builtins.str) -> demo.WidgetClient:",
-        "class DemoError(builtins.Exception):",
-        "class NotFoundError(DemoError):",
-        "def details(self) -> list[typing.Any]:",
-        "def get_blob(self, path: builtins.str) -> demo.Blob:",
-    ] {
-        assert!(root.contains(expected), "missing `{expected}` in:\n{root}");
-    }
-    for expected in [
-        "class Widget:",
-        "def color(self) -> typing.Optional[_enums.Color]:",
-        "def type(self) -> typing.Optional[builtins.str]:",
-        "def __eq__(self, other: builtins.object, /) -> builtins.bool:",
-        "The color of the widget.",
-        "def __new__(cls, key: builtins.str, *, value: typing.Optional[builtins.str] = None",
-        "def get_async(self) -> asyncio.Future[Widget]:",
-        "def delete_async(self) -> asyncio.Future[None]:",
-        "def attributes(self) -> typing.Optional[dict[str, typing.Any]]:",
-        "def extra(self) -> typing.Any:",
-        "def notes(self) -> list[typing.Any]:",
-        "def rows(self) -> dict[str, list[typing.Any]]:",
-    ] {
-        assert!(
-            models.contains(expected),
-            "missing `{expected}` in:\n{models}"
-        );
-    }
-    // No request classes; no constructor on response models.
-    assert!(!models.contains("class CreateWidgetRequest"), "{models}");
-    let widget = &models[models.find("class Widget:").unwrap()..];
-    let widget = &widget[..widget.find("class WidgetClient:").unwrap()];
-    assert!(!widget.contains("__new__"), "{widget}");
 }

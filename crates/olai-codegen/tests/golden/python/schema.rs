@@ -7,13 +7,11 @@ use example_common::models::*;
 use crate::codegen::error::{PyExampleError, PyExampleResult};
 
 /// The requests on one `Schema`.
-#[::pyo3_stub_gen::derive::gen_stub_pyclass]
-#[pyclass(name = "SchemaClient")]
+#[pyclass(name = "SchemaClient", module = "example._core.schemas")]
 pub struct PySchemaClient {
     pub(crate) client: SchemaClient,
 }
 
-#[::pyo3_stub_gen::derive::gen_stub_pymethods]
 #[pymethods]
 impl PySchemaClient {
     /// Returns:

@@ -695,7 +695,7 @@ fn rest_client_and_python_options_generate_valid_code() {
                 name: "example".into(),
             },
             error_base_class: "ExampleError".into(),
-            module: Some("example._core".into()),
+            module: "example._core".into(),
             async_methods: true,
             keyword_only: true,
             public_modules: true,
@@ -738,14 +738,18 @@ fn rest_client_and_python_options_generate_valid_code() {
     );
     assert!(models.contains("frozen"), "frozen models missing");
     assert!(
-        models.contains("gen_stub_pyclass"),
-        "stub annotations missing"
+        models.contains("const INPUT_TYPE"),
+        "enum type hints missing"
     );
     assert!(models.contains("__python_repr"), "Python repr missing");
 
     let bindings = read_all(&python);
     assert!(bindings.contains("_async"), "async twins missing");
-    assert!(bindings.contains("pub fn register("), "register missing");
+    assert!(
+        bindings.contains("#[pyo3(name = \"_core\", module = \"example\")]")
+            && bindings.contains("pub mod extension_module"),
+        "extension module missing"
+    );
     assert!(bindings.contains("PyFuture"), "PyFuture helper missing");
     assert!(
         bindings.contains("\"example-python/\""),
@@ -768,7 +772,8 @@ fn rest_client_and_python_options_generate_valid_code() {
         "{schemas}"
     );
     assert!(
-        bindings.contains("extends = ExampleError") && bindings.contains("add_exceptions(module)"),
+        bindings.contains("extends = ExampleError")
+            && bindings.contains("use crate::codegen::error::{\n        ExampleError,"),
         "PyO3 exception classes missing"
     );
 }
