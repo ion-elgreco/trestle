@@ -266,6 +266,10 @@ pub struct PythonOptions {
     /// `token_provider`, such as one that reads the identity of the environment. Needs the
     /// `reqwest` transport.
     pub default_token_source: Option<String>,
+    /// The Rust paths of hand-written `#[pymodule]` modules of the binding crate, such as
+    /// `crate::identity::identity`, exported as submodules of [`module`](Self::module) under
+    /// their last segment, so that they are in the stubs and in `sys.modules`.
+    pub submodules: Vec<String>,
 }
 
 /// Where the generated pure-Python files go.
@@ -616,7 +620,13 @@ impl CodeGenConfig {
             };
             let paths = (python.exports.iter().map(|p| (p, "PythonOptions::exports"))).chain(
                 (python.default_token_source.iter())
-                    .map(|p| (p, "PythonOptions::default_token_source")),
+                    .map(|p| (p, "PythonOptions::default_token_source"))
+                    .chain(
+                        python
+                            .submodules
+                            .iter()
+                            .map(|p| (p, "PythonOptions::submodules")),
+                    ),
             );
             for (path, option) in paths {
                 syn::parse_str::<syn::Path>(path).map_err(|source| Error::InvalidRustPath {

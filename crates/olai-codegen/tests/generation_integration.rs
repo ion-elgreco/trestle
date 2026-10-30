@@ -834,6 +834,7 @@ fn rest_client_and_python_options_generate_valid_code() {
                 "crate::extras::helper_fn".into(),
             ],
             default_token_source: Some("example_client::default_token_source".into()),
+            submodules: vec!["crate::extra".into()],
         }),
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
@@ -911,6 +912,10 @@ fn rest_client_and_python_options_generate_valid_code() {
             && bindings.contains("pub struct RustTokenSource")
             && bindings.contains("example_client::default_token_source"),
         "token sources missing"
+    );
+    assert!(
+        bindings.contains("use crate::extra;") && bindings.contains("\"extra\""),
+        "hand-written submodule missing"
     );
 
     let enums = std::fs::read_to_string(package.join("_enums.py")).unwrap();
@@ -1033,6 +1038,7 @@ fn python_bindings_without_error_module_leave_api_error_answer_to_the_crate() {
         user_agent: None,
         exports: vec![],
         default_token_source: None,
+        submodules: vec![],
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
 

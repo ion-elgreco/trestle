@@ -119,6 +119,7 @@ fn demo_config(out: &Path) -> CodeGenConfig {
                 user_agent: Some("demo-python".into()),
                 exports: vec![],
                 default_token_source: Some("rest_client_e2e::default_token_source".into()),
+                submodules: vec!["crate::extra".into()],
             }),
         }),
     }

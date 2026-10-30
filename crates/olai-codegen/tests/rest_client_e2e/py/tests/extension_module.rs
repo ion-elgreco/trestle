@@ -94,6 +94,7 @@ fn stubs() {
     for expected in [
         "\"\"\"\nThe extension module `demo._core`.\n\"\"\"",
         "from . import demo as demo",
+        "extra as extra",
         "__version__: Final[str]",
         "class DemoClient:",
         "def __new__(cls, /, base_url: str, token: str | None = None, token_provider: Any | None = None) -> DemoClient:",
@@ -136,6 +137,12 @@ fn stubs() {
             "missing `{expected}` in:\n{models}"
         );
     }
+    // The hand-written submodule, with its stub.
+    let extra = &files[Path::new("extra.pyi")];
+    assert!(
+        extra.contains("def counting_source() -> TokenSource:"),
+        "{extra}"
+    );
     // No request classes; no constructor on response models.
     assert!(!models.contains("class CreateWidgetRequest"), "{models}");
     let widget = &models[models.find("class Widget:").unwrap()..];

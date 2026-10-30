@@ -73,6 +73,7 @@ fn make_test_config(
                 user_agent: None,
                 exports: vec![],
                 default_token_source: None,
+                submodules: Vec::new(),
             }),
         }),
     }

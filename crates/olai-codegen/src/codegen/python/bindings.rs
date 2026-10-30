@@ -113,7 +113,23 @@ impl<'a> PyBackend<'a> {
         let module_option = parent.map(|parent| quote! { , module = #parent });
         let module_doc = format!(" The extension module `{full_name}`.");
         let exceptions = super::errors::class_idents(self.python);
-        let segments = groups.keys();
+        // Paths are validated by `CodeGenConfig::validate`.
+        let export = |path: &String| {
+            let path: syn::Path = syn::parse_str(path).expect("validated export path");
+            quote! {
+                #[pymodule_export]
+                use #path;
+            }
+        };
+        let exports = self.python.exports.iter().map(export);
+        // The hand-written submodules of the binding crate, under their last segment.
+        let extra_submodules = self.python.submodules.iter().map(export);
+        let segments = groups.keys().map(|segment| segment.to_string()).chain(
+            self.python
+                .submodules
+                .iter()
+                .map(|path| path.rsplit("::").next().unwrap_or(path).to_string()),
+        );
         let submodules = groups.iter().map(|(segment, classes)| {
             let ident = crate::utils::field_ident(segment);
             let doc = format!(" The classes of the `{segment}` API.");
@@ -124,14 +140,6 @@ impl<'a> PyBackend<'a> {
                     #[pymodule_export]
                     use super::super::{#(#classes),*};
                 }
-            }
-        });
-        // Paths are validated by `CodeGenConfig::validate`.
-        let exports = self.python.exports.iter().map(|path| {
-            let path: syn::Path = syn::parse_str(path).expect("validated export path");
-            quote! {
-                #[pymodule_export]
-                use #path;
             }
         });
         quote! {
@@ -163,6 +171,8 @@ impl<'a> PyBackend<'a> {
                 #(#exports)*
 
                 #(#submodules)*
+
+                #(#extra_submodules)*
 
                 /// Put the submodules in `sys.modules`. The import system puts the module there
                 /// before it runs this. Not handed the module, so the stubs still describe the

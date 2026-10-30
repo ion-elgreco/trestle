@@ -160,8 +160,6 @@ fn run_python(code: &str) {
             if !modules.contains("demo._core")? {
                 let core = pyo3::wrap_pymodule!(crate::codegen::extension_module)(py);
                 let core = core.bind(py);
-                // A token source made in Rust, as a binding crate would add one.
-                core.add_function(pyo3::wrap_pyfunction!(crate::counting_source, core)?)?;
                 modules.set_item("demo._core", core)?;
                 crate::codegen::add_submodules_to_sys_modules(core)?;
             }
@@ -247,8 +245,9 @@ try:
 except ValueError:
     pass
 
-# A source made in Rust.
-from demo._core import TokenSource, counting_source
+# A source made in Rust, from a hand-written submodule.
+from demo._core import TokenSource
+from demo._core.extra import counting_source
 source = counting_source()
 assert isinstance(source, TokenSource)
 client = DemoClient(BASE, token_provider=source)
