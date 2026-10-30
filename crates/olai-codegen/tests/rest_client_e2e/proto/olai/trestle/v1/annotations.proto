@@ -1,0 +1,25 @@
+// Field options that trestle reads besides `google.api`. Copy this file next to your protos as
+// `olai/trestle/v1/annotations.proto`.
+syntax = "proto3";
+
+package olai.trestle.v1;
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.FieldOptions {
+  // Read this response field from the named HTTP response header (e.g. `Delta-Table-Version`)
+  // instead of the JSON body.
+  string response_header = 51001;
+
+  // Send this field even when unpopulated (empty, zero, `false`, or `null` for `optional`), which
+  // proto3 JSON otherwise leaves out.
+  bool emit_unpopulated = 51002;
+
+  // Send or read this `bytes` field as the raw HTTP body instead of JSON. In a request it must be
+  // the rule's `body`; in a response, the other fields must come from response headers.
+  bool raw_body = 51003;
+
+  // Send this `string` request field in the named HTTP request header (e.g. `Range`) instead of
+  // the query or the body.
+  string request_header = 51004;
+}

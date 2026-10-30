@@ -104,7 +104,8 @@ fn stubs() {
         "class DemoError(Exception):",
         "class NotFoundError(DemoError):",
         "def details(self, /) -> list:",
-        "def get_blob(self, /, path: str) -> Blob:",
+        "def get_blob(self, /, path: str, *, range: str | None = None) -> Blob:",
+        "def put_blob(self, /, path: str, data: bytes | bytearray) -> None:",
         "            order_by: The order of the widgets.",
     ] {
         assert!(root.contains(expected), "missing `{expected}` in:\n{root}");
@@ -125,6 +126,8 @@ fn stubs() {
         "def extra(self, /) -> Any:",
         "def notes(self, /) -> list[Any]:",
         "def rows(self, /) -> dict[str, list[Any]]:",
+        "def data(self, /) -> bytes:",
+        "def size(self, /) -> int | None:",
     ] {
         assert!(
             models.contains(expected),
