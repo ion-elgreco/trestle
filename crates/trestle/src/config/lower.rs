@@ -313,6 +313,7 @@ fn lower_python(
         public_modules: options.public_modules,
         user_agent: options.user_agent.clone(),
         default_token_source: options.default_token_source.clone(),
+        submodules: options.submodules.clone(),
     })
 }
 

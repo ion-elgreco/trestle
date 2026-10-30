@@ -402,6 +402,11 @@ pub struct PythonOptions {
     /// `token_provider`. Needs the `reqwest` transport.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_token_source: Option<String>,
+    /// The Rust paths of hand-written `#[pymodule]` modules of the binding crate, such as
+    /// `crate::identity::identity`, exported as submodules of `module` under their last
+    /// segment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub submodules: Vec<String>,
 }
 
 /// The pure-Python package of the generated files.
