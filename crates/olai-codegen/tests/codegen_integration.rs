@@ -72,6 +72,7 @@ fn make_test_config(
                 public_modules: false,
                 user_agent: None,
                 exports: vec![],
+                default_token_source: None,
             }),
         }),
     }

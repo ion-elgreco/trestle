@@ -96,6 +96,8 @@ fn stubs() {
         "from . import demo as demo",
         "__version__: Final[str]",
         "class DemoClient:",
+        "def __new__(cls, /, base_url: str, token: str | None = None, token_provider: Any | None = None) -> DemoClient:",
+        "class TokenSource:",
         "def list_widgets(self, /, *, max_results: SupportsIndex | None = None, \
          color: Color | str | None = None, first: SupportsIndex | None = None, \
          order_by: str | None = None) -> list[Widget]:",

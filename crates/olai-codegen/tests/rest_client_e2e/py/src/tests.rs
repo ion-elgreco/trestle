@@ -160,6 +160,8 @@ fn run_python(code: &str) {
             if !modules.contains("demo._core")? {
                 let core = pyo3::wrap_pymodule!(crate::codegen::extension_module)(py);
                 let core = core.bind(py);
+                // A token source made in Rust, as a binding crate would add one.
+                core.add_function(pyo3::wrap_pyfunction!(crate::counting_source, core)?)?;
                 modules.set_item("demo._core", core)?;
                 crate::codegen::add_submodules_to_sys_modules(core)?;
             }
@@ -245,8 +247,22 @@ try:
 except ValueError:
     pass
 
-# Without either, no token.
+# A source made in Rust.
+from demo._core import TokenSource, counting_source
+source = counting_source()
+assert isinstance(source, TokenSource)
+client = DemoClient(BASE, token_provider=source)
+assert client.widget("token").get().name == "Bearer t1"
+assert client.widget("token").get().name == "Bearer t2"
+
+# Without either, the default source of the client crate: by the host here.
 assert DemoClient(BASE).widget("token").get().name == "none"
+assert DemoClient(BASE.replace("127.0.0.1", "localhost")).widget("token").get().name == "Bearer defaulted"
+try:
+    DemoClient("http://fail.invalid:1/")
+    raise AssertionError("a failing default source passed")
+except DemoError as e:
+    assert "no default token" in str(e), str(e)
 "#,
     );
 }

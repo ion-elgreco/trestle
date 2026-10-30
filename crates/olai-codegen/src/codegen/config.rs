@@ -261,6 +261,11 @@ pub struct PythonOptions {
     /// Hand-written classes and functions of the binding crate (Rust paths, e.g.
     /// `crate::extras::PyHelper`) that the extension module also exports.
     pub exports: Vec<String>,
+    /// The Rust path of an `async fn(&Url) -> Result<Option<Arc<dyn TokenSource>>, TokenError>`
+    /// that the Python client calls for its token source when it gets neither `token` nor
+    /// `token_provider`, such as one that reads the identity of the environment. Needs the
+    /// `reqwest` transport.
+    pub default_token_source: Option<String>,
 }
 
 /// Where the generated pure-Python files go.
@@ -609,12 +614,22 @@ impl CodeGenConfig {
             let Some(python) = self.bindings_python() else {
                 return needs("CodeGenOutput::python", "`BindingsConfig::python`");
             };
-            for path in &python.exports {
+            let paths = (python.exports.iter().map(|p| (p, "PythonOptions::exports"))).chain(
+                (python.default_token_source.iter())
+                    .map(|p| (p, "PythonOptions::default_token_source")),
+            );
+            for (path, option) in paths {
                 syn::parse_str::<syn::Path>(path).map_err(|source| Error::InvalidRustPath {
                     path: path.clone(),
-                    message: "PythonOptions::exports".to_string(),
+                    message: option.to_string(),
                     source,
                 })?;
+            }
+            if python.default_token_source.is_some() && !self.uses_reqwest_transport() {
+                return needs(
+                    "PythonOptions::default_token_source",
+                    "the generated `reqwest` transport",
+                );
             }
             if python.user_agent.is_some() && !self.uses_reqwest_transport() {
                 return needs(

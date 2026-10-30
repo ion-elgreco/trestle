@@ -193,6 +193,12 @@ The generated API:
 | `async_methods` | Each method gets a `<name>_async` twin that returns an `asyncio.Future` (needs `pyo3-async-runtimes`). |
 | `keyword_only` | Optional parameters are keyword-only. |
 | `public_modules` | A module `<package>/<service>.py` per submodule of `module`, re-exporting its classes and enums. |
+| `user_agent` | The `User-Agent` product of the Python client, `<product>/<binding crate version>`. Needs the `reqwest` transport. |
+| `default_token_source` | The Rust path of an `async fn(&Url) -> Result<Option<Arc<dyn TokenSource>>, TokenError>` that the client calls for its token source when it gets neither `token` nor `token_provider`, such as one that reads the identity of the environment. Needs the `reqwest` transport. |
+
+With the `reqwest` transport, the client also takes `token_provider=`: a Python callable that
+returns the token, or a `(token, expires_at)` pair, or a `TokenSource` object that the binding
+crate makes in Rust (`RustTokenSource { source }`).
 
 In `trestle.yaml`, `package` and `module` sit under `clients.python` and the rest under
 `clients.python.options`. `tests/rest_client_e2e` runs a client and Python bindings with all of

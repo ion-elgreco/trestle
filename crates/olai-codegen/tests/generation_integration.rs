@@ -833,6 +833,7 @@ fn rest_client_and_python_options_generate_valid_code() {
                 "crate::extras::PyHelper".into(),
                 "crate::extras::helper_fn".into(),
             ],
+            default_token_source: Some("example_client::default_token_source".into()),
         }),
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
@@ -905,6 +906,12 @@ fn rest_client_and_python_options_generate_valid_code() {
         "Python User-Agent missing"
     );
     assert!(bindings.contains("pub fn rt()"), "runtime missing");
+    assert!(
+        bindings.contains("token_provider")
+            && bindings.contains("pub struct RustTokenSource")
+            && bindings.contains("example_client::default_token_source"),
+        "token sources missing"
+    );
 
     let enums = std::fs::read_to_string(package.join("_enums.py")).unwrap();
     assert!(enums.contains("(enum.StrEnum):"), "{enums}");
@@ -1025,6 +1032,7 @@ fn python_bindings_without_error_module_leave_api_error_answer_to_the_crate() {
         public_modules: false,
         user_agent: None,
         exports: vec![],
+        default_token_source: None,
     });
     generate_code(&metadata(), &config).expect("generation succeeds");
 
