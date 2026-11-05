@@ -54,6 +54,11 @@ const GOOGLE_API_HTTP_EXTENSION: u32 = 72295728; // google.api.http
 const GNOSTIC_OPERATION_EXTENSION: u32 = 1143; // gnostic.openapi.v3.operation
 const GOOGLE_API_RESOURCE_EXTENSION: u32 = 1053; // google.api.resource
 const GOOGLE_API_FIELD_BEHAVIOR_EXTENSION: u32 = 1052; // google.api.field_behavior
+/// `olai.trestle.v1.response_header` (`proto/olai/trestle/v1/annotations.proto`).
+const TRESTLE_RESPONSE_HEADER_EXTENSION: u32 = 51001;
+const TRESTLE_EMIT_UNPOPULATED_EXTENSION: u32 = 51002;
+const TRESTLE_RAW_BODY_EXTENSION: u32 = 51003;
+const TRESTLE_REQUEST_HEADER_EXTENSION: u32 = 51004;
 const GOOGLE_API_RESOURCE_REFERENCE_EXTENSION: u32 = 1055; // google.api.resource_reference
 
 /// Parse a compiled protobuf [`FileDescriptorSet`] into [`CodeGenMetadata`].
