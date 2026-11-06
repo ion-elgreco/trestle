@@ -11,6 +11,14 @@ From `proto/demo/v1/svc.proto`, with every option on (see `config.rs`), it gener
   an extension module, they are imported by a Python process and give the stubs that
   `pyo3-introspection` writes.
 
+## Python tests
+
+The tests of the Python bindings are the files of `py/tests/python/`. A `#[test]` in
+`py/src/tests.rs` runs each one in the embedded interpreter (`python_test!`), with `BASE` set to
+the URL of a test server and the generated `demo` package importable; a traceback names the file
+and line. The files are compiled into the test binary, so a change to one reruns its test. Add a
+file and a `python_test!` line for a new test. Check them with `ruff check` and `ruff format`.
+
 ## Running
 
 Requires `protoc` on `PATH` and a Python with its shared library (e.g. Homebrew python3.12):
