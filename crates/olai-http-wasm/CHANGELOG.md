@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7](https://github.com/ion-elgreco/trestle/compare/olai-http-wasm-v0.0.6...olai-http-wasm-v0.0.7) - 2026-11-07
+
+### Added
+
+- reqwest 0.13 and the request builder of CloudClient
+
 ## [0.0.6](https://github.com/open-lakehouse/trestle/compare/olai-http-wasm-v0.0.5...olai-http-wasm-v0.0.6) - 2026-11-01
 
 ### Changed

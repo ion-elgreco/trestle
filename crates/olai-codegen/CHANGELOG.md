@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.14](https://github.com/ion-elgreco/trestle/compare/olai-codegen-v0.0.13...olai-codegen-v0.0.14) - 2026-11-07
+
+### Added
+
+- CloudClient signers and token providers in the generated clients
+
 ## [0.0.13](https://github.com/open-lakehouse/trestle/compare/olai-codegen-v0.0.12...olai-codegen-v0.0.13) - 2026-11-06
 
 ### Added
