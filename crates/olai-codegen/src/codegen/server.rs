@@ -18,6 +18,7 @@
 use itertools::Itertools;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
+use syn::ext::IdentExt;
 use syn::{Path, Type};
 
 use super::format_tokens;
@@ -285,7 +286,7 @@ fn generate_body_extractions_tokens(method: &MethodPlan, response_type: &Ident) 
     } else {
         let field_names: Vec<_> = body_fields
             .iter()
-            .map(|f| format_ident!("{}", f.name))
+            .map(|f| crate::utils::field_ident(&f.name))
             .collect();
         // A single body field is a plain binding, not a 1-tuple destructure — `(x) = (y)`
         // trips `unused_parens`.
@@ -360,7 +361,10 @@ fn query_extractions(method: &MethodHandler<'_>) -> TokenStream {
             // marked `optional`) intentionally have NO default: omitting one is a 400/422, which
             // is the correct contract for a required parameter.
             let key = method.query_key(p);
-            let rename = (key != p.name).then(|| quote! { #[serde(rename = #key)] });
+            // serde reads a raw ident (`r#type`) under its bare name, but a suffixed one
+            // (`self_`) needs the key spelled out.
+            let rename = (key != p.name || name.unraw() != p.name)
+                .then(|| quote! { #[serde(rename = #key)] });
             if p.is_optional() || p.field_type.is_repeated {
                 quote! { #rename #[serde(default)] #name: #type_tokens }
             } else {
